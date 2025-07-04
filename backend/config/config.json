@@ -1,0 +1,14 @@
+{
+  "development": {
+    "username": "postgres",
+    "password": "99480231a",
+    "database": "zazap2",
+    "host": "localhost",
+    "port": 5432,
+    "dialect": "postgres",
+    "dialectOptions": {
+      "ssl": false
+    },
+    "logging": false
+  }
+}
