@@ -1,6 +1,9 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import cors from 'cors';
+import { createServer } from 'http';
+import { initializeSocket } from './services/socket.js';
+import { autoReconnectSessions, startSessionHealthCheck } from './services/sessionManager.js';
 import whatsappRoutes from './routes/whatsappRoutes.js';
 import whatsappjsRoutes from './routes/whatsappjsRoutes.js';
 import baileysRoutes from './routes/baileysRoutes.js';
@@ -15,10 +18,15 @@ import ticketMessageFileRoutes from './routes/ticketMessageFileRoutes.js';
 import integrationRoutes from './routes/integrationRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
 import sessionRoutes from './routes/sessionRoutes.js';
+import contactRoutes from './routes/contactRoutes.js';
 
 dotenv.config();
 
 const app = express();
+const server = createServer(app);
+
+// Inicializar Socket.IO
+const io = initializeSocket(server);
 
 // Middlewares
 app.use(cors({
@@ -48,12 +56,26 @@ app.use('/api/ticket-messages', ticketMessageFileRoutes);
 app.use('/api/integrations', integrationRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/sessions', sessionRoutes);
+app.use('/api/contacts', contactRoutes);
 
 app.get('/', (req, res) => {
   res.send('Zazap Backend API');
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`Backend running on port ${PORT}`);
+  console.log(`Socket.IO server initialized`);
+  
+  // Aguardar um pouco para o servidor estabilizar
+  setTimeout(async () => {
+    console.log('🚀 Iniciando sistemas automáticos...');
+    
+    // Reconectar sessões que estavam conectadas
+    await autoReconnectSessions();
+    
+    // Iniciar verificação de saúde das sessões
+    startSessionHealthCheck();
+    
+  }, 3000); // Aguardar 3 segundos
 });

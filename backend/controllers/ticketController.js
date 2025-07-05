@@ -1,5 +1,25 @@
-import { Ticket, Queue } from '../models/index.js';
+import { Ticket, Queue, Contact } from '../models/index.js';
 import { Op } from 'sequelize';
+import { emitToAll } from '../services/socket.js';
+
+// Função utilitária para emitir atualizações de tickets
+const emitTicketsUpdate = async () => {
+  try {
+    const tickets = await Ticket.findAll({
+      include: [
+        {
+          model: Contact,
+          required: false // LEFT JOIN para incluir tickets sem contato vinculado
+        }
+      ],
+      order: [['updatedAt', 'DESC']]
+    });
+    console.log(`🔄 Emitindo atualização de tickets via WebSocket: ${tickets.length} tickets`);
+    emitToAll('tickets-update', tickets);
+  } catch (error) {
+    console.error('❌ Erro ao emitir atualização de tickets:', error);
+  }
+};
 
 // Listar tickets com filtros e busca avançada
 export const listTickets = async (req, res) => {
@@ -25,14 +45,21 @@ export const listTickets = async (req, res) => {
         where[Op.or] = [
           { contact: { [Op.iLike]: `%${search}%` } },
           { lastMessage: { [Op.iLike]: `%${search}%` } },
+          { '$Contact.name$': { [Op.iLike]: `%${search}%` } },
+          { '$Contact.pushname$': { [Op.iLike]: `%${search}%` } }
         ];
       }
     }
     
     const tickets = await Ticket.findAll({
       where,
+      include: [
+        {
+          model: Contact,
+          required: false // LEFT JOIN para incluir tickets sem contato vinculado
+        }
+      ],
       order: [['updatedAt', 'DESC']], // Ordenar por updatedAt para mostrar mais recentes primeiro
-      // Removido o include com Queue por enquanto até configurarmos a associação correta
     });
     
     console.log(`📊 Listando tickets: ${tickets.length} encontrados${ticketId ? ` (busca específica ID: ${ticketId})` : ''}`);
@@ -58,6 +85,9 @@ export const moveTicket = async (req, res) => {
     // TODO: Implementar lógica de associação ticket-fila quando necessário
     // Por enquanto, apenas retornar sucesso
     console.log(`✅ Ticket #${ticketId} seria movido para fila "${queue.name}"`);
+    
+    // Emitir atualização de tickets
+    await emitTicketsUpdate();
     
     res.json({ success: true, ticket, message: 'Funcionalidade será implementada quando necessário' });
   } catch (err) {

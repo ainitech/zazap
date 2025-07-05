@@ -14,6 +14,7 @@ import FavoritesPage from './pages/FavoritesPage';
 import ArchivedPage from './pages/ArchivedPage';
 import TrashPage from './pages/TrashPage';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { SocketProvider } from './context/SocketContext';
 
 function ProtectedRoute({ children }) {
   const { token } = useAuth();
@@ -57,7 +58,9 @@ function MainApp() {
 export default function App() {
   return (
     <AuthProvider>
-      <MainApp />
+      <SocketProvider>
+        <MainApp />
+      </SocketProvider>
     </AuthProvider>
   );
 }

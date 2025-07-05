@@ -10,6 +10,7 @@ import TicketMessage from './ticketMessage.js';
 import Integration from './integration.js';
 import IntegrationTicket from './integrationTicket.js';
 import IntegrationQueue from './integrationQueue.js';
+import Contact from './contact.js';
 
 // Definir associações
 User.hasMany(Session, { foreignKey: 'userId' });
@@ -43,6 +44,14 @@ Ticket.belongsToMany(Integration, { through: IntegrationTicket, foreignKey: 'tic
 Integration.belongsToMany(Queue, { through: IntegrationQueue, foreignKey: 'integrationId' });
 Queue.belongsToMany(Integration, { through: IntegrationQueue, foreignKey: 'queueId' });
 
+// Session <-> Contact
+Session.hasMany(Contact, { foreignKey: 'sessionId' });
+Contact.belongsTo(Session, { foreignKey: 'sessionId' });
+
+// Contact <-> Ticket
+Contact.hasMany(Ticket, { foreignKey: 'contactId' });
+Ticket.belongsTo(Contact, { foreignKey: 'contactId' });
+
 export { 
   sequelize,
   User, 
@@ -54,5 +63,6 @@ export {
   TicketMessage, 
   Integration, 
   IntegrationTicket, 
-  IntegrationQueue 
+  IntegrationQueue,
+  Contact
 };

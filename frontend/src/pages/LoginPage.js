@@ -16,23 +16,32 @@ export default function LoginPage() {
     setLoading(true);
     
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/auth/${isRegister ? 'register' : 'login'}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(form),
-      });
+      if (isRegister) {
+        // Registro
+        const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/auth/register`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(form),
+        });
 
-      const data = await response.json();
+        const data = await response.json();
 
-      if (response.ok) {
-        login(data.token, data.user);
+        if (response.ok) {
+          setError('');
+          setIsRegister(false);
+          setForm({ name: '', email: form.email, password: '' });
+          // Após registro, mostrar tela de login
+        } else {
+          setError(data.error || 'Erro ao criar conta');
+        }
       } else {
-        setError(data.message || 'Erro ao autenticar');
+        // Login
+        await login(form.email, form.password);
       }
     } catch (err) {
-      setError('Erro de conexão com o servidor');
+      setError(err.message || 'Erro de conexão com o servidor');
     } finally {
       setLoading(false);
     }

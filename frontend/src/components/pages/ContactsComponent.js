@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import io from 'socket.io-client';
 import { 
   MagnifyingGlassIcon,
   UserPlusIcon,
@@ -14,6 +15,7 @@ const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
 export default function ContactsComponent() {
   const navigate = useNavigate();
+  const socketRef = useRef(null);
   const [contacts, setContacts] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
@@ -22,11 +24,57 @@ export default function ContactsComponent() {
 
   useEffect(() => {
     fetchContacts();
+    
+    // Conectar ao WebSocket
+    if (!socketRef.current) {
+      socketRef.current = io(API_URL, {
+        auth: {
+          token: localStorage.getItem('token')
+        }
+      });
+
+      // Escutar atualizações de contatos
+      socketRef.current.on('contact-updated', (updatedContact) => {
+        console.log('📱 Contato atualizado via socket:', updatedContact);
+        updateContactInList(updatedContact);
+      });
+
+      // Escutar atualizações de tickets
+      socketRef.current.on('tickets-update', (tickets) => {
+        console.log('🎫 Tickets atualizados via socket, recarregando contatos...');
+        fetchContacts(); // Recarregar toda a lista para manter sincronizado
+      });
+    }
+
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.off('contact-updated');
+        socketRef.current.off('tickets-update');
+        socketRef.current.disconnect();
+      }
+    };
   }, []);
+
+  const updateContactInList = (updatedContact) => {
+    setContacts(prevContacts => 
+      prevContacts.map(contact => {
+        // Procurar por ID do contato ou por número
+        if (contact.contactId === updatedContact.id || contact.number === updatedContact.whatsappId?.split('@')[0]) {
+          return {
+            ...contact,
+            name: updatedContact.name || updatedContact.pushname || contact.name,
+            profilePicUrl: updatedContact.profilePicUrl,
+            contactId: updatedContact.id
+          };
+        }
+        return contact;
+      })
+    );
+  };
 
   const fetchContacts = async () => {
     try {
-      // Buscar tickets para extrair contatos únicos
+      // Buscar tickets com dados dos contatos incluídos
       const response = await fetch(`${API_URL}/api/tickets`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -36,17 +84,21 @@ export default function ContactsComponent() {
       if (response.ok) {
         const tickets = await response.json();
         
-        // Extrair contatos únicos dos tickets
+        // Extrair contatos únicos dos tickets com dados mais completos
         const uniqueContacts = tickets.reduce((acc, ticket) => {
-          const contactNumber = ticket.contact_number || ticket.contact;
-          const contactName = ticket.contact_name || contactNumber;
+          const contactNumber = ticket.Contact?.formattedNumber || ticket.contact;
+          const contactName = ticket.Contact?.name || ticket.Contact?.pushname || contactNumber;
+          const contactId = ticket.Contact?.id || ticket.contactId;
+          const profilePicUrl = ticket.Contact?.profilePicUrl;
           
           const existingContact = acc.find(c => c.number === contactNumber);
           if (!existingContact) {
             acc.push({
               id: ticket.id,
+              contactId: contactId,
               name: contactName,
               number: contactNumber,
+              profilePicUrl: profilePicUrl,
               lastMessage: ticket.lastMessage,
               lastContact: ticket.updatedAt,
               ticketCount: 1,
@@ -57,6 +109,12 @@ export default function ContactsComponent() {
             if (new Date(ticket.updatedAt) > new Date(existingContact.lastContact)) {
               existingContact.lastMessage = ticket.lastMessage;
               existingContact.lastContact = ticket.updatedAt;
+              // Atualizar dados do contato se disponíveis
+              if (contactId && !existingContact.contactId) {
+                existingContact.contactId = contactId;
+                existingContact.name = contactName;
+                existingContact.profilePicUrl = profilePicUrl;
+              }
             }
           }
           return acc;
@@ -192,10 +250,25 @@ export default function ContactsComponent() {
           <div key={contact.id} className="bg-slate-800 border border-slate-700 rounded-lg shadow-lg p-6 hover:bg-slate-750 hover:border-yellow-500/50 transition-all duration-200">
             <div className="flex items-start justify-between mb-4">
               <div className="flex items-center space-x-3">
-                <div className="w-12 h-12 bg-gradient-to-r from-yellow-500 to-yellow-600 rounded-full flex items-center justify-center shadow-lg">
-                  <span className="text-slate-900 font-bold text-sm">
-                    {getInitials(contact.name)}
-                  </span>
+                <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg overflow-hidden">
+                  {contact.profilePicUrl ? (
+                    <img 
+                      src={contact.profilePicUrl} 
+                      alt={contact.name}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        e.target.style.display = 'none';
+                        e.target.nextSibling.style.display = 'flex';
+                      }}
+                    />
+                  ) : null}
+                  <div 
+                    className={`w-full h-full bg-gradient-to-r from-yellow-500 to-yellow-600 flex items-center justify-center ${contact.profilePicUrl ? 'hidden' : 'flex'}`}
+                  >
+                    <span className="text-slate-900 font-bold text-sm">
+                      {getInitials(contact.name)}
+                    </span>
+                  </div>
                 </div>
                 <div>
                   <h3 className="font-semibold text-white truncate">

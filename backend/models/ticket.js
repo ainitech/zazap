@@ -15,6 +15,15 @@ const Ticket = sequelize.define('Ticket', {
       key: 'id',
     },
   },
+  contactId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'contacts',
+      key: 'id',
+    },
+    comment: 'ID do contato vinculado ao ticket'
+  },
   contact: {
     type: DataTypes.STRING,
     allowNull: false,
