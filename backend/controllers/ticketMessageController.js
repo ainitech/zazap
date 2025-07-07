@@ -1,7 +1,9 @@
-import { TicketMessage, Ticket, Session, Contact } from '../models/index.js';
+import { TicketMessage, Ticket, Session, Contact, MessageReaction, User } from '../models/index.js';
 import { sendText as sendTextWhatsappJs, getWhatsappJsSession } from '../services/whatsappjsService.js';
 import { sendText as sendTextBaileys, getBaileysSession } from '../services/baileysService.js';
 import { emitToTicket, emitToAll } from '../services/socket.js';
+import path from 'path';
+import fs from 'fs';
 
 // Função para atualizar informações do contato ao enviar mensagem
 const updateContactOnSend = async (ticket, sessionId) => {
@@ -99,6 +101,15 @@ export const listMessages = async (req, res) => {
     
     const messages = await TicketMessage.findAll({
       where: { ticketId },
+      include: [{
+        model: MessageReaction,
+        as: 'reactions',
+        include: [{
+          model: User,
+          as: 'User',
+          attributes: ['id', 'name']
+        }]
+      }],
       order: [['timestamp', 'ASC']],
     });
     
@@ -145,12 +156,6 @@ export const sendMessage = async (req, res) => {
       
       emitToTicket(ticketId, 'new-message', message);
       emitToAll('message-update', { ticketId, message });
-      
-      // Também emitir atualização de tickets para refletir nova atividade
-      const tickets = await Ticket.findAll({
-        order: [['updatedAt', 'DESC']]
-      });
-      emitToAll('tickets-update', tickets);
       
       console.log(`✅ Eventos WebSocket emitidos com sucesso para ${ticketId}`);
     } catch (socketError) {
@@ -240,30 +245,301 @@ export const sendMessage = async (req, res) => {
           
           if (!messageSent) {
             console.error(`❌ Falha ao enviar mensagem via ${session.library}`);
-          } else {
-            // Se a mensagem foi enviada com sucesso, emitir atualização dos tickets com dados do contato
-            try {
-              const updatedTickets = await Ticket.findAll({
-                include: [{
-                  model: Contact,
-                  as: 'Contact',
-                  required: false
-                }],
-                order: [['updatedAt', 'DESC']]
-              });
-              emitToAll('tickets-update', updatedTickets);
-              console.log(`✅ Tickets atualizados emitidos via WebSocket com dados dos contatos`);
-            } catch (socketError) {
-              console.error(`❌ Erro ao emitir tickets atualizados:`, socketError);
-            }
           }
         }
       }
+    }
+    
+    // Sempre emitir atualização dos tickets com dados completos
+    try {
+      const updatedTickets = await Ticket.findAll({
+        include: [
+          {
+            model: Contact,
+            required: false
+          },
+          {
+            model: Queue,
+            required: false
+          },
+          {
+            model: User,
+            as: 'AssignedUser',
+            required: false
+          }
+        ],
+        order: [['updatedAt', 'DESC']]
+      });
+      emitToAll('tickets-update', updatedTickets);
+      console.log(`✅ Tickets atualizados emitidos via WebSocket com dados completos dos contatos`);
+    } catch (socketError) {
+      console.error(`❌ Erro ao emitir tickets atualizados:`, socketError);
     }
     
     res.json(message);
   } catch (err) {
     console.error(`❌ Erro ao enviar mensagem para ticket ${ticketId}:`, err);
     res.status(500).json({ error: err.message });
+  }
+};
+
+// Enviar mensagem com mídia
+export const sendMediaMessage = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { sender } = req.body;
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: 'Arquivo não enviado' });
+
+    const ticket = await Ticket.findByPk(ticketId);
+    if (!ticket) return res.status(404).json({ error: 'Ticket não encontrado' });
+
+    // Gerar URL correta do arquivo
+    // Extrair apenas o nome do arquivo e determinar a pasta correta
+    const fileName = file.filename;
+    const mimeType = file.mimetype;
+    
+    // Determinar a pasta baseada no tipo de arquivo
+    let folder = 'outros';
+    const ext = path.extname(fileName).toLowerCase();
+    
+    if (mimeType.startsWith('image/')) folder = 'imagens';
+    else if (mimeType.startsWith('video/')) folder = 'videos';
+    else if (mimeType.startsWith('audio/')) folder = 'audios';
+    else if (
+      mimeType === 'application/pdf' ||
+      mimeType === 'application/msword' ||
+      mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      mimeType === 'application/vnd.ms-excel' ||
+      mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    ) folder = 'documentos';
+    else if (ext === '.exe') folder = 'executaveis';
+    else if (ext === '.zip' || ext === '.rar' || ext === '.7z') folder = 'arquivos_compactados';
+    else if (ext === '.apk') folder = 'apks';
+    else if (ext === '.csv' || ext === '.json' || ext === '.xml') folder = 'dados';
+    else if (ext === '.html' || ext === '.js' || ext === '.ts' || ext === '.css') folder = 'codigo';
+    else if (ext === '.dll' || ext === '.sys') folder = 'sistema';
+    
+    // Gerar URL limpa
+    const fileUrl = `/uploads/${folder}/${fileName}`;
+    
+    console.log(`📁 Arquivo salvo: ${fileName} -> URL: ${fileUrl}`);
+    
+    const message = await TicketMessage.create({
+      ticketId,
+      sender: sender || 'user',
+      content: '',
+      fileUrl,
+      fileName: file.originalname,
+      fileType: file.mimetype,
+      timestamp: new Date()
+    });
+
+    console.log(`📡 Emitindo evento 'message-update' para todos os clientes:`, { ticketId, message });
+
+    // Emitir via socket
+    emitToTicket(ticketId, 'new-message', message);
+    emitToAll('message-update', { ticketId, message });
+    
+    console.log(`✅ Evento 'message-update' emitido para todos os clientes`);
+
+    res.json(message);
+  } catch (err) {
+    console.error('Erro ao enviar mídia:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Listar mídias/anexos de um ticket
+export const listTicketMedia = async (req, res) => {
+  const { ticketId } = req.params;
+  try {
+    // Busca todas as mensagens do ticket que possuem arquivo (mídia ou documento)
+    const mediaMessages = await TicketMessage.findAll({
+      where: {
+        ticketId,
+        fileUrl: { [TicketMessage.sequelize.Op.ne]: null },
+      },
+      order: [['timestamp', 'ASC']],
+    });
+    res.json(mediaMessages);
+  } catch (err) {
+    console.error(`❌ Erro ao listar mídias do ticket ${ticketId}:`, err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Deletar mensagem
+export const deleteMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const { deleteForEveryone = false } = req.body;
+    const userId = req.user.id;
+
+    console.log(`🗑️ Tentativa de deletar mensagem ${messageId} por usuário ${userId}, deleteForEveryone: ${deleteForEveryone}`);
+
+    // Buscar a mensagem
+    const message = await TicketMessage.findByPk(messageId, {
+      include: [
+        {
+          model: Ticket,
+          as: 'Ticket'
+        }
+      ]
+    });
+
+    if (!message) {
+      return res.status(404).json({ error: 'Mensagem não encontrada' });
+    }
+
+    // Se for deletar para todos, remover arquivo do disco se existir
+    if (deleteForEveryone && message.fileUrl) {
+      try {
+        const filePath = path.join(process.cwd(), 'uploads', message.fileUrl.replace('/uploads/', ''));
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          console.log(`📁 Arquivo removido: ${filePath}`);
+        }
+      } catch (fileError) {
+        console.error('Erro ao remover arquivo:', fileError);
+      }
+    }
+
+    if (deleteForEveryone) {
+      // Deletar para todos - remover do banco
+      await message.destroy();
+      console.log(`🗑️ Mensagem ${messageId} deletada para todos`);
+      
+      // Emitir evento de mensagem deletada
+      emitToTicket(message.ticketId, 'message-deleted', { messageId });
+      emitToAll('message-deleted', { messageId, ticketId: message.ticketId });
+    } else {
+      // Deletar apenas para o usuário atual - marcar como deletada
+      // Para simplificar, vamos usar o mesmo comportamento (deletar do banco)
+      // Em uma implementação mais complexa, você poderia adicionar um campo "deletedFor" 
+      await message.destroy();
+      console.log(`🗑️ Mensagem ${messageId} deletada para usuário ${userId}`);
+      
+      emitToTicket(message.ticketId, 'message-deleted', { messageId });
+    }
+
+    res.json({ success: true, message: 'Mensagem deletada com sucesso' });
+  } catch (error) {
+    console.error('Erro ao deletar mensagem:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+};
+
+// Reagir a mensagem
+export const reactToMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const { reaction } = req.body;
+    const userId = req.user.id;
+
+    console.log(`😀 Usuário ${userId} reagindo à mensagem ${messageId} com ${reaction}`);
+
+    // Verificar se a mensagem existe
+    const message = await TicketMessage.findByPk(messageId);
+    if (!message) {
+      return res.status(404).json({ error: 'Mensagem não encontrada' });
+    }
+
+    // Verificar se o usuário já reagiu com esta reação
+    const existingReaction = await MessageReaction.findOne({
+      where: {
+        messageId,
+        userId,
+        reaction
+      }
+    });
+
+    if (existingReaction) {
+      // Se já existe, remover a reação (toggle)
+      await existingReaction.destroy();
+      console.log(`😀 Reação ${reaction} removida da mensagem ${messageId} pelo usuário ${userId}`);
+      
+      // Buscar todas as reações da mensagem para retornar
+      const allReactions = await MessageReaction.findAll({
+        where: { messageId },
+        include: [{
+          model: User,
+          as: 'User',
+          attributes: ['id', 'name']
+        }]
+      });
+
+      // Emitir evento de reação removida
+      emitToTicket(message.ticketId, 'reaction-removed', { 
+        messageId, 
+        userId, 
+        reaction,
+        allReactions 
+      });
+      emitToAll('reaction-removed', { 
+        messageId, 
+        userId, 
+        reaction, 
+        ticketId: message.ticketId,
+        allReactions 
+      });
+
+      return res.json({ 
+        success: true, 
+        message: 'Reação removida', 
+        reactions: allReactions 
+      });
+    }
+
+    // Criar nova reação
+    const newReaction = await MessageReaction.create({
+      messageId,
+      userId,
+      reaction
+    });
+
+    // Buscar a reação com o usuário
+    const reactionWithUser = await MessageReaction.findByPk(newReaction.id, {
+      include: [{
+        model: User,
+        as: 'User',
+        attributes: ['id', 'name']
+      }]
+    });
+
+    // Buscar todas as reações da mensagem
+    const allReactions = await MessageReaction.findAll({
+      where: { messageId },
+      include: [{
+        model: User,
+        as: 'User',
+        attributes: ['id', 'name']
+      }]
+    });
+
+    console.log(`😀 Nova reação ${reaction} adicionada à mensagem ${messageId} pelo usuário ${userId}`);
+
+    // Emitir evento de nova reação
+    emitToTicket(message.ticketId, 'reaction-added', { 
+      messageId, 
+      reaction: reactionWithUser,
+      allReactions 
+    });
+    emitToAll('reaction-added', { 
+      messageId, 
+      reaction: reactionWithUser, 
+      ticketId: message.ticketId,
+      allReactions 
+    });
+
+    res.json({ 
+      success: true, 
+      message: 'Reação adicionada', 
+      reaction: reactionWithUser,
+      reactions: allReactions 
+    });
+  } catch (error) {
+    console.error('Erro ao reagir à mensagem:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
   }
 };

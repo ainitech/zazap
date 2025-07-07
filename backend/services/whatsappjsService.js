@@ -168,7 +168,8 @@ const handleMessage = async (msg, wbot) => {
         contactId: contact ? contact.id : null, // Vincular ao contato criado
         lastMessage: msg.body || '',
         unreadCount: 1,
-        status: 'open'
+        status: 'open',
+        chatStatus: 'waiting' // Iniciar como aguardando
       });
       console.log(`🎫 Novo ticket criado: #${ticket.id} para ${msg.from} na sessão ${wbot.sessionId} (ID: ${session.id}) com contato ${contact?.id || 'N/A'}`);
     } else {
@@ -184,6 +185,7 @@ const handleMessage = async (msg, wbot) => {
       
       if (ticket.status === 'closed') {
         ticket.status = 'open';
+        ticket.chatStatus = 'waiting'; // Reabrir como aguardando
         console.log(`🔄 Ticket #${ticket.id} reaberto por nova mensagem`);
       }
       await ticket.save();
@@ -206,8 +208,23 @@ const handleMessage = async (msg, wbot) => {
       emitToAll('message-update', { ticketId: ticket.id, message });
       
       // Também emitir atualização de tickets para refletir nova atividade
-      const { Ticket: TicketModel } = await import('../models/index.js');
+      const { Ticket: TicketModel, Contact, Queue, User } = await import('../models/index.js');
       const tickets = await TicketModel.findAll({
+        include: [
+          {
+            model: Contact,
+            required: false
+          },
+          {
+            model: Queue,
+            required: false
+          },
+          {
+            model: User,
+            as: 'AssignedUser',
+            required: false
+          }
+        ],
         order: [['updatedAt', 'DESC']]
       });
       emitToAll('tickets-update', tickets);

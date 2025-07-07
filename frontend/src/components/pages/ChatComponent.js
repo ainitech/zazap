@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import ConversationList from '../chat/ConversationList';
@@ -32,7 +33,14 @@ export default function ChatComponent() {
       }
     };
   }, []);
-
+// Atualiza tickets em tempo real ao receber evento global
+useEffect(() => {
+  const handleRefresh = () => {
+    fetchTickets(true);
+  };
+  window.addEventListener('refreshTickets', handleRefresh);
+  return () => window.removeEventListener('refreshTickets', handleRefresh);
+}, []);
   // Setup WebSocket listeners quando socket está disponível
   useEffect(() => {
     if (!socket || !isConnected) return;
@@ -126,6 +134,42 @@ export default function ChatComponent() {
       }
     }
   }, [ticketId, tickets]);
+
+  const acceptTicket = async (ticketId) => {
+    try {
+      console.log(`🎫 Aceitando ticket #${ticketId}...`);
+      
+      const response = await fetch(`${API_URL}/api/tickets/${ticketId}/accept`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`✅ Ticket #${ticketId} aceito com sucesso!`);
+        
+        // Atualizar lista de tickets
+        await fetchTickets(true);
+        
+        // Se o ticket aceito for o selecionado atualmente, atualizá-lo
+        if (selectedTicket && selectedTicket.id === ticketId) {
+          setSelectedTicket(data.ticket);
+        }
+        
+        return data.ticket;
+      } else {
+        const errorData = await response.json();
+        console.error('❌ Erro ao aceitar ticket:', errorData.error);
+        alert('Erro ao aceitar ticket: ' + errorData.error);
+      }
+    } catch (error) {
+      console.error('❌ Erro ao aceitar ticket:', error);
+      alert('Erro ao aceitar ticket. Tente novamente.');
+    }
+  };
 
   const fetchTickets = async (silent = false) => {
     try {
@@ -245,6 +289,8 @@ export default function ChatComponent() {
         onSearchChange={setSearchTerm}
         unreadCount={unreadCount}
         isRealTime={isConnected}
+        currentUser={null} // TODO: Adicionar usuário atual quando necessário
+        onAcceptTicket={acceptTicket}
       />
       <ChatArea
         selectedTicket={selectedTicket}

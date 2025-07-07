@@ -19,6 +19,7 @@ import integrationRoutes from './routes/integrationRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
 import sessionRoutes from './routes/sessionRoutes.js';
 import contactRoutes from './routes/contactRoutes.js';
+import path from 'path';
 
 dotenv.config();
 
@@ -39,7 +40,29 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Servir arquivos enviados
-app.use('/uploads', express.static('uploads'));
+// Caminho público correto: /uploads/arquivo.ext (NÃO /api/uploads)
+app.use('/uploads', (req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Cache-Control', 'public, max-age=3600'); // Cache por 1 hora
+  next();
+}, express.static(path.join(process.cwd(), 'uploads')));
+
+// Rota de teste para verificar se os arquivos estão sendo servidos
+app.get('/test-file/:folder/:filename', (req, res) => {
+  const { folder, filename } = req.params;
+  const filePath = path.join(process.cwd(), 'uploads', folder, filename);
+  console.log('🔍 Testando arquivo:', filePath);
+  res.sendFile(filePath, (err) => {
+    if (err) {
+      console.error('❌ Erro ao servir arquivo:', err);
+      res.status(404).send('Arquivo não encontrado');
+    } else {
+      console.log('✅ Arquivo servido com sucesso');
+    }
+  });
+});
 
 // Rotas principais
 app.use('/api', whatsappRoutes);

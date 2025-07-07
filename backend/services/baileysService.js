@@ -136,7 +136,8 @@ const handleMessage = async (msg, sock) => {
         contactId: contact ? contact.id : null, // Vincular ao contato criado
         lastMessage: messageText,
         unreadCount: 1,
-        status: 'open'
+        status: 'open',
+        chatStatus: 'waiting' // Iniciar como aguardando
       });
       console.log(`🎫 Novo ticket criado: #${ticket.id} para ${fromJid} na sessão ${sock.sessionId} (ID: ${session.id}) com contato ${contact?.id || 'N/A'}`);
     } else {
@@ -152,6 +153,7 @@ const handleMessage = async (msg, sock) => {
       
       if (ticket.status === 'closed') {
         ticket.status = 'open';
+        ticket.chatStatus = 'waiting'; // Reabrir como aguardando
         console.log(`🔄 Ticket #${ticket.id} reaberto por nova mensagem`);
       }
       await ticket.save();
@@ -175,6 +177,21 @@ const handleMessage = async (msg, sock) => {
       
       // Também emitir atualização de tickets para refletir nova atividade
       const tickets = await Ticket.findAll({
+        include: [
+          {
+            model: Contact,
+            required: false
+          },
+          {
+            model: Queue,
+            required: false
+          },
+          {
+            model: User,
+            as: 'AssignedUser',
+            required: false
+          }
+        ],
         order: [['updatedAt', 'DESC']]
       });
       emitToAll('tickets-update', tickets);

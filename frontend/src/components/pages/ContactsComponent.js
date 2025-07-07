@@ -8,7 +8,8 @@ import {
   ChatBubbleBottomCenterTextIcon,
   EllipsisVerticalIcon,
   PlusIcon,
-  XMarkIcon
+  XMarkIcon,
+  TrashIcon
 } from '@heroicons/react/24/outline';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
@@ -21,6 +22,7 @@ export default function ContactsComponent() {
   const [loading, setLoading] = useState(true);
   const [showNewContactModal, setShowNewContactModal] = useState(false);
   const [newContact, setNewContact] = useState({ name: '', number: '' });
+  const [deletingContact, setDeletingContact] = useState(null);
 
   useEffect(() => {
     fetchContacts();
@@ -44,12 +46,21 @@ export default function ContactsComponent() {
         console.log('🎫 Tickets atualizados via socket, recarregando contatos...');
         fetchContacts(); // Recarregar toda a lista para manter sincronizado
       });
+
+      // Escutar exclusão de contatos
+      socketRef.current.on('contact-deleted', (data) => {
+        console.log('🗑️ Contato deletado via socket:', data.contactId);
+        setContacts(prevContacts => 
+          prevContacts.filter(contact => contact.contactId !== data.contactId)
+        );
+      });
     }
 
     return () => {
       if (socketRef.current) {
         socketRef.current.off('contact-updated');
         socketRef.current.off('tickets-update');
+        socketRef.current.off('contact-deleted');
         socketRef.current.disconnect();
       }
     };
@@ -203,6 +214,29 @@ export default function ContactsComponent() {
     }
   };
 
+  const handleDeleteContact = async (contact) => {
+    if (!window.confirm(`Tem certeza que deseja deletar o contato "${contact.name}" e todos os dados relacionados? Esta ação não pode ser desfeita!`)) return;
+    setDeletingContact(contact.contactId);
+    try {
+      const response = await fetch(`${API_URL}/api/contacts/contact/${contact.contactId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      if (response.ok) {
+        setContacts(prev => prev.filter(c => c.contactId !== contact.contactId));
+      } else {
+        alert('Erro ao deletar contato');
+      }
+    } catch (error) {
+      console.error('Erro ao deletar contato:', error);
+      alert('Erro ao deletar contato');
+    } finally {
+      setDeletingContact(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="p-6 bg-slate-900 min-h-screen">
@@ -277,9 +311,19 @@ export default function ContactsComponent() {
                   <p className="text-sm text-slate-400">{contact.number}</p>
                 </div>
               </div>
-              <button className="text-slate-400 hover:text-yellow-500 transition-colors">
-                <EllipsisVerticalIcon className="h-5 w-5" />
-              </button>
+              <div className="flex items-center">
+                <button className="text-slate-400 hover:text-yellow-500 transition-colors">
+                  <EllipsisVerticalIcon className="h-5 w-5" />
+                </button>
+                <button
+                  className={`ml-2 text-red-500 hover:text-red-700 transition-colors ${deletingContact === contact.contactId ? 'opacity-50 pointer-events-none' : ''}`}
+                  title="Deletar contato"
+                  onClick={() => handleDeleteContact(contact)}
+                  disabled={deletingContact === contact.contactId}
+                >
+                  <TrashIcon className="h-5 w-5" />
+                </button>
+              </div>
             </div>
 
             <div className="space-y-3">

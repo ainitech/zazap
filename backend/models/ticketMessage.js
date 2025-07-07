@@ -45,4 +45,19 @@ const TicketMessage = sequelize.define('TicketMessage', {
   timestamps: true, // Habilita createdAt e updatedAt
 });
 
+// Associações
+TicketMessage.associate = function(models) {
+  // Associação com Ticket
+  TicketMessage.belongsTo(models.Ticket, {
+    foreignKey: 'ticketId',
+    as: 'Ticket'
+  });
+  
+  // Associação com reações
+  TicketMessage.hasMany(models.MessageReaction, {
+    foreignKey: 'messageId',
+    as: 'reactions'
+  });
+};
+
 export default TicketMessage;

@@ -5,46 +5,44 @@ import {
   UserGroupIcon,
   TicketIcon,
   PencilIcon,
-  TrashIcon
+  TrashIcon,
+  UsersIcon,
+  ClockIcon,
+  CheckCircleIcon,
+  XMarkIcon,
+  ChatBubbleLeftRightIcon
 } from '@heroicons/react/24/outline';
+import { useAuth } from '../../context/AuthContext';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
 export default function QueuesComponent() {
+  const { user } = useAuth();
   const [queues, setQueues] = useState([]);
+  const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newQueueName, setNewQueueName] = useState('');
-  const [selectedSessionId, setSelectedSessionId] = useState('');
-  const [sessions, setSessions] = useState([]);
-  const [showManageModal, setShowManageModal] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [editingQueue, setEditingQueue] = useState(null);
   const [selectedQueue, setSelectedQueue] = useState(null);
+  const [showManageModal, setShowManageModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editQueueName, setEditQueueName] = useState('');
   const [editSessionId, setEditSessionId] = useState('');
+  const [formData, setFormData] = useState({
+    name: '',
+    color: '#3B82F6',
+    greetingMessage: '',
+    outOfHoursMessage: '',
+    isActive: true,
+    sessionId: ''
+  });
+  const [sessions, setSessions] = useState([]);
 
   useEffect(() => {
     fetchQueues();
+    fetchUsers();
     fetchSessions();
   }, []);
-
-  const fetchQueues = async () => {
-    try {
-      const response = await fetch(`${API_URL}/api/queues`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setQueues(data);
-      }
-    } catch (error) {
-      console.error('Erro ao buscar filas:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const fetchSessions = async () => {
     try {
@@ -62,36 +60,72 @@ export default function QueuesComponent() {
     }
   };
 
-  const createQueue = async () => {
-    if (!newQueueName.trim()) return;
-
+  const fetchQueues = async () => {
     try {
+      setLoading(true);
       const response = await fetch(`${API_URL}/api/queues`, {
-        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setQueues(data);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar filas:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchUsers = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/users`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setUsers(data);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar usuários:', error);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!formData.sessionId) {
+      alert('Selecione uma sessão para a fila.');
+      return;
+    }
+    try {
+      const url = editingQueue 
+        ? `${API_URL}/api/queues/${editingQueue.id}`
+        : `${API_URL}/api/queues`;
+      const method = editingQueue ? 'PUT' : 'POST';
+      const response = await fetch(url, {
+        method,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify({
-          name: newQueueName.trim(),
-          sessionId: selectedSessionId || null
-        })
+        body: JSON.stringify(formData)
       });
-
       if (response.ok) {
-        setShowCreateModal(false);
-        setNewQueueName('');
-        setSelectedSessionId('');
-        fetchQueues();
+        await fetchQueues();
+        handleCloseModal();
       }
     } catch (error) {
-      console.error('Erro ao criar fila:', error);
+      console.error('Erro ao salvar fila:', error);
     }
   };
 
-  const deleteQueue = async (queueId) => {
+  const handleDelete = async (queueId) => {
     if (!window.confirm('Tem certeza que deseja excluir esta fila?')) return;
-
+    
     try {
       const response = await fetch(`${API_URL}/api/queues/${queueId}`, {
         method: 'DELETE',
@@ -101,10 +135,74 @@ export default function QueuesComponent() {
       });
 
       if (response.ok) {
-        fetchQueues();
+        await fetchQueues();
       }
     } catch (error) {
       console.error('Erro ao excluir fila:', error);
+    }
+  };
+
+  const handleEdit = (queue) => {
+    setEditingQueue(queue);
+    setFormData({
+      name: queue.name,
+      color: queue.color || '#3B82F6',
+      greetingMessage: queue.greetingMessage || '',
+      outOfHoursMessage: queue.outOfHoursMessage || '',
+      isActive: queue.isActive,
+      sessionId: queue.sessionId || ''
+    });
+    setShowModal(true);
+  };
+
+  const handleCloseModal = () => {
+    setShowModal(false);
+    setEditingQueue(null);
+    setFormData({
+      name: '',
+      color: '#3B82F6',
+      greetingMessage: '',
+      outOfHoursMessage: '',
+      isActive: true,
+      sessionId: ''
+    });
+  };
+
+  const assignUserToQueue = async (queueId, userId) => {
+    try {
+      const response = await fetch(`${API_URL}/api/queues/${queueId}/assign-user`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ userId })
+      });
+
+      if (response.ok) {
+        await fetchQueues();
+      }
+    } catch (error) {
+      console.error('Erro ao vincular usuário à fila:', error);
+    }
+  };
+
+  const removeUserFromQueue = async (queueId, userId) => {
+    try {
+      const response = await fetch(`${API_URL}/api/queues/${queueId}/remove-user`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ userId })
+      });
+
+      if (response.ok) {
+        await fetchQueues();
+      }
+    } catch (error) {
+      console.error('Erro ao remover usuário da fila:', error);
     }
   };
 
@@ -155,314 +253,261 @@ export default function QueuesComponent() {
     // navigate(`/tickets?queue=${queue.id}`);
   };
 
-  if (loading) {
-    return (
-      <div className="p-6 bg-gray-900 min-h-screen">
-        <div className="flex justify-center items-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-yellow-500"></div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="p-6 bg-gray-900 min-h-screen">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-white mb-2">Filas de Atendimento</h1>
-          <p className="text-gray-400">Organize o atendimento em filas especializadas</p>
-        </div>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="bg-gradient-to-r from-yellow-500 to-yellow-600 text-gray-900 px-6 py-3 rounded-xl flex items-center space-x-2 hover:from-yellow-600 hover:to-yellow-700 transition-all duration-200 shadow-lg font-semibold"
-        >
-          <PlusIcon className="h-5 w-5" />
-          <span>Nova Fila</span>
-        </button>
-      </div>
-
-      {/* Queues Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {queues.map((queue) => (
-          <div key={queue.id} className="bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-700 hover:border-yellow-500 transition-all duration-200">
-            <div className="flex justify-between items-start mb-6">
-              <div className="flex items-center space-x-3">
-                <div className="w-12 h-12 bg-yellow-500 rounded-xl flex items-center justify-center">
-                  <QueueListIcon className="h-6 w-6 text-gray-900" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-white text-lg">{queue.name}</h3>
-                  <p className="text-sm text-gray-400">
-                    Criada em {new Date(queue.createdAt).toLocaleDateString()}
-                  </p>
-                </div>
-              </div>
-              <div className="flex space-x-2">
-                <button 
-                  onClick={() => handleEditQueue(queue)}
-                  className="p-2 text-gray-400 hover:text-yellow-500 hover:bg-gray-700 rounded-lg transition-all duration-200"
-                >
-                  <PencilIcon className="h-5 w-5" />
-                </button>
-                <button
-                  onClick={() => deleteQueue(queue.id)}
-                  className="p-2 text-gray-400 hover:text-red-500 hover:bg-gray-700 rounded-lg transition-all duration-200"
-                >
-                  <TrashIcon className="h-5 w-5" />
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div className="bg-gray-700 rounded-xl p-4 text-center">
-                <div className="text-2xl font-bold text-yellow-500">
-                  {queue.ticketCount || 0}
-                </div>
-                <div className="text-xs text-gray-400 font-medium">Tickets</div>
-              </div>
-              <div className="bg-gray-700 rounded-xl p-4 text-center">
-                <div className="text-2xl font-bold text-yellow-500">
-                  {queue.userCount || 0}
-                </div>
-                <div className="text-xs text-gray-400 font-medium">Usuários</div>
-              </div>
-            </div>
-
-            {queue.session && (
-              <div className="bg-gradient-to-r from-yellow-500/10 to-yellow-600/10 border border-yellow-500/20 p-4 rounded-xl mb-6">
-                <div className="flex items-center space-x-2">
-                  <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
-                  <span className="text-sm font-medium text-yellow-400">
-                    Sessão: {queue.session.name}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            <div className="flex space-x-3">
-              <button 
-                onClick={() => handleManageQueue(queue)}
-                className="flex-1 bg-gradient-to-r from-yellow-500 to-yellow-600 text-gray-900 py-3 px-4 rounded-xl font-semibold hover:from-yellow-600 hover:to-yellow-700 transition-all duration-200 flex items-center justify-center space-x-2 shadow-lg"
-              >
-                <UserGroupIcon className="h-5 w-5" />
-                <span>Gerenciar</span>
-              </button>
-              <button 
-                onClick={() => handleViewTickets(queue)}
-                className="flex-1 bg-gray-700 text-white py-3 px-4 rounded-xl font-medium hover:bg-gray-600 transition-all duration-200 flex items-center justify-center space-x-2 border border-gray-600"
-              >
-                <TicketIcon className="h-5 w-5" />
-                <span>Tickets</span>
-              </button>
-            </div>
+    <div className="min-h-screen bg-slate-900 p-6">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-white mb-2">Gerenciamento de Filas</h1>
+            <p className="text-slate-400">Organize e distribua atendimentos por departamentos</p>
           </div>
-        ))}
-      </div>
-
-      {/* Empty State */}
-      {queues.length === 0 && (
-        <div className="text-center py-16">
-          <div className="w-20 h-20 bg-yellow-500 rounded-2xl flex items-center justify-center mx-auto mb-6">
-            <QueueListIcon className="h-10 w-10 text-gray-900" />
-          </div>
-          <h3 className="text-xl font-medium text-white mb-2">Nenhuma fila criada</h3>
-          <p className="text-gray-400 mb-8">Comece criando sua primeira fila de atendimento.</p>
+          
           <button
-            onClick={() => setShowCreateModal(true)}
-            className="bg-gradient-to-r from-yellow-500 to-yellow-600 text-gray-900 px-6 py-3 rounded-xl font-semibold hover:from-yellow-600 hover:to-yellow-700 transition-all duration-200 shadow-lg"
+            onClick={() => setShowModal(true)}
+            className="flex items-center space-x-2 bg-yellow-500 text-slate-900 px-4 py-2 rounded-lg font-medium hover:bg-yellow-400 transition-colors"
           >
-            Criar primeira fila
+            <PlusIcon className="w-5 h-5" />
+            <span>Nova Fila</span>
           </button>
         </div>
-      )}
 
-      {/* Create Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-800 rounded-2xl max-w-md w-full p-8 border border-gray-700 shadow-2xl">
-            <h2 className="text-2xl font-bold mb-6 text-white">Nova Fila</h2>
-            
-            <div className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Nome da Fila
-                </label>
-                <input
-                  type="text"
-                  value={newQueueName}
-                  onChange={(e) => setNewQueueName(e.target.value)}
-                  className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-xl text-white placeholder-gray-400 focus:ring-2 focus:ring-yellow-500 focus:border-transparent transition-all duration-200"
-                  placeholder="Ex: Suporte Técnico"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Sessão WhatsApp (opcional)
-                </label>
-                <select
-                  value={selectedSessionId}
-                  onChange={(e) => setSelectedSessionId(e.target.value)}
-                  className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-xl text-white focus:ring-2 focus:ring-yellow-500 focus:border-transparent transition-all duration-200"
-                >
-                  <option value="">Selecione uma sessão</option>
-                  {sessions.map((session) => (
-                    <option key={session.id} value={session.id}>
-                      {session.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="flex space-x-4 mt-8">
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="flex-1 px-6 py-3 border border-gray-600 text-gray-300 rounded-xl hover:bg-gray-700 transition-all duration-200 font-medium"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={createQueue}
-                disabled={!newQueueName.trim()}
-                className="flex-1 px-6 py-3 bg-gradient-to-r from-yellow-500 to-yellow-600 text-gray-900 rounded-xl font-semibold hover:from-yellow-600 hover:to-yellow-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
-              >
-                Criar
-              </button>
-            </div>
+        {/* Queues Grid */}
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-yellow-500"></div>
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {queues.map(queue => (
+              <div key={queue.id} className="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                {/* Queue Header */}
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center space-x-3">
+                    <div 
+                      className="w-4 h-4 rounded-full"
+                      style={{ backgroundColor: queue.color }}
+                    ></div>
+                    <h3 className="text-white font-semibold">{queue.name}</h3>
+                  </div>
+                  
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => handleEdit(queue)}
+                      className="p-1 text-slate-400 hover:text-white transition-colors"
+                    >
+                      <PencilIcon className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(queue.id)}
+                      className="p-1 text-slate-400 hover:text-red-400 transition-colors"
+                    >
+                      <TrashIcon className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
 
-      {/* Manage Modal */}
-      {showManageModal && selectedQueue && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-800 rounded-2xl max-w-2xl w-full p-8 border border-gray-700 shadow-2xl">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold text-white">Gerenciar Fila: {selectedQueue.name}</h2>
-              <button
-                onClick={() => setShowManageModal(false)}
-                className="text-gray-400 hover:text-white"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+                {/* Queue Stats */}
+                <div className="grid grid-cols-3 gap-4 mb-4">
+                  <div className="text-center">
+                    <div className="text-yellow-400 text-lg font-semibold">
+                      {queue._count?.waitingTickets || 0}
+                    </div>
+                    <div className="text-slate-400 text-xs">Aguardando</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-green-400 text-lg font-semibold">
+                      {queue._count?.activeTickets || 0}
+                    </div>
+                    <div className="text-slate-400 text-xs">Ativos</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-blue-400 text-lg font-semibold">
+                      {queue._count?.resolvedTickets || 0}
+                    </div>
+                    <div className="text-slate-400 text-xs">Resolvidos</div>
+                  </div>
+                </div>
+
+                {/* Queue Users */}
+                <div className="mb-4">
+                  <div className="flex items-center space-x-2 mb-2">
+                    <UsersIcon className="w-4 h-4 text-slate-400" />
+                    <span className="text-slate-300 text-sm">Agentes</span>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    {queue.Users?.map(user => (
+                      <div key={user.id} className="flex items-center justify-between text-sm">
+                        <span className="text-slate-300">{user.name}</span>
+                        <button
+                          onClick={() => removeUserFromQueue(queue.id, user.id)}
+                          className="text-red-400 hover:text-red-300 transition-colors"
+                        >
+                          <XMarkIcon className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                    
+                    {/* Add User Dropdown */}
+                    <select
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          assignUserToQueue(queue.id, parseInt(e.target.value));
+                          e.target.value = '';
+                        }
+                      }}
+                      className="w-full bg-slate-700 text-white text-sm px-2 py-1 rounded border border-slate-600 focus:outline-none focus:border-yellow-500"
+                    >
+                      <option value="">+ Adicionar agente</option>
+                      {users
+                        .filter(user => !queue.Users?.some(qu => qu.id === user.id))
+                        .map(user => (
+                          <option key={user.id} value={user.id}>{user.name}</option>
+                        ))
+                      }
+                    </select>
+                  </div>
+                </div>
+
+                {/* Queue Status */}
+                <div className="flex items-center justify-between">
+                  <div className={`flex items-center space-x-1 text-sm ${queue.isActive ? 'text-green-400' : 'text-red-400'}`}>
+                    {queue.isActive ? (
+                      <CheckCircleIcon className="w-4 h-4" />
+                    ) : (
+                      <XMarkIcon className="w-4 h-4" />
+                    )}
+                    <span>{queue.isActive ? 'Ativa' : 'Inativa'}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Empty State */}
+        {!loading && queues.length === 0 && (
+          <div className="text-center py-16">
+            <div className="w-20 h-20 bg-yellow-500 rounded-2xl flex items-center justify-center mx-auto mb-6">
+              <QueueListIcon className="h-10 w-10 text-slate-900" />
             </div>
+            <h3 className="text-xl font-medium text-white mb-2">Nenhuma fila criada</h3>
+            <p className="text-slate-400 mb-8">Comece criando sua primeira fila de atendimento.</p>
+            <button
+              onClick={() => setShowModal(true)}
+              className="bg-yellow-500 text-slate-900 px-6 py-3 rounded-xl font-semibold hover:bg-yellow-400 transition-colors"
+            >
+              Criar primeira fila
+            </button>
+          </div>
+        )}
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-              <div className="bg-gray-700 rounded-xl p-6 text-center">
-                <div className="text-3xl font-bold text-yellow-500 mb-2">
-                  {selectedQueue.ticketCount || 0}
-                </div>
-                <div className="text-gray-300 font-medium">Total de Tickets</div>
-              </div>
-              <div className="bg-gray-700 rounded-xl p-6 text-center">
-                <div className="text-3xl font-bold text-yellow-500 mb-2">
-                  {selectedQueue.userCount || 0}
-                </div>
-                <div className="text-gray-300 font-medium">Usuários Ativos</div>
-              </div>
-              <div className="bg-gray-700 rounded-xl p-6 text-center">
-                <div className="text-3xl font-bold text-yellow-500 mb-2">
-                  {selectedQueue.session ? 'Ativa' : 'Inativa'}
-                </div>
-                <div className="text-gray-300 font-medium">Sessão WhatsApp</div>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-white mb-4">Ações da Fila</h3>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <button 
-                  onClick={() => handleEditQueue(selectedQueue)}
-                  className="bg-gradient-to-r from-yellow-500 to-yellow-600 text-gray-900 py-3 px-6 rounded-xl font-semibold hover:from-yellow-600 hover:to-yellow-700 transition-all duration-200 flex items-center justify-center space-x-2"
+        {/* Modal */}
+        {showModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-white text-lg font-semibold">
+                  {editingQueue ? 'Editar Fila' : 'Nova Fila'}
+                </h2>
+                <button
+                  onClick={handleCloseModal}
+                  className="text-slate-400 hover:text-white transition-colors"
                 >
-                  <PencilIcon className="h-5 w-5" />
-                  <span>Editar Fila</span>
+                  <XMarkIcon className="w-5 h-5" />
                 </button>
-                
-                <button 
-                  onClick={() => handleViewTickets(selectedQueue)}
-                  className="bg-gray-700 text-white py-3 px-6 rounded-xl font-medium hover:bg-gray-600 transition-all duration-200 flex items-center justify-center space-x-2 border border-gray-600"
-                >
-                  <TicketIcon className="h-5 w-5" />
-                  <span>Ver Tickets</span>
-                </button>
               </div>
-            </div>
 
-            <div className="mt-8 pt-6 border-t border-gray-700">
-              <button
-                onClick={() => setShowManageModal(false)}
-                className="w-full px-6 py-3 border border-gray-600 text-gray-300 rounded-xl hover:bg-gray-700 transition-all duration-200 font-medium"
-              >
-                Fechar
-              </button>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-slate-300 text-sm font-medium mb-1">Sessão</label>
+                  <select
+                    value={formData.sessionId}
+                    onChange={e => setFormData({ ...formData, sessionId: e.target.value })}
+                    className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 focus:outline-none focus:border-yellow-500"
+                    required
+                  >
+                    <option value="">Selecione uma sessão</option>
+                    {sessions.map(session => (
+                      <option key={session.id} value={session.id}>{session.name || session.id}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-slate-300 text-sm font-medium mb-1">Nome da Fila</label>
+                  <input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 focus:outline-none focus:border-yellow-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 text-sm font-medium mb-1">Cor</label>
+                  <input
+                    type="color"
+                    value={formData.color}
+                    onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                    className="w-full h-10 bg-slate-700 rounded border border-slate-600 focus:outline-none focus:border-yellow-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 text-sm font-medium mb-1">Mensagem de Saudação</label>
+                  <textarea
+                    value={formData.greetingMessage}
+                    onChange={(e) => setFormData({ ...formData, greetingMessage: e.target.value })}
+                    className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 focus:outline-none focus:border-yellow-500"
+                    rows="3"
+                    placeholder="Mensagem enviada quando um cliente entra na fila..."
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 text-sm font-medium mb-1">Mensagem Fora do Horário</label>
+                  <textarea
+                    value={formData.outOfHoursMessage}
+                    onChange={(e) => setFormData({ ...formData, outOfHoursMessage: e.target.value })}
+                    className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 focus:outline-none focus:border-yellow-500"
+                    rows="3"
+                    placeholder="Mensagem enviada fora do horário de atendimento..."
+                  />
+                </div>
+
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="isActive"
+                    checked={formData.isActive}
+                    onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
+                    className="mr-2"
+                  />
+                  <label htmlFor="isActive" className="text-slate-300 text-sm">Fila ativa</label>
+                </div>
+
+                <div className="flex items-center justify-end space-x-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={handleCloseModal}
+                    className="px-4 py-2 text-slate-400 hover:text-white transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-yellow-500 text-slate-900 rounded hover:bg-yellow-400 transition-colors font-medium"
+                  >
+                    {editingQueue ? 'Salvar' : 'Criar'}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Edit Modal */}
-      {showEditModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-800 rounded-2xl max-w-md w-full p-8 border border-gray-700 shadow-2xl">
-            <h2 className="text-2xl font-bold mb-6 text-white">Editar Fila</h2>
-            
-            <div className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Nome da Fila
-                </label>
-                <input
-                  type="text"
-                  value={editQueueName}
-                  onChange={(e) => setEditQueueName(e.target.value)}
-                  className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-xl text-white placeholder-gray-400 focus:ring-2 focus:ring-yellow-500 focus:border-transparent transition-all duration-200"
-                  placeholder="Ex: Suporte Técnico"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Sessão WhatsApp
-                </label>
-                <select
-                  value={editSessionId}
-                  onChange={(e) => setEditSessionId(e.target.value)}
-                  className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-xl text-white focus:ring-2 focus:ring-yellow-500 focus:border-transparent transition-all duration-200"
-                >
-                  <option value="">Nenhuma sessão</option>
-                  {sessions.map((session) => (
-                    <option key={session.id} value={session.id}>
-                      {session.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="flex space-x-4 mt-8">
-              <button
-                onClick={() => setShowEditModal(false)}
-                className="flex-1 px-6 py-3 border border-gray-600 text-gray-300 rounded-xl hover:bg-gray-700 transition-all duration-200 font-medium"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={updateQueue}
-                disabled={!editQueueName.trim()}
-                className="flex-1 px-6 py-3 bg-gradient-to-r from-yellow-500 to-yellow-600 text-gray-900 rounded-xl font-semibold hover:from-yellow-600 hover:to-yellow-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
-              >
-                Salvar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
