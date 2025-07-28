@@ -52,7 +52,7 @@ O **ZaZap** é um sistema completo de atendimento ao cliente via WhatsApp, desen
 - ✅ **API RESTful** completa e documentada
 - ✅ **Autenticação JWT** segura
 - ✅ **Integração WhatsApp** via Baileys e WhatsApp.js
-- ✅ **Banco de Dados** MySQL com Sequelize ORM
+- ✅ **Banco de Dados** PostgreSQL com Sequelize ORM
 - ✅ **Sistema de Migrações** para versionamento do banco
 - ✅ **Upload de Arquivos** com validação
 - ✅ **Logs Detalhados** para debugging
@@ -71,7 +71,7 @@ O **ZaZap** é um sistema completo de atendimento ao cliente via WhatsApp, desen
 - **Node.js 18+** - Runtime JavaScript
 - **Express.js** - Framework web
 - **Sequelize** - ORM para banco de dados
-- **MySQL** - Banco de dados principal
+- **PostgreSQL** - Banco de dados principal
 - **JWT** - Autenticação
 - **Multer** - Upload de arquivos
 - **Baileys** - Integração WhatsApp
@@ -88,14 +88,14 @@ Antes de começar, certifique-se de ter instalado:
 
 - **Node.js** (versão 18 ou superior) - [Download](https://nodejs.org/)
 - **npm** (vem com Node.js) ou **yarn**
-- **MySQL** (versão 8 ou superior) - [Download](https://mysql.com/)
+- **PostgreSQL** (versão 14 ou superior) - [Download](https://www.postgresql.org/download/)
 - **Git** - [Download](https://git-scm.com/)
 
 ## 💾 Instalação
 
 ### 1. Clone o repositório
 ```bash
-git clone https://github.com/seu-usuario/zazap.git
+git clone https://github.com/flaviokalleu/zazap.git
 cd zazap
 ```
 
@@ -115,7 +115,7 @@ npm install
 
 ### 1. Configuração do Banco de Dados
 
-Crie um banco de dados MySQL:
+Crie um banco de dados PostgreSQL:
 ```sql
 CREATE DATABASE zazap_db;
 ```
@@ -130,16 +130,16 @@ Crie o arquivo `backend/config/config.json`:
     "password": "sua_senha",
     "database": "zazap_db",
     "host": "localhost",
-    "dialect": "mysql",
-    "port": 3306
+    "dialect": "postgres",
+    "port": 5432
   },
   "production": {
     "username": "seu_usuario",
     "password": "sua_senha",
     "database": "zazap_db",
     "host": "localhost",
-    "dialect": "mysql",
-    "port": 3306
+    "dialect": "postgres",
+    "port": 5432
   }
 }
 ```
@@ -309,6 +309,12 @@ Se você encontrar algum problema ou tiver dúvidas:
 - 🐛 **Issues**: Reporte bugs através das [Issues do GitHub](https://github.com/seu-usuario/zazap/issues)
 - 💬 **Discussões**: Participe das [Discussões do GitHub](https://github.com/seu-usuario/zazap/discussions)
 - 📧 **Email**: contato@zazap.com
+
+## 👥 Comunidade
+
+Participe da nossa comunidade no Telegram para dúvidas, novidades e networking:
+
+- [ZaZap Multiatendimento Telegram](https://t.me/zazapmutiatendimento)
 
 ## 🙏 Agradecimentos
 
