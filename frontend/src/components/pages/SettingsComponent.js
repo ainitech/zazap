@@ -85,6 +85,25 @@ export default function SettingsComponent() {
                     </label>
                   </div>
                 ))}
+                <div className="mt-4">
+                  <button
+                    className="bg-yellow-500 text-white px-4 py-2 rounded-lg hover:bg-yellow-600 transition-colors"
+                    onClick={async () => {
+                      try {
+                        if (!window.zazapSubscribeToPush) {
+                          showMessage('Registro de notificações não disponível.', 'error');
+                          return;
+                        }
+                        await window.zazapSubscribeToPush();
+                        showMessage('Inscrição push registrada com sucesso!');
+                      } catch (err) {
+                        showMessage(err.message || 'Falha ao registrar push', 'error');
+                      }
+                    }}
+                  >
+                    Ativar Push
+                  </button>
+                </div>
               </div>
             </div>
           </div>

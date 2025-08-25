@@ -1,5 +1,6 @@
 import { createWhatsappJsSession, sendText, sendMedia } from '../services/whatsappjsService.js';
 import { Ticket, Session, TicketMessage } from '../models/index.js';
+import { createWhatsappJsMessageCallback } from '../services/messageCallbacks.js';
 
 // Inicializar sessão (gera QRCode)
 export const initSession = async (req, res) => {
@@ -19,6 +20,9 @@ export const initSession = async (req, res) => {
 
     let qrCodeSent = false;
     
+    // Criar callback para processamento de mensagens
+    const onMessage = createWhatsappJsMessageCallback(session);
+    
     createWhatsappJsSession(sessionId, 
       async (client) => {
         // Atualiza status da sessão no banco usando o ID correto
@@ -27,77 +31,7 @@ export const initSession = async (req, res) => {
           res.json({ message: 'Sessão whatsapp-web.js conectada!', status: 'connected' });
         }
       }, 
-      async (msg, client) => {
-        console.log(`📨 === NOVA MENSAGEM RECEBIDA ===`);
-        console.log(`📱 De: ${msg.from}`);
-        console.log(`� Conteúdo: ${msg.body}`);
-        console.log(`🔢 SessionId (string): ${sessionId}`);
-        console.log(`🔢 Session ID (numérico): ${session.id}`);
-        
-        try {
-          // Buscar ticket usando o ID numérico da sessão
-          let ticket = await Ticket.findOne({ 
-            where: { 
-              sessionId: session.id, // Usar o ID numérico da sessão
-              contact: msg.from 
-            } 
-          });
-          
-          console.log(`🔍 Ticket encontrado:`, ticket ? `#${ticket.id}` : 'Nenhum');
-          
-          if (!ticket) {
-            // Criar novo ticket para novo contato
-            console.log(`🎫 Criando novo ticket...`);
-            ticket = await Ticket.create({
-              sessionId: session.id,
-              contact: msg.from,
-              lastMessage: msg.body || '',
-              unreadCount: 1,
-              status: 'open' // Garantir que o ticket seja criado como aberto
-            });
-            console.log(`✅ Novo ticket criado: #${ticket.id} para ${msg.from}`);
-            console.log(`📊 Dados do ticket:`, {
-              id: ticket.id,
-              sessionId: ticket.sessionId,
-              contact: ticket.contact,
-              status: ticket.status,
-              unreadCount: ticket.unreadCount
-            });
-          } else {
-            // Atualizar ticket existente
-            console.log(`📝 Atualizando ticket existente #${ticket.id}`);
-            const oldUnreadCount = ticket.unreadCount;
-            ticket.lastMessage = msg.body || '';
-            ticket.unreadCount += 1;
-            ticket.updatedAt = new Date();
-            // Se o ticket estava fechado, reabrir
-            if (ticket.status === 'closed') {
-              ticket.status = 'open';
-              console.log(`🔄 Ticket #${ticket.id} reaberto por nova mensagem`);
-            }
-            await ticket.save();
-            console.log(`✅ Ticket #${ticket.id} atualizado - Não lidas: ${oldUnreadCount} → ${ticket.unreadCount}`);
-          }
-          
-          // Salvar mensagem no ticket
-          console.log(`💾 Salvando mensagem no ticket #${ticket.id}...`);
-          const ticketMessage = await TicketMessage.create({
-            ticketId: ticket.id,
-            sender: 'contact',
-            content: msg.body || '',
-            timestamp: new Date()
-          });
-          
-          console.log(`✅ Mensagem salva: ID ${ticketMessage.id} no ticket #${ticket.id}`);
-          console.log(`🏁 === PROCESSAMENTO CONCLUÍDO ===\n`);
-          
-        } catch (error) {
-          console.error('❌ === ERRO AO PROCESSAR MENSAGEM ===');
-          console.error('❌ Erro:', error.message);
-          console.error('❌ Stack:', error.stack);
-          console.error('❌ ================================\n');
-        }
-      },
+      onMessage, // Usar callback centralizado para processamento de mensagens
       async (qrCodeDataURL) => {
         // Callback do QR Code - retorna o QR Code como base64
         if (!qrCodeSent) {

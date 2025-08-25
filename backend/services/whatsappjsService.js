@@ -172,6 +172,25 @@ const handleMessage = async (msg, wbot) => {
         chatStatus: 'waiting' // Iniciar como aguardando
       });
       console.log(`🎫 Novo ticket criado: #${ticket.id} para ${msg.from} na sessão ${wbot.sessionId} (ID: ${session.id}) com contato ${contact?.id || 'N/A'}`);
+      // Emitir notificação para frontend (desktop/mobile)
+      try {
+        const payload = {
+          title: 'Nova mensagem',
+          body: contact?.name ? `${contact.name}: ${msg.body}` : `${msg.from}: ${msg.body}`,
+          ticketId: ticket.id,
+          contact: msg.from,
+          iconUrl: contact?.profilePicUrl || null
+        };
+        emitToAll('notification', payload);
+        try {
+          const push = await import('./push.js');
+          if (push && push.broadcastPush) await push.broadcastPush(payload);
+        } catch (pushErr) {
+          console.warn('⚠️ Push broadcast failed (new ticket):', pushErr);
+        }
+      } catch (notifyErr) {
+        console.error('❌ Falha ao emitir notificação via socket:', notifyErr);
+      }
     } else {
       // Atualizar ticket existente e vincular ao contato se não estiver vinculado
       ticket.lastMessage = msg.body || '';
@@ -183,10 +202,32 @@ const handleMessage = async (msg, wbot) => {
         console.log(`🔗 Ticket #${ticket.id} vinculado ao contato ${contact.id}`);
       }
       
-      if (ticket.status === 'closed') {
+      // Reabrir ticket se estiver fechado ou resolvido
+      const wasResolvedOrClosed = (ticket.status === 'closed' || ticket.chatStatus === 'resolved');
+      if (wasResolvedOrClosed) {
+        const prevStatus = { status: ticket.status, chatStatus: ticket.chatStatus };
         ticket.status = 'open';
         ticket.chatStatus = 'waiting'; // Reabrir como aguardando
-        console.log(`🔄 Ticket #${ticket.id} reaberto por nova mensagem`);
+        console.log(`🔄 Ticket #${ticket.id} reaberto por nova mensagem (status anterior: ${prevStatus.status}/${prevStatus.chatStatus})`);
+        // Emitir notificação também para reabertura
+        try {
+          const payload = {
+            title: 'Novo contato',
+            body: contact?.name ? `${contact.name}: ${msg.body}` : `${msg.from}: ${msg.body}`,
+            ticketId: ticket.id,
+            contact: msg.from,
+            iconUrl: contact?.profilePicUrl || null
+          };
+          emitToAll('notification', payload);
+          try {
+            const push = await import('./push.js');
+            if (push && push.broadcastPush) await push.broadcastPush(payload);
+          } catch (pushErr) {
+            console.warn('⚠️ Push broadcast failed (reopen):', pushErr);
+          }
+        } catch (notifyErr) {
+          console.error('❌ Falha ao emitir notificação via socket (reopen):', notifyErr);
+        }
       }
       await ticket.save();
     }
@@ -776,6 +817,10 @@ export const sendMedia = async (sessionId, to, base64, filename, mimetype) => {
   
   console.log(`✅ Sessão "${sessionId}" encontrada, enviando mídia...`);
   const media = new MessageMedia(mimetype, base64, filename);
+  // Se áudio, enviar como mensagem de voz (sem título/caption) para parecer gravado
+  if (mimetype?.startsWith('audio/')) {
+    return client.sendMessage(to, media, { sendAudioAsVoice: true });
+  }
   return client.sendMessage(to, media);
 };
 

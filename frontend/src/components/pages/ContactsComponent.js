@@ -286,13 +286,22 @@ export default function ContactsComponent() {
               <div className="flex items-center space-x-3">
                 <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg overflow-hidden">
                   {contact.profilePicUrl ? (
-                    <img 
+                      <img 
                       src={contact.profilePicUrl} 
                       alt={contact.name}
                       className="w-full h-full object-cover"
                       onError={(e) => {
-                        e.target.style.display = 'none';
-                        e.target.nextSibling.style.display = 'flex';
+                        try {
+                          if (e && e.target) {
+                            if (e.target.style) e.target.style.display = 'none';
+                            if (e.target.nextSibling && e.target.nextSibling.style) {
+                              e.target.nextSibling.style.display = 'flex';
+                            }
+                          }
+                        } catch (err) {
+                          // swallow errors to avoid crashing UI
+                          console.warn('onError image handler failed', err);
+                        }
                       }}
                     />
                   ) : null}

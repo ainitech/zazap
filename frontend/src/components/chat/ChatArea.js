@@ -18,8 +18,11 @@ import {
   ArrowRightIcon,
   FlagIcon,
   CheckIcon,
-  XMarkIcon
+  XMarkIcon,
+  TrashIcon
 } from '@heroicons/react/24/outline';
+import { BoltIcon } from '@heroicons/react/24/solid';
+import { UserPlusIcon } from '@heroicons/react/24/outline';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
@@ -40,12 +43,67 @@ const styles = `
     50% { transform: scale(1.05); }
   }
   
+  @keyframes audioWave {
+    0%, 100% { height: 8px; }
+    25% { height: 16px; }
+    50% { height: 24px; }
+    75% { height: 12px; }
+  }
+  
+  @keyframes audioWave2 {
+    0%, 100% { height: 12px; }
+    25% { height: 20px; }
+    50% { height: 8px; }
+    75% { height: 16px; }
+  }
+  
+  @keyframes audioWave3 {
+    0%, 100% { height: 16px; }
+    25% { height: 8px; }
+    50% { height: 20px; }
+    75% { height: 24px; }
+  }
+  
+  @keyframes audioWave4 {
+    0%, 100% { height: 10px; }
+    25% { height: 18px; }
+    50% { height: 14px; }
+    75% { height: 22px; }
+  }
+  
+  @keyframes audioWave5 {
+    0%, 100% { height: 14px; }
+    25% { height: 10px; }
+    50% { height: 18px; }
+    75% { height: 8px; }
+  }
+  
   .animate-fadeIn {
     animation: fadeIn 0.5s ease-out;
   }
   
   .animate-slideIn {
     animation: slideIn 0.3s ease-out;
+  }
+  
+  .animate-audio-wave-1 {
+    animation: audioWave 1.2s ease-in-out infinite;
+  }
+  
+  .animate-audio-wave-2 {
+    animation: audioWave2 1.0s ease-in-out infinite;
+  }
+  
+  .animate-audio-wave-3 {
+    animation: audioWave3 1.4s ease-in-out infinite;
+  }
+  
+  .animate-audio-wave-4 {
+    animation: audioWave4 1.1s ease-in-out infinite;
+  }
+  
+  .animate-audio-wave-5 {
+    animation: audioWave5 1.3s ease-in-out infinite;
   }
   
   .scrollbar-thin::-webkit-scrollbar {
@@ -102,6 +160,8 @@ export default function ChatArea({
   // Adicionar estado para upload
   const [uploadingFile, setUploadingFile] = useState(false);
   const fileInputRef = useRef(null);
+  const fileInputMediaRef = useRef(null);
+  const fileInputDocRef = useRef(null);
 
   // Estado para modal de áudio
   const [showAudioModal, setShowAudioModal] = useState(false);
@@ -114,6 +174,21 @@ export default function ChatArea({
   // Estados para menu de contexto de mensagem
   const [showMessageMenu, setShowMessageMenu] = useState(null);
   const [showReactionPicker, setShowReactionPicker] = useState(null);
+
+  // Estados para gravação de áudio
+  const [isRecording, setIsRecording] = useState(false);
+  const [mediaRecorder, setMediaRecorder] = useState(null);
+  const [audioChunks, setAudioChunks] = useState([]);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [recordingInterval, setRecordingInterval] = useState(null);
+  const [recordingError, setRecordingError] = useState(null);
+
+  // Quick Replies state
+  const [qrOpen, setQrOpen] = useState(false);
+  const [qrItems, setQrItems] = useState([]);
+  const [qrQuery, setQrQuery] = useState('');
+  const [qrLoading, setQrLoading] = useState(false);
+  const qrRef = useRef(null);
 
   // Reações disponíveis
   const availableReactions = ['👍', '❤️', '😂', '😮', '😢', '😡', '👏', '🙏'];
@@ -268,6 +343,55 @@ export default function ChatArea({
     }
   };
 
+  const handlePermanentDeleteTicket = async () => {
+    if (!selectedTicket) return;
+    
+    const contactName = selectedTicket.Contact?.name || selectedTicket.Contact?.pushname || selectedTicket.contact;
+    
+    if (!window.confirm(
+      `⚠️ ATENÇÃO: Esta ação é IRREVERSÍVEL!\n\n` +
+      `Isso irá deletar PERMANENTEMENTE:\n` +
+      `• O ticket #${selectedTicket.id}\n` +
+      `• TODAS as mensagens e arquivos\n` +
+      `• TODOS os dados do contato ${contactName}\n` +
+      `• TODOS os outros tickets deste contato\n\n` +
+      `Tem certeza que deseja continuar?`
+    )) return;
+    
+    if (!window.confirm(
+      `🚨 CONFIRMAÇÃO FINAL\n\n` +
+      `Você está prestes a APAGAR TUDO sobre o contato:\n` +
+      `${contactName} (${selectedTicket.contact})\n\n` +
+      `Esta ação NÃO PODE ser desfeita!\n\n` +
+      `Digite "DELETAR" para confirmar ou clique Cancelar`
+    )) return;
+    
+    try {
+      const response = await fetch(`${API_URL}/api/tickets/${selectedTicket.id}/permanent`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+
+      if (response.ok) {
+        setShowActionsMenu(false);
+        // Atualizar dados após deleção permanente
+        if (onTicketUpdate) {
+          onTicketUpdate();
+        }
+        // Mostrar mensagem de sucesso
+        alert('✅ Ticket e todas as informações do contato foram removidos permanentemente.');
+      } else {
+        const errorData = await response.json();
+        alert(`❌ Erro: ${errorData.error || 'Erro desconhecido'}`);
+      }
+    } catch (error) {
+      console.error('Erro ao deletar ticket permanentemente:', error);
+      alert('❌ Erro ao deletar ticket. Tente novamente.');
+    }
+  };
+
   // Scroll automático para o final quando novas mensagens chegam
   useEffect(() => {
     if (messagesEndRef.current) {
@@ -287,6 +411,9 @@ export default function ChatArea({
       if (showReactionPicker && !event.target.closest('.reaction-picker')) {
         setShowReactionPicker(null);
       }
+      if (qrOpen && !event.target.closest('.quick-replies-popover')) {
+        setQrOpen(false);
+      }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
@@ -294,6 +421,62 @@ export default function ChatArea({
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [showActionsMenu, showMessageMenu, showReactionPicker]);
+
+  // Quick Replies fetch and filter
+  const openQuickReplies = async () => {
+    setQrOpen(true);
+    setQrLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/quick-replies` , {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : (data.quickReplies || data.rows || data.items || []);
+      setQrItems(Array.isArray(list) ? list : []);
+    } catch (e) {
+      console.error('Erro ao carregar respostas rápidas', e);
+    } finally {
+      setQrLoading(false);
+    }
+  };
+
+  const filteredQr = useMemo(() => {
+    const base = Array.isArray(qrItems) ? qrItems : [];
+    const q = qrQuery.trim().toLowerCase();
+    if (!q) return base;
+    return base.filter((i) => (i.shortcut||'').toLowerCase().includes(q) || (i.title||'').toLowerCase().includes(q) || (i.content||'').toLowerCase().includes(q));
+  }, [qrItems, qrQuery]);
+
+  const insertQuickReply = async (item) => {
+    // Check if this is an audio quick reply
+    if (item.mediaType === 'audio' && item.mediaUrl) {
+      await simulateAudioRecordingAndSend(item);
+      setQrOpen(false);
+      return;
+    }
+    
+    let toInsert = item.processedContent || item.contentPreview || item.content || '';
+    // If we have a shortcut, ask the API for the latest processed content
+    if (item.shortcut) {
+      try {
+        const res = await fetch(`${API_URL}/api/quick-replies/shortcut/${encodeURIComponent(item.shortcut)}`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.processedContent) toInsert = data.processedContent;
+        }
+      } catch (e) {
+        // Fallback to local content
+      }
+    }
+    const base = newMessage || '';
+    // Replace a leading /shortcut if present
+    const replaced = base.replace(/\/(\w+)?$/, '').trim();
+    const space = replaced && !replaced.endsWith(' ') ? ' ' : '';
+    onNewMessageChange((replaced + space + (toInsert || '')).trimStart());
+    setQrOpen(false);
+  };
 
   // Scroll automático imediato quando enviar mensagem
   useEffect(() => {
@@ -330,13 +513,57 @@ export default function ChatArea({
     return colors[Math.abs(hash) % colors.length];
   };
 
-  const handleFileButtonClick = () => {
-    if (fileInputRef.current) fileInputRef.current.click();
+  const handleFileButtonClick = (type) => {
+    // type: 'media' | 'document'
+    if (type === 'media') {
+      if (fileInputMediaRef.current) fileInputMediaRef.current.click();
+    } else if (type === 'document') {
+      if (fileInputDocRef.current) fileInputDocRef.current.click();
+    } else {
+      if (fileInputRef.current) fileInputRef.current.click();
+    }
+  };
+
+  const handleSendContact = async () => {
+    if (!selectedTicket) return alert('Selecione um ticket primeiro');
+
+    const name = window.prompt('Nome do contato:');
+    if (!name) return;
+    const phone = window.prompt('Número do contato (apenas dígitos, com DDI):', '5511999999999');
+    if (!phone) return;
+
+    // Montar vCard simples
+    const vcard = `BEGIN:VCARD\nVERSION:3.0\nFN:${name}\nTEL;TYPE=CELL:${phone}\nEND:VCARD`;
+
+    const blob = new Blob([vcard], { type: 'text/vcard' });
+    const file = new File([blob], `${name.replace(/\s+/g, '_')}.vcf`, { type: 'text/vcard' });
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('sender', 'user');
+
+    try {
+      setUploadingFile(true);
+      const resp = await fetch(`${API_URL}/api/ticket-messages/${selectedTicket.id}/media`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: formData
+      });
+      if (!resp.ok) throw new Error('Falha ao enviar contato');
+      alert('Contato enviado');
+    } catch (err) {
+      console.error('Erro ao enviar contato:', err);
+      alert('Erro ao enviar contato');
+    } finally {
+      setUploadingFile(false);
+    }
   };
 
   // Suporte a múltiplos arquivos de qualquer tipo
   const handleFileChange = async (e) => {
-    const files = Array.from(e.target.files);
+    const files = Array.from(e.target.files || []);
     if (!files.length || !selectedTicket) return;
     setUploadingFile(true);
     try {
@@ -352,8 +579,10 @@ export default function ChatArea({
           body: formData
         });
       }
-      e.target.value = '';
+      // reset input
+      try { e.target.value = ''; } catch (e) {}
     } catch (err) {
+      console.error('Erro ao enviar arquivo', err);
       alert('Erro ao enviar arquivo');
     } finally {
       setUploadingFile(false);
@@ -433,6 +662,366 @@ export default function ChatArea({
       console.error('Erro ao reagir à mensagem:', error);
       alert('Erro ao reagir à mensagem');
     }
+  };
+
+  // Simular gravação e envio de áudio das respostas rápidas
+  const simulateAudioRecordingAndSend = async (quickReplyItem) => {
+    if (!selectedTicket || !quickReplyItem.mediaUrl) return;
+    
+    try {
+      // Iniciar simulação de gravação
+      setIsRecording(true);
+      setRecordingTime(0);
+      
+      // Notificar WhatsApp que está gravando
+      await notifyRecordingStatus(true);
+      
+      // Simular tempo de gravação (2-5 segundos baseado no nome do arquivo)
+      const fileName = quickReplyItem.fileName || 'audio';
+      const simulatedDuration = Math.min(Math.max(fileName.length * 0.3, 2), 5);
+      
+      // Animar contador de tempo
+      const interval = setInterval(() => {
+        setRecordingTime(prev => {
+          const newTime = prev + 0.1;
+          return newTime >= simulatedDuration ? simulatedDuration : newTime;
+        });
+      }, 100);
+      
+      // Aguardar duração simulada
+      await new Promise(resolve => setTimeout(resolve, simulatedDuration * 1000));
+      
+      // Parar animação
+      clearInterval(interval);
+      setIsRecording(false);
+      setRecordingTime(0);
+      
+      // Notificar WhatsApp que parou de gravar
+      await notifyRecordingStatus(false);
+      
+      // Enviar o arquivo de áudio da resposta rápida
+      await sendQuickReplyAudio(quickReplyItem);
+      
+    } catch (error) {
+      console.error('Erro ao simular gravação de áudio:', error);
+      setIsRecording(false);
+      setRecordingTime(0);
+      await notifyRecordingStatus(false);
+    }
+  };
+
+  // Enviar áudio de resposta rápida
+  const sendQuickReplyAudio = async (quickReplyItem) => {
+    if (!selectedTicket || !quickReplyItem.mediaUrl) return;
+    
+    try {
+      setUploadingFile(true);
+      
+      // Fetch do arquivo de áudio
+      const audioResponse = await fetch(`${API_URL}${quickReplyItem.mediaUrl}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      
+      if (!audioResponse.ok) {
+        throw new Error('Não foi possível carregar o arquivo de áudio');
+      }
+      
+      const audioBlob = await audioResponse.blob();
+      const audioFile = new File([audioBlob], quickReplyItem.fileName || `audio_${Date.now()}.webm`, { 
+        type: audioBlob.type || 'audio/webm' 
+      });
+      
+      // Criar FormData
+      const formData = new FormData();
+      formData.append('file', audioFile);
+      formData.append('sender', 'quick-reply'); // Flag para identificar como Quick Reply
+      
+      // Adicionar conteúdo de texto se houver
+      if (quickReplyItem.content) {
+        formData.append('content', quickReplyItem.content);
+      }
+      
+      // Enviar via API
+      const response = await fetch(`${API_URL}/api/ticket-messages/${selectedTicket.id}/media`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: formData
+      });
+      
+      if (!response.ok) {
+        throw new Error('Erro ao enviar áudio');
+      }
+      
+      console.log('Áudio de resposta rápida enviado com sucesso');
+      
+    } catch (error) {
+      console.error('Erro ao enviar áudio de resposta rápida:', error);
+      setRecordingError('Erro ao enviar áudio.');
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
+  // ===============================
+  // FUNÇÕES DE GRAVAÇÃO DE ÁUDIO
+  // ===============================
+
+  // Iniciar gravação de áudio
+  const startRecording = async () => {
+    try {
+      setRecordingError(null);
+      
+      // Solicitar permissão de microfone
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: 44100
+        } 
+      });
+      
+      // Criar MediaRecorder
+      const recorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
+      
+      const chunks = [];
+      
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunks.push(event.data);
+        }
+      };
+      
+      recorder.onstop = () => {
+        // Parar todas as tracks do stream
+        stream.getTracks().forEach(track => track.stop());
+      };
+      
+      // Definir estados
+      setMediaRecorder(recorder);
+      setAudioChunks(chunks);
+      setIsRecording(true);
+      setRecordingTime(0);
+      
+      // Iniciar gravação
+      recorder.start();
+      
+      // Iniciar contador de tempo
+      const interval = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+      setRecordingInterval(interval);
+      
+      // Notificar WhatsApp que está gravando
+      await notifyRecordingStatus(true);
+      
+    } catch (error) {
+      console.error('Erro ao iniciar gravação:', error);
+      setRecordingError('Erro ao acessar microfone. Verifique as permissões.');
+    }
+  };
+
+  // Parar gravação de áudio
+  const stopRecording = async () => {
+    if (!mediaRecorder || !isRecording) return;
+    
+    try {
+      // Parar gravação
+      mediaRecorder.stop();
+      
+      // Limpar interval
+      if (recordingInterval) {
+        clearInterval(recordingInterval);
+        setRecordingInterval(null);
+      }
+      
+      // Aguardar chunks serem processados
+      await new Promise(resolve => {
+        mediaRecorder.onstop = async () => {
+          try {
+            // Criar blob do áudio
+            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+            
+            // Resetar estados
+            setIsRecording(false);
+            setMediaRecorder(null);
+            setAudioChunks([]);
+            setRecordingTime(0);
+            
+            // Notificar WhatsApp que parou de gravar
+            await notifyRecordingStatus(false);
+            
+            // Enviar áudio se maior que 1 segundo
+            if (recordingTime >= 1) {
+              await sendAudioMessage(audioBlob);
+            }
+            
+            resolve();
+          } catch (error) {
+            console.error('Erro ao processar áudio:', error);
+            setRecordingError('Erro ao processar gravação.');
+            resolve();
+          }
+        };
+      });
+      
+    } catch (error) {
+      console.error('Erro ao parar gravação:', error);
+      setRecordingError('Erro ao finalizar gravação.');
+      
+      // Cleanup em caso de erro
+      setIsRecording(false);
+      setMediaRecorder(null);
+      setAudioChunks([]);
+      setRecordingTime(0);
+      if (recordingInterval) {
+        clearInterval(recordingInterval);
+        setRecordingInterval(null);
+      }
+    }
+  };
+
+  // Cancelar gravação
+  const cancelRecording = async () => {
+    if (!isRecording) return;
+    
+    try {
+      // Parar media recorder sem salvar
+      if (mediaRecorder) {
+        mediaRecorder.stop();
+      }
+      
+      // Limpar interval
+      if (recordingInterval) {
+        clearInterval(recordingInterval);
+        setRecordingInterval(null);
+      }
+      
+      // Resetar estados
+      setIsRecording(false);
+      setMediaRecorder(null);
+      setAudioChunks([]);
+      setRecordingTime(0);
+      
+      // Notificar WhatsApp que parou de gravar
+      await notifyRecordingStatus(false);
+      
+    } catch (error) {
+      console.error('Erro ao cancelar gravação:', error);
+    }
+  };
+
+  // Notificar status de gravação ao WhatsApp
+  const notifyRecordingStatus = async (isRecording) => {
+    if (!selectedTicket) return;
+    
+    try {
+      await fetch(`${API_URL}/api/tickets/${selectedTicket.id}/recording-status`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ isRecording })
+      });
+    } catch (error) {
+      console.error('Erro ao notificar status de gravação:', error);
+    }
+  };
+
+  // Enviar mensagem de áudio
+  const sendAudioMessage = async (audioBlob) => {
+    if (!selectedTicket || !audioBlob) return;
+    
+    try {
+      setUploadingFile(true);
+      
+      // Criar FormData
+      const formData = new FormData();
+      // Tentar diferentes formatos de áudio dependendo do suporte do browser
+      let fileName = `audio_${Date.now()}`;
+      let audioFile;
+      
+      // Verificar se o browser suporta conversão para wav
+      if (audioBlob.type === 'audio/webm;codecs=opus') {
+        // Converter para um formato mais compatível se possível
+        try {
+          // Criar um arquivo WAV ou MP3 se o browser suportar
+          audioFile = new File([audioBlob], `${fileName}.webm`, { type: 'audio/webm' });
+        } catch (error) {
+          console.log('Usando áudio webm original');
+          audioFile = new File([audioBlob], `${fileName}.webm`, { type: 'audio/webm' });
+        }
+      } else {
+        // Usar o formato original
+        const extension = audioBlob.type.includes('webm') ? 'webm' : 'ogg';
+        audioFile = new File([audioBlob], `${fileName}.${extension}`, { type: audioBlob.type });
+      }
+      
+  formData.append('file', audioFile);
+  formData.append('sender', 'user');
+      
+  // Enviar áudio
+  const response = await fetch(`${API_URL}/api/ticket-messages/${selectedTicket.id}/media`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: formData
+      });
+      
+      if (response.ok) {
+        console.log('Áudio enviado com sucesso');
+      } else {
+        console.error('Erro ao enviar áudio');
+        setRecordingError('Erro ao enviar áudio.');
+      }
+      
+    } catch (error) {
+      console.error('Erro ao enviar áudio:', error);
+      setRecordingError('Erro ao enviar áudio.');
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
+  // Formatar tempo de gravação
+  const formatRecordingTime = (seconds) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
+  // Componente de ondas sonoras animadas
+  const AudioWaves = ({ isActive }) => {
+    const waveCount = 15;
+    const waves = [];
+    
+    for (let i = 0; i < waveCount; i++) {
+      const animationClass = `animate-audio-wave-${(i % 5) + 1}`;
+      const delay = `${i * 100}ms`;
+      
+      waves.push(
+        <div
+          key={i}
+          className={`w-1 bg-red-500 rounded-full ${isActive ? animationClass : ''}`}
+          style={{
+            height: isActive ? 'auto' : '8px',
+            animationDelay: delay,
+            minHeight: '4px'
+          }}
+        />
+      );
+    }
+    
+    return (
+      <div className="flex items-center space-x-1">
+        {waves}
+      </div>
+    );
   };
 
   // Player de áudio WhatsApp-like
@@ -666,8 +1255,16 @@ return (
                                     alt={displayName}
                                     className="w-full h-full object-cover transition-transform duration-300 hover:scale-110"
                                     onError={(e) => {
-                                        e.target.style.display = 'none';
-                                        e.target.nextSibling.style.display = 'flex';
+                                        try {
+                                          if (e && e.target) {
+                                            if (e.target.style) e.target.style.display = 'none';
+                                            if (e.target.nextSibling && e.target.nextSibling.style) {
+                                              e.target.nextSibling.style.display = 'flex';
+                                            }
+                                          }
+                                        } catch (err) {
+                                          console.warn('onError image handler failed', err);
+                                        }
                                     }}
                                 />
                             ) : null}
@@ -769,6 +1366,18 @@ return (
                                         </div>
                                         <span className="font-medium">Fechar Ticket</span>
                                     </button>
+                                    
+                                    <div className="border-t border-slate-700/50 my-2"></div>
+                                    
+                                    <button
+                                        onClick={handlePermanentDeleteTicket}
+                                        className="w-full flex items-center space-x-3 px-4 py-3 text-left text-red-600 hover:bg-red-900/20 transition-all duration-200 hover:text-red-500 group"
+                                    >
+                                        <div className="p-2 bg-red-600/20 rounded-lg group-hover:bg-red-600/30 transition-colors">
+                                            <TrashIcon className="w-4 h-4" />
+                                        </div>
+                                        <span className="font-medium">🗑️ Deletar Permanentemente</span>
+                                    </button>
                                 </div>
                             </div>
                         )}
@@ -814,8 +1423,16 @@ return (
                                                 alt={displayName}
                                                 className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
                                                 onError={(e) => {
-                                                    e.target.style.display = 'none';
-                                                    e.target.nextSibling.style.display = 'flex';
+                                                    try {
+                                                      if (e && e.target) {
+                                                        if (e.target.style) e.target.style.display = 'none';
+                                                        if (e.target.nextSibling && e.target.nextSibling.style) {
+                                                          e.target.nextSibling.style.display = 'flex';
+                                                        }
+                                                      }
+                                                    } catch (err) {
+                                                      console.warn('onError image handler failed', err);
+                                                    }
                                                 }}
                                             />
                                         ) : null}
@@ -937,8 +1554,16 @@ return (
                                                 onClick={() => window.open(getFileUrl(message.fileUrl), '_blank')}
                                                 onError={(e) => {
                                                     console.error('Erro ao carregar imagem:', message.fileUrl);
-                                                    e.target.style.display = 'none';
-                                                    e.target.nextSibling.style.display = 'block';
+                                                    try {
+                                                      if (e && e.target) {
+                                                        if (e.target.style) e.target.style.display = 'none';
+                                                        if (e.target.nextSibling && e.target.nextSibling.style) {
+                                                          e.target.nextSibling.style.display = 'block';
+                                                        }
+                                                      }
+                                                    } catch (err) {
+                                                      console.warn('onError image handler failed', err);
+                                                    }
                                                 }}
                                             />
                                             <div className="hidden p-3 bg-red-500/20 rounded-lg text-red-400 text-sm">
@@ -959,9 +1584,17 @@ return (
                                             controls 
                                             className="max-w-xs max-h-60 rounded-lg shadow-md"
                                             onError={(e) => {
-                                                console.error('Erro ao carregar vídeo:', message.fileUrl);
-                                                e.target.style.display = 'none';
-                                                e.target.nextSibling.style.display = 'block';
+                                                  console.error('Erro ao carregar vídeo:', message.fileUrl);
+                                                  try {
+                                                    if (e && e.target) {
+                                                      if (e.target.style) e.target.style.display = 'none';
+                                                      if (e.target.nextSibling && e.target.nextSibling.style) {
+                                                        e.target.nextSibling.style.display = 'block';
+                                                      }
+                                                    }
+                                                  } catch (err) {
+                                                    console.warn('onError video handler failed', err);
+                                                  }
                                             }}
                                         >
                                             <div className="hidden p-3 bg-red-500/20 rounded-lg text-red-400 text-sm">
@@ -1058,52 +1691,234 @@ return (
 
         {/* Message Input */}
         <div className="p-4 border-t border-slate-600/50 bg-gradient-to-r from-slate-800 to-slate-900">
+            {/* Mensagem de erro de gravação */}
+            {recordingError && (
+                <div className="mb-4 p-3 bg-red-500/20 border border-red-500/30 rounded-lg backdrop-blur-sm">
+                    <div className="text-red-400 text-sm">
+                        {recordingError}
+                    </div>
+                </div>
+            )}
+            
             <div className="flex items-end space-x-3">
-                <button
-                    className="p-3 text-slate-400 hover:text-white hover:bg-slate-700 rounded-full transition-all duration-200 hover:scale-105 disabled:opacity-50"
-                    onClick={handleFileButtonClick}
-                    disabled={uploadingFile}
-                    type="button"
-                >
-                    <PaperClipIcon className="w-5 h-5" />
-                    <input
-                        type="file"
-                        ref={fileInputRef}
-                        style={{ display: 'none' }}
-                        onChange={handleFileChange}
-                        multiple
-                    />
-                </button>
-                <div className="flex-1 bg-gradient-to-r from-slate-700 to-slate-600 rounded-full px-4 py-3 flex items-center border border-slate-600/50 shadow-lg backdrop-blur-sm">
-                    <input
-                        type="text"
-                        className="flex-1 bg-transparent text-white placeholder-slate-400 focus:outline-none"
-                        placeholder="Digite sua mensagem..."
-                        value={newMessage}
-                        onChange={(e) => onNewMessageChange(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (
-                                e.key === 'Enter' &&
-                                !isSendingMessage &&
-                                newMessage.trim()
-                            ) {
-                                onSendMessage();
-                            }
-                        }}
-                        disabled={isSendingMessage}
-                    />
-                    <button
-                        className={`ml-3 p-3 rounded-full transition-all duration-200 shadow-lg ${
-                            isSendingMessage || !newMessage.trim()
-                                ? 'bg-gray-600 cursor-not-allowed text-gray-400'
-                                : 'bg-gradient-to-r from-yellow-500 to-yellow-400 text-slate-900 hover:from-yellow-300 hover:to-yellow-400 hover:scale-105 shadow-yellow-500/25'
-                        }`}
-                        onClick={onSendMessage}
-                        disabled={isSendingMessage || !newMessage.trim()}
-                        type="button"
-                    >
-                        <PaperAirplaneIcon className="w-5 h-5" />
-                    </button>
+        {/* Photos/Videos button */}
+        <button
+          className="p-3 text-slate-400 hover:text-white hover:bg-slate-700 rounded-full transition-all duration-200 hover:scale-105 disabled:opacity-50"
+          onClick={() => handleFileButtonClick('media')}
+          disabled={uploadingFile || isRecording}
+          type="button"
+          title="Fotos/Vídeos"
+        >
+          <VideoCameraIcon className="w-5 h-5" />
+          <input
+            type="file"
+            ref={fileInputMediaRef}
+            style={{ display: 'none' }}
+            onChange={handleFileChange}
+            accept="image/*,video/*,audio/*"
+            multiple
+          />
+        </button>
+
+        {/* Documents button */}
+        <button
+          className="p-3 text-slate-400 hover:text-white hover:bg-slate-700 rounded-full transition-all duration-200 hover:scale-105 disabled:opacity-50"
+          onClick={() => handleFileButtonClick('document')}
+          disabled={uploadingFile || isRecording}
+          type="button"
+          title="Documentos"
+        >
+          <FileText className="w-5 h-5" />
+          <input
+            type="file"
+            ref={fileInputDocRef}
+            style={{ display: 'none' }}
+            onChange={handleFileChange}
+            accept=".pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.zip,.rar,.7z"
+            multiple
+          />
+        </button>
+
+        {/* Contact button */}
+        <button
+          className="p-3 text-slate-400 hover:text-white hover:bg-slate-700 rounded-full transition-all duration-200 hover:scale-105 disabled:opacity-50"
+          onClick={handleSendContact}
+          disabled={uploadingFile || isRecording}
+          type="button"
+          title="Enviar contato"
+        >
+          <UserPlusIcon className="w-5 h-5" />
+        </button>
+                
+                {/* Área de input principal */}
+                <div className={`flex-1 bg-gradient-to-r from-slate-700 to-slate-600 rounded-full px-4 py-3 flex items-center border border-slate-600/50 shadow-lg backdrop-blur-sm ${
+                    isRecording ? 'opacity-50' : ''
+                }`}>
+                    {isRecording ? (
+                        /* Interface de gravação com ondas sonoras */
+                        <div className="flex-1 flex items-center justify-center space-x-4">
+                            <AudioWaves isActive={isRecording} />
+                            <span className="text-red-400 font-medium">Gravando...</span>
+                            <div className="text-white font-mono text-sm bg-black/20 px-2 py-1 rounded">
+                                {formatRecordingTime(recordingTime)}
+                            </div>
+                        </div>
+                    ) : (
+                        /* Input de texto normal */
+                        <input
+                            type="text"
+                            className="flex-1 bg-transparent text-white placeholder-slate-400 focus:outline-none"
+                            placeholder="Digite sua mensagem..."
+                            value={newMessage}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              onNewMessageChange(val);
+                              if (val.endsWith('/') && !isRecording) {
+                                if (!qrOpen) openQuickReplies();
+                                setQrQuery('');
+                              } else if (/\/(\w+)$/.test(val)) {
+                                if (!qrOpen) openQuickReplies();
+                                const m = val.match(/\/(\w+)$/);
+                                setQrQuery(m ? m[1] : '');
+                              } else if (qrOpen) {
+                                setQrOpen(false);
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                                if (
+                                    e.key === 'Enter' &&
+                                    !isSendingMessage &&
+                                    !isRecording &&
+                                    newMessage.trim()
+                                ) {
+                                    onSendMessage();
+                                }
+                            }}
+                            disabled={isSendingMessage}
+                        />
+                    )}
+                    
+                    {/* Botões do lado direito */}
+                    <div className="flex items-center space-x-2 ml-3">
+                        {isRecording ? (
+                            /* Botões durante gravação */
+                            <>
+                                <button
+                                    onClick={cancelRecording}
+                                    className="p-3 text-slate-300 hover:text-red-400 hover:bg-red-600/20 rounded-full transition-all duration-200 hover:scale-105"
+                                    title="Cancelar gravação"
+                                >
+                                    <XMarkIcon className="w-5 h-5" />
+                                </button>
+                                <button
+                                    onClick={stopRecording}
+                                    className="p-3 bg-green-600 hover:bg-green-500 text-white rounded-full transition-all duration-200 hover:scale-105 shadow-lg shadow-green-500/25"
+                                    title="Enviar áudio"
+                                >
+                                    <CheckIcon className="w-5 h-5" />
+                                </button>
+                            </>
+                        ) : (
+                            /* Botões normais */
+                            <>
+                                {/* Botão de microfone - só aparece quando não tem texto */}
+                                {!newMessage.trim() && (
+                                    <button
+                                        className="p-3 text-slate-400 hover:text-green-400 hover:bg-green-600/20 rounded-full transition-all duration-300 hover:scale-105 disabled:opacity-50 transform animate-slideIn"
+                                        onClick={startRecording}
+                                        disabled={uploadingFile || isSendingMessage}
+                                        type="button"
+                                        title="Gravar áudio"
+                                    >
+                                        <MicrophoneIcon className="w-5 h-5" />
+                                    </button>
+                                )}
+                                
+                                {/* Botão de enviar - só aparece quando tem texto */}
+                                {newMessage.trim() && (
+                                    <button
+                                        className={`p-3 rounded-full transition-all duration-300 shadow-lg transform animate-slideIn ${
+                                            isSendingMessage
+                                                ? 'bg-gray-600 cursor-not-allowed text-gray-400 scale-95'
+                                                : 'bg-gradient-to-r from-green-500 to-green-400 text-white hover:from-green-400 hover:to-green-300 hover:scale-105 shadow-green-500/25'
+                                        }`}
+                                        onClick={onSendMessage}
+                                        disabled={isSendingMessage}
+                                        type="button"
+                                        title="Enviar mensagem"
+                                    >
+                                        <PaperAirplaneIcon className="w-5 h-5" />
+                                    </button>
+                                )}
+                                {/* Quick Replies Button */}
+                                {!isRecording && (
+                                  <div className="relative quick-replies-popover">
+                                    <button
+                                      className={`p-3 rounded-full transition-all duration-200 hover:scale-105 ${qrOpen ? 'bg-yellow-500 text-slate-900' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}
+                                      onClick={() => (qrOpen ? setQrOpen(false) : openQuickReplies())}
+                                      type="button"
+                                      title="Respostas rápidas (/ atalho)"
+                                    >
+                                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                                        <path d="M7.266 3.04a.75.75 0 01.694.805l-.234 3.273h3.809l.234-3.273a.75.75 0 011.499.107l-.234 3.166H16a.75.75 0 010 1.5h-3.092l-.24 3.35H15a.75.75 0 010 1.5h-2.482l-.234 3.166a.75.75 0 01-1.499-.107l.234-3.059H7.21l-.234 3.166a.75.75 0 01-1.499-.107l.234-3.059H4a.75.75 0 010-1.5h1.571l.24-3.35H4a.75.75 0 010-1.5h1.928l.234-3.273a.75.75 0 01.805-.694zM8.48 8.118l-.24 3.35h3.808l.24-3.35H8.48z" />
+                                      </svg>
+                                    </button>
+                                    {qrOpen && (
+                                      <div className="absolute bottom-12 right-0 w-80 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl p-3 z-50">
+                                        <div className="flex items-center gap-2 mb-2">
+                                          <span className="text-slate-300 text-sm">/</span>
+                                          <input
+                                            autoFocus
+                                            value={qrQuery}
+                                            onChange={(e)=>setQrQuery(e.target.value)}
+                                            placeholder="Atalho, título ou conteúdo"
+                                            className="flex-1 bg-slate-700 text-white text-sm rounded px-2 py-1 outline-none"
+                                          />
+                                        </div>
+                                        <div className="max-h-64 overflow-auto divide-y divide-slate-700">
+                                          {qrLoading ? (
+                                            <div className="py-6 text-center text-slate-400">Carregando...</div>
+                                          ) : filteredQr.length === 0 ? (
+                                            <div className="py-6 text-center text-slate-400">Nenhuma resposta encontrada</div>
+                                          ) : (
+                                            filteredQr.map(item => (
+                                              <button
+                                                key={item.id}
+                                                onClick={() => insertQuickReply(item)}
+                                                className="w-full text-left py-2 px-2 hover:bg-slate-700 rounded-lg"
+                                              >
+                                                <div className="flex items-center justify-between">
+                                                  <div className="flex items-center gap-2">
+                                                    {item.mediaType === 'audio' && (
+                                                      <span className="text-green-400" title="Áudio">🎵</span>
+                                                    )}
+                                                    {item.mediaType === 'image' && (
+                                                      <span className="text-blue-400" title="Imagem">🖼️</span>
+                                                    )}
+                                                    {item.mediaType === 'video' && (
+                                                      <span className="text-purple-400" title="Vídeo">🎬</span>
+                                                    )}
+                                                    {item.mediaType === 'document' && (
+                                                      <span className="text-orange-400" title="Documento">📄</span>
+                                                    )}
+                                                    <div className="font-medium text-white text-sm">{item.title || item.content?.slice(0,40) || 'Resposta'}</div>
+                                                  </div>
+                                                  <span className="text-xs text-slate-300 bg-slate-700 rounded px-2 py-0.5">/{item.shortcut}</span>
+                                                </div>
+                                                {item.content && (
+                                                  <div className="text-xs text-slate-300 mt-1 line-clamp-2">{item.content}</div>
+                                                )}
+                                              </button>
+                                            ))
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                            </>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>

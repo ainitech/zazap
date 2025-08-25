@@ -1,6 +1,8 @@
-import { Ticket, Queue, Contact, User } from '../models/index.js';
+import { Ticket, Queue, Contact, User, TicketMessage, TicketComment, MessageReaction } from '../models/index.js';
 import { Op } from 'sequelize';
 import { emitToAll } from '../services/socket.js';
+import fs from 'fs';
+import path from 'path';
 
 // Função utilitária para emitir atualizações de tickets
 const emitTicketsUpdate = async () => {
@@ -312,6 +314,243 @@ export const closeTicket = async (req, res) => {
     });
   } catch (err) {
     console.error('❌ Erro ao fechar ticket:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Atualizar ticket (campos permitidos)
+export const updateTicket = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const updates = req.body;
+    const ticket = await Ticket.findByPk(ticketId);
+    if (!ticket) return res.status(404).json({ error: 'Ticket não encontrado.' });
+
+    // Limitar campos que podem ser atualizados via API pública
+    const allowed = ['priority', 'assignedUserId', 'queueId', 'contactId', 'chatStatus', 'lastMessage'];
+    const payload = {};
+    for (const key of allowed) {
+      if (Object.prototype.hasOwnProperty.call(updates, key)) payload[key] = updates[key];
+    }
+
+    await ticket.update(payload);
+
+    // Emitir atualização
+    await emitTicketsUpdate();
+
+    res.json({ success: true, ticket });
+  } catch (err) {
+    console.error('❌ Erro ao atualizar ticket:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Deletar (soft-delete) ticket
+export const deleteTicket = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const ticket = await Ticket.findByPk(ticketId);
+    if (!ticket) return res.status(404).json({ error: 'Ticket não encontrado.' });
+
+    // Marcar como deletado (soft delete)
+    await ticket.update({ status: 'deleted' });
+
+    // Emitir atualização
+    await emitTicketsUpdate();
+
+    res.json({ success: true, message: 'Ticket movido para lixeira.' });
+  } catch (err) {
+    console.error('❌ Erro ao deletar ticket:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Restaurar ticket da lixeira
+export const restoreTicket = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const ticket = await Ticket.findByPk(ticketId);
+    if (!ticket) return res.status(404).json({ error: 'Ticket não encontrado.' });
+
+    // Restaurar status para 'open' (ou outro valor baseado em histórico)
+    await ticket.update({ status: 'open' });
+
+    // Emitir atualização
+    await emitTicketsUpdate();
+
+    res.json({ success: true, message: 'Ticket restaurado com sucesso.' });
+  } catch (err) {
+    console.error('❌ Erro ao restaurar ticket:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Deletar ticket permanentemente com todas as informações do contato
+export const permanentDeleteTicket = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const userId = req.user.id;
+    
+    console.log(`🗑️ Iniciando deleção permanente do ticket #${ticketId} pelo usuário ${userId}`);
+    
+    // Buscar ticket com contato vinculado
+    const ticket = await Ticket.findByPk(ticketId, {
+      include: [
+        {
+          model: Contact,
+          required: false
+        }
+      ]
+    });
+    
+    if (!ticket) {
+      return res.status(404).json({ error: 'Ticket não encontrado.' });
+    }
+    
+    const contactPhone = ticket.contact;
+    const contactId = ticket.contactId;
+    
+    console.log(`📞 Contato a ser removido: ${contactPhone} (ID: ${contactId})`);
+    
+    // 1. Buscar todas as mensagens com arquivos para remover do disco
+    const messagesWithFiles = await TicketMessage.findAll({
+      where: {
+        ticketId,
+        fileUrl: { [Op.ne]: null }
+      }
+    });
+    
+    console.log(`📁 Encontradas ${messagesWithFiles.length} mensagens com arquivos`);
+    
+    // 2. Remover arquivos do disco
+    for (const message of messagesWithFiles) {
+      try {
+        const filePath = path.join(process.cwd(), 'uploads', message.fileUrl.replace('/uploads/', ''));
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          console.log(`🗑️ Arquivo removido: ${filePath}`);
+        }
+      } catch (fileError) {
+        console.error(`❌ Erro ao remover arquivo: ${fileError.message}`);
+      }
+    }
+    
+    // 3. Remover reações das mensagens
+    await MessageReaction.destroy({
+      where: {
+        messageId: {
+          [Op.in]: await TicketMessage.findAll({
+            where: { ticketId },
+            attributes: ['id']
+          }).then(messages => messages.map(m => m.id))
+        }
+      }
+    });
+    
+    console.log(`🗑️ Reações das mensagens removidas`);
+    
+    // 4. Remover todas as mensagens do ticket
+    await TicketMessage.destroy({
+      where: { ticketId }
+    });
+    
+    console.log(`🗑️ Mensagens do ticket removidas`);
+    
+    // 5. Remover comentários do ticket
+    await TicketComment.destroy({
+      where: { ticketId }
+    });
+    
+    console.log(`🗑️ Comentários do ticket removidos`);
+    
+    // 6. Buscar e remover TODOS os tickets deste contato (mesmo número em outras sessões)
+    const allContactTickets = await Ticket.findAll({
+      where: { contact: contactPhone }
+    });
+    
+    console.log(`🎫 Encontrados ${allContactTickets.length} tickets para o contato ${contactPhone}`);
+    
+    for (const contactTicket of allContactTickets) {
+      if (contactTicket.id !== ticketId) {
+        // Remover mensagens de outros tickets do mesmo contato
+        const otherTicketMessages = await TicketMessage.findAll({
+          where: { ticketId: contactTicket.id, fileUrl: { [Op.ne]: null } }
+        });
+        
+        // Remover arquivos de outros tickets
+        for (const message of otherTicketMessages) {
+          try {
+            const filePath = path.join(process.cwd(), 'uploads', message.fileUrl.replace('/uploads/', ''));
+            if (fs.existsSync(filePath)) {
+              fs.unlinkSync(filePath);
+              console.log(`🗑️ Arquivo de outro ticket removido: ${filePath}`);
+            }
+          } catch (fileError) {
+            console.error(`❌ Erro ao remover arquivo de outro ticket: ${fileError.message}`);
+          }
+        }
+        
+        // Remover reações de outros tickets
+        await MessageReaction.destroy({
+          where: {
+            messageId: {
+              [Op.in]: await TicketMessage.findAll({
+                where: { ticketId: contactTicket.id },
+                attributes: ['id']
+              }).then(messages => messages.map(m => m.id))
+            }
+          }
+        });
+        
+        // Remover mensagens de outros tickets
+        await TicketMessage.destroy({
+          where: { ticketId: contactTicket.id }
+        });
+        
+        // Remover comentários de outros tickets
+        await TicketComment.destroy({
+          where: { ticketId: contactTicket.id }
+        });
+        
+        console.log(`🗑️ Ticket relacionado #${contactTicket.id} limpo`);
+      }
+    }
+    
+    // 7. Remover todos os tickets do contato (comparando pelo campo contact que guarda o whatsappId)
+    await Ticket.destroy({
+      where: { contact: contactPhone }
+    });
+    
+    console.log(`🗑️ Todos os tickets do contato removidos`);
+    
+    // 8. Remover o registro do contato se existir
+    if (contactId) {
+      await Contact.destroy({
+        where: { id: contactId }
+      });
+      console.log(`🗑️ Registro do contato ${contactId} removido`);
+    }
+    
+    // 9. Remover outros registros de contato que possuam o mesmo whatsappId
+    // O modelo de Contact usa o campo `whatsappId` para armazenar o id do contato no WhatsApp.
+    await Contact.destroy({
+      where: { whatsappId: contactPhone }
+    });
+
+    console.log(`🗑️ Todos os registros de contato com whatsappId ${contactPhone} removidos`);
+    
+    // Emitir atualização de tickets
+    await emitTicketsUpdate();
+    
+    console.log(`✅ Deleção permanente concluída para contato ${contactPhone}`);
+    
+    res.json({ 
+      success: true, 
+      message: `Ticket e todas as informações do contato ${contactPhone} foram removidos permanentemente.` 
+    });
+    
+  } catch (err) {
+    console.error('❌ Erro ao deletar ticket permanentemente:', err);
     res.status(500).json({ error: err.message });
   }
 };

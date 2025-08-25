@@ -140,6 +140,24 @@ const handleMessage = async (msg, sock) => {
         chatStatus: 'waiting' // Iniciar como aguardando
       });
       console.log(`🎫 Novo ticket criado: #${ticket.id} para ${fromJid} na sessão ${sock.sessionId} (ID: ${session.id}) com contato ${contact?.id || 'N/A'}`);
+      try {
+        const payload = {
+          title: 'Nova mensagem',
+          body: contact?.name ? `${contact.name}: ${messageText}` : `${fromJid}: ${messageText}`,
+          ticketId: ticket.id,
+          contact: fromJid,
+          iconUrl: contact?.profilePicUrl || null
+        };
+        emitToAll('notification', payload);
+        try {
+          const push = await import('./push.js');
+          if (push && push.broadcastPush) await push.broadcastPush(payload);
+        } catch (pushErr) {
+          console.warn('⚠️ Push broadcast failed (baileys new ticket):', pushErr);
+        }
+      } catch (notifyErr) {
+        console.error('❌ Falha ao emitir notificação via socket (baileys):', notifyErr);
+      }
     } else {
       // Atualizar ticket existente e vincular ao contato se não estiver vinculado
       ticket.lastMessage = messageText;
@@ -151,10 +169,31 @@ const handleMessage = async (msg, sock) => {
         console.log(`🔗 Ticket #${ticket.id} vinculado ao contato ${contact.id}`);
       }
       
-      if (ticket.status === 'closed') {
+      // Reabrir ticket se estiver fechado ou resolvido
+      const wasResolvedOrClosed = (ticket.status === 'closed' || ticket.chatStatus === 'resolved');
+      if (wasResolvedOrClosed) {
+        const prev = { status: ticket.status, chatStatus: ticket.chatStatus };
         ticket.status = 'open';
         ticket.chatStatus = 'waiting'; // Reabrir como aguardando
-        console.log(`🔄 Ticket #${ticket.id} reaberto por nova mensagem`);
+        console.log(`🔄 Ticket #${ticket.id} reaberto por nova mensagem (status anterior: ${prev.status}/${prev.chatStatus})`);
+        try {
+          const payload = {
+            title: 'Novo contato',
+            body: contact?.name ? `${contact.name}: ${messageText}` : `${fromJid}: ${messageText}`,
+            ticketId: ticket.id,
+            contact: fromJid,
+            iconUrl: contact?.profilePicUrl || null
+          };
+          emitToAll('notification', payload);
+          try {
+            const push = await import('./push.js');
+            if (push && push.broadcastPush) await push.broadcastPush(payload);
+          } catch (pushErr) {
+            console.warn('⚠️ Push broadcast failed (baileys reopen):', pushErr);
+          }
+        } catch (notifyErr) {
+          console.error('❌ Falha ao emitir notificação via socket (baileys reopen):', notifyErr);
+        }
       }
       await ticket.save();
     }
@@ -417,17 +456,30 @@ export const sendText = async (sessionId, to, text) => {
 export const sendMedia = async (sessionId, to, buffer, mimetype, caption) => {
   const sock = getBaileysSession(sessionId);
   if (!sock) throw new Error('Sessão Baileys não encontrada');
-  
-  const message = { 
-    document: buffer, 
-    mimetype 
-  };
-  
-  if (caption) {
-    message.caption = caption;
+
+  let content;
+  try {
+    if (mimetype?.startsWith('audio/')) {
+      // Enviar como mensagem de voz (ptt) para parecer gravado na hora
+      content = { audio: buffer, mimetype, ptt: true };
+    } else if (mimetype?.startsWith('image/')) {
+      content = { image: buffer, mimetype };
+      if (caption) content.caption = caption;
+    } else if (mimetype?.startsWith('video/')) {
+      content = { video: buffer, mimetype };
+      if (caption) content.caption = caption;
+    } else {
+      // Documento genérico
+      content = { document: buffer, mimetype };
+      if (caption) content.caption = caption;
+    }
+    return await sock.sendMessage(to, content);
+  } catch (err) {
+    // Fallback como documento se falhar
+    const fallback = { document: buffer, mimetype };
+    if (caption) fallback.caption = caption;
+    return await sock.sendMessage(to, fallback);
   }
-  
-  return sock.sendMessage(to, message);
 };
 
 /**

@@ -15,11 +15,18 @@ import {
   WifiIcon
 } from '@heroicons/react/24/outline';
 import { useSocket } from '../../context/SocketContext';
+import { useToast } from '../../context/ToastContext';
+import { useNavigate } from 'react-router-dom';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
 export default function SessionsComponent() {
   const { socket, isConnected } = useSocket();
+  const toastApi = useToast();
+  // Use a ref to make toast API available inside WebSocket handlers declared later
+  const toastApiRef = useRef(null);
+  const navigate = useNavigate();
+  // Keep sessions state in scope for handlers
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -44,6 +51,9 @@ export default function SessionsComponent() {
 
   // Setup WebSocket listeners quando socket está disponível
   useEffect(() => {
+  // keep toast api ref updated
+  toastApiRef.current = toastApi;
+
     if (!socket || !isConnected) return;
 
     console.log('🔗 Configurando listeners WebSocket para sessões...');
@@ -62,12 +72,33 @@ export default function SessionsComponent() {
     };
     
     // Listener para status de sessão individual
+    const { addToast } = toastApiRef.current || {};
     const handleSessionStatusUpdate = ({ sessionId, status }) => {
       console.log('🔄 Status de sessão atualizado via WebSocket:', { sessionId, status });
       setRealTimeStatus(prev => ({ 
         ...prev, 
         [sessionId]: status 
       }));
+
+      // Mostrar toast quando sessão ficar desconectada
+      if (status === 'disconnected') {
+        // Tentar pegar o nome da sessão
+        const sess = sessions.find(s => s.id === sessionId);
+        const name = sess ? (sess.whatsappId || sess.name || `Sessão ${sessionId}`) : `Sessão ${sessionId}`;
+        // Usar addToast se disponível
+        if (toastApiRef.current && toastApiRef.current.addToast) {
+          toastApiRef.current.addToast(`Sessão ${name} desconectada. Por favor reconecte na página de sessões.`, { 
+            type: 'error', 
+            duration: 12000,
+            action: {
+              label: 'Ir para Sessões',
+              onClick: () => navigate('/sessions')
+            }
+          });
+        } else {
+          console.warn('Toast API não encontrada para notificações de sessão desconectada');
+        }
+      }
     };
 
     // Listener para QR Code updates
@@ -98,12 +129,12 @@ export default function SessionsComponent() {
 
     socket.on('sessions-update', handleSessionsUpdate);
     socket.on('session-status-update', handleSessionStatusUpdate);
-    socket.on('qr-code-update', handleQRCodeUpdate);
+    socket.on('session-qr-update', handleQRCodeUpdate);
 
     return () => {
       socket.off('sessions-update', handleSessionsUpdate);
       socket.off('session-status-update', handleSessionStatusUpdate);
-      socket.off('qr-code-update', handleQRCodeUpdate);
+      socket.off('session-qr-update', handleQRCodeUpdate);
     };
   }, [socket, isConnected, showQRModal, selectedSession]);
 
@@ -330,7 +361,8 @@ export default function SessionsComponent() {
 
   const getQRCode = async (sessionId, silent = false) => {
     try {
-      const response = await fetch(`${API_URL}/api/sessions/${sessionId}/qr`, {
+      const response = await fetch(`${API_URL}/api/sessions/${sessionId}/qrcode`, {
+        method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }

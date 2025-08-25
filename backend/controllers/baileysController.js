@@ -1,5 +1,6 @@
 import { createBaileysSession, sendText, sendMedia } from '../services/baileysService.js';
 import { Ticket, Session, TicketMessage } from '../models/index.js';
+import { createBaileysMessageCallback } from '../services/messageCallbacks.js';
 
 // Inicializar sessão (gera QRCode)
 export const initSession = async (req, res) => {
@@ -19,6 +20,9 @@ export const initSession = async (req, res) => {
 
     let qrCodeSent = false;
     
+    // Criar callback para processamento de mensagens
+    const onMessage = createBaileysMessageCallback(session);
+    
     await createBaileysSession(sessionId, 
       async (qrCodeDataURL) => {
         // Callback do QR Code - retorna o QR Code como base64
@@ -37,59 +41,7 @@ export const initSession = async (req, res) => {
           res.json({ message: 'Sessão Baileys conectada!', status: 'connected' });
         }
       }, 
-      async (msg, sock) => {
-        try {
-          const messageContent = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
-          const contactId = msg.key.remoteJid;
-          
-          console.log(`📨 Nova mensagem Baileys de ${contactId}: ${messageContent}`);
-          
-          // Buscar ticket usando o ID numérico da sessão
-          let ticket = await Ticket.findOne({ 
-            where: { 
-              sessionId: session.id, // Usar o ID numérico da sessão
-              contact: contactId 
-            } 
-          });
-          
-          if (!ticket) {
-            // Criar novo ticket para novo contato
-            ticket = await Ticket.create({
-              sessionId: session.id,
-              contact: contactId,
-              lastMessage: messageContent,
-              unreadCount: 1,
-              status: 'open' // Garantir que o ticket seja criado como aberto
-            });
-            console.log(`🎫 Novo ticket criado: #${ticket.id} para ${contactId}`);
-          } else {
-            // Atualizar ticket existente
-            ticket.lastMessage = messageContent;
-            ticket.unreadCount += 1;
-            ticket.updatedAt = new Date();
-            // Se o ticket estava fechado, reabrir
-            if (ticket.status === 'closed') {
-              ticket.status = 'open';
-              console.log(`🔄 Ticket #${ticket.id} reaberto por nova mensagem`);
-            }
-            await ticket.save();
-            console.log(`📝 Ticket #${ticket.id} atualizado`);
-          }
-          
-          // Salvar mensagem no ticket
-          const ticketMessage = await TicketMessage.create({
-            ticketId: ticket.id,
-            sender: 'contact',
-            content: messageContent,
-            timestamp: new Date()
-          });
-          
-          console.log(`💾 Mensagem salva no ticket #${ticket.id}`);
-          
-        } catch (error) {
-          console.error('Erro ao processar mensagem:', error);
-        }
-      }
+      onMessage // Usar callback centralizado para processamento de mensagens
     );
   } catch (error) {
     console.error('Erro ao iniciar sessão:', error);

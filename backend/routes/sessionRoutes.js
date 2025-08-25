@@ -301,7 +301,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// POST /api/sessions/:id/restart - Reiniciar sessão
+// POST /api/sessions/:id/restart - Reiniciar sessão completamente
 router.post('/:id/restart', authenticateToken, async (req, res) => {
   try {
     const session = await Session.findOne({
@@ -312,42 +312,78 @@ router.post('/:id/restart', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Sessão não encontrada' });
     }
 
-    console.log(`🔄 Reiniciando sessão ${session.whatsappId} (${session.library})`);
+    console.log(`🔄 Reiniciando sessão ${session.whatsappId} (${session.library}) completamente`);
 
     // Limpar dados em memória
     sessionQRs.delete(session.whatsappId);
     sessionStatus.set(session.whatsappId, 'restarting');
 
+    // Emitir status de reinicialização
+    emitToAll('session-status-update', { 
+      sessionId: session.id, 
+      status: 'restarting' 
+    });
+
     try {
+      // Primeiro parar completamente a sessão
       if (session.library === 'whatsappjs') {
-        const client = await restartWhatsappJsSession(
+        await shutdownWhatsappJsSession(session.whatsappId);
+        await removeWhatsappJsSession(session.whatsappId);
+      } else if (session.library === 'baileys') {
+        await shutdownBaileysSession(session.whatsappId);
+        await removeBaileysSession(session.whatsappId);
+      }
+
+      // Aguardar um momento para garantir limpeza
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Agora criar uma nova sessão
+      if (session.library === 'whatsappjs') {
+        const client = await createWhatsappJsSession(
           session.whatsappId,
           (client) => {
             sessionStatus.set(session.whatsappId, 'connected');
             sessionQRs.delete(session.whatsappId);
             session.update({ status: 'connected' });
-            console.log(`✅ Sessão WhatsApp.js ${session.whatsappId} reconectada`);
+            console.log(`✅ Sessão WhatsApp.js ${session.whatsappId} reiniciada e conectada`);
+            
+            // Emitir atualização de conexão
+            emitToAll('session-status-update', { 
+              sessionId: session.id, 
+              status: 'connected' 
+            });
+            emitSessionsUpdate();
           },
           (message, client) => {
             console.log('📨 Mensagem recebida WhatsApp.js:', message.body);
           }
         );
 
+        // Capturar QR code
         client.on('qr', async (qr) => {
           try {
             const QRCode = await import('qrcode');
             const qrDataURL = await QRCode.toDataURL(qr);
             sessionQRs.set(session.whatsappId, qrDataURL);
             sessionStatus.set(session.whatsappId, 'qr_ready');
+            console.log(`📱 QR Code gerado para sessão ${session.whatsappId}`);
+            
+            // Emitir QR code via WebSocket
+            emitToAll('session-qr-update', { 
+              sessionId: session.id, 
+              qrCode: qrDataURL,
+              status: 'qr_ready'
+            });
+            emitSessionsUpdate();
           } catch (error) {
-            console.error('Erro ao gerar QR Code:', error);
+            console.error('❌ Erro ao gerar QR Code:', error);
             sessionQRs.set(session.whatsappId, qr);
             sessionStatus.set(session.whatsappId, 'qr_ready');
           }
         });
 
       } else if (session.library === 'baileys') {
-        const sock = await restartBaileysSession(
+        const sock = await createBaileysSession(
           session.whatsappId,
           async (qr) => {
             try {
@@ -355,8 +391,17 @@ router.post('/:id/restart', authenticateToken, async (req, res) => {
               const qrDataURL = await QRCode.toDataURL(qr);
               sessionQRs.set(session.whatsappId, qrDataURL);
               sessionStatus.set(session.whatsappId, 'qr_ready');
+              console.log(`📱 QR Code gerado para sessão Baileys ${session.whatsappId}`);
+              
+              // Emitir QR code via WebSocket
+              emitToAll('session-qr-update', { 
+                sessionId: session.id, 
+                qrCode: qrDataURL,
+                status: 'qr_ready'
+              });
+              emitSessionsUpdate();
             } catch (error) {
-              console.error('Erro ao gerar QR Code:', error);
+              console.error('❌ Erro ao gerar QR Code:', error);
               sessionQRs.set(session.whatsappId, qr);
               sessionStatus.set(session.whatsappId, 'qr_ready');
             }
@@ -365,7 +410,14 @@ router.post('/:id/restart', authenticateToken, async (req, res) => {
             sessionStatus.set(session.whatsappId, 'connected');
             sessionQRs.delete(session.whatsappId);
             session.update({ status: 'connected' });
-            console.log(`✅ Sessão Baileys ${session.whatsappId} reconectada`);
+            console.log(`✅ Sessão Baileys ${session.whatsappId} reiniciada e conectada`);
+            
+            // Emitir atualização de conexão
+            emitToAll('session-status-update', { 
+              sessionId: session.id, 
+              status: 'connected' 
+            });
+            emitSessionsUpdate();
           },
           (message, sock) => {
             console.log('📨 Mensagem recebida via Baileys:', message);
@@ -383,19 +435,25 @@ router.post('/:id/restart', authenticateToken, async (req, res) => {
       });
 
     } catch (error) {
-      console.error(`Erro ao reiniciar sessão ${session.whatsappId}:`, error);
+      console.error(`❌ Erro ao reiniciar sessão ${session.whatsappId}:`, error);
       sessionStatus.set(session.whatsappId, 'error');
       await session.update({ status: 'error' });
-      res.status(500).json({ error: 'Erro ao reiniciar sessão' });
+      
+      emitToAll('session-status-update', { 
+        sessionId: session.id, 
+        status: 'error' 
+      });
+      
+      res.status(500).json({ error: 'Erro ao reiniciar sessão: ' + error.message });
     }
 
   } catch (error) {
-    console.error('Erro ao reiniciar sessão:', error);
+    console.error('❌ Erro ao reiniciar sessão:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
-// POST /api/sessions/:id/shutdown - Desligar sessão
+// POST /api/sessions/:id/shutdown - Parar e limpar sessão completamente
 router.post('/:id/shutdown', authenticateToken, async (req, res) => {
   try {
     const session = await Session.findOne({
@@ -406,35 +464,204 @@ router.post('/:id/shutdown', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Sessão não encontrada' });
     }
 
-    console.log(`🔌 Desligando sessão ${session.whatsappId} (${session.library})`);
+    console.log(`� Parando e limpando sessão ${session.whatsappId} (${session.library})`);
 
     try {
+      // Desligar a sessão
       if (session.library === 'whatsappjs') {
         await shutdownWhatsappJsSession(session.whatsappId);
+        await removeWhatsappJsSession(session.whatsappId); // Remove completamente
       } else if (session.library === 'baileys') {
         await shutdownBaileysSession(session.whatsappId);
+        await removeBaileysSession(session.whatsappId); // Remove completamente
       }
 
-      // Limpar dados em memória
+      // Limpar completamente dados em memória
       sessionQRs.delete(session.whatsappId);
-      sessionStatus.set(session.whatsappId, 'disconnected');
+      sessionStatus.delete(session.whatsappId);
 
-      await session.update({ status: 'disconnected' });
+      // Atualizar status no banco
+      await session.update({ status: 'stopped' });
+
+      // Emitir atualização via WebSocket
+      emitToAll('session-status-update', { 
+        sessionId: session.id, 
+        status: 'stopped' 
+      });
+
+      // Emitir atualização geral de sessões
+      emitSessionsUpdate();
+
+      console.log(`✅ Sessão ${session.whatsappId} parada e limpa completamente`);
 
       res.json({ 
-        message: 'Sessão desligada com sucesso',
+        message: 'Sessão parada e limpa com sucesso',
         sessionId: session.whatsappId,
         library: session.library,
-        status: 'disconnected'
+        status: 'stopped'
       });
 
     } catch (error) {
-      console.error(`Erro ao desligar sessão ${session.whatsappId}:`, error);
-      res.status(500).json({ error: 'Erro ao desligar sessão' });
+      console.error(`❌ Erro ao parar sessão ${session.whatsappId}:`, error);
+      sessionStatus.set(session.whatsappId, 'error');
+      await session.update({ status: 'error' });
+      res.status(500).json({ error: 'Erro ao parar sessão: ' + error.message });
     }
 
   } catch (error) {
-    console.error('Erro ao desligar sessão:', error);
+    console.error('❌ Erro ao parar sessão:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+// POST /api/sessions/:id/qrcode - Gerar novo QR Code
+router.post('/:id/qrcode', authenticateToken, async (req, res) => {
+  try {
+    const session = await Session.findOne({
+      where: { id: req.params.id, userId: req.user.id }
+    });
+
+    if (!session) {
+      return res.status(404).json({ error: 'Sessão não encontrada' });
+    }
+
+    console.log(`📱 Gerando novo QR Code para sessão ${session.whatsappId} (${session.library})`);
+
+    // Limpar QR code anterior
+    sessionQRs.delete(session.whatsappId);
+    sessionStatus.set(session.whatsappId, 'generating_qr');
+
+    // Emitir status de geração de QR
+    emitToAll('session-status-update', { 
+      sessionId: session.id, 
+      status: 'generating_qr' 
+    });
+
+    try {
+      // Parar sessão atual se estiver ativa
+      if (session.library === 'whatsappjs') {
+        await shutdownWhatsappJsSession(session.whatsappId);
+        await removeWhatsappJsSession(session.whatsappId);
+      } else if (session.library === 'baileys') {
+        await shutdownBaileysSession(session.whatsappId);
+        await removeBaileysSession(session.whatsappId);
+      }
+
+      // Aguardar um momento para garantir limpeza
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Criar nova sessão apenas para gerar QR code
+      if (session.library === 'whatsappjs') {
+        const client = await createWhatsappJsSession(
+          session.whatsappId,
+          (client) => {
+            sessionStatus.set(session.whatsappId, 'connected');
+            sessionQRs.delete(session.whatsappId);
+            session.update({ status: 'connected' });
+            console.log(`✅ Sessão WhatsApp.js ${session.whatsappId} conectada via QR Code`);
+            
+            // Emitir atualização de conexão
+            emitToAll('session-status-update', { 
+              sessionId: session.id, 
+              status: 'connected' 
+            });
+            emitSessionsUpdate();
+          },
+          (message, client) => {
+            console.log('📨 Mensagem recebida WhatsApp.js:', message.body);
+          }
+        );
+
+        // Capturar QR code
+        client.on('qr', async (qr) => {
+          try {
+            const QRCode = await import('qrcode');
+            const qrDataURL = await QRCode.toDataURL(qr);
+            sessionQRs.set(session.whatsappId, qrDataURL);
+            sessionStatus.set(session.whatsappId, 'qr_ready');
+            console.log(`📱 Novo QR Code gerado para sessão ${session.whatsappId}`);
+            
+            // Emitir QR code via WebSocket
+            emitToAll('session-qr-update', { 
+              sessionId: session.id, 
+              qrCode: qrDataURL,
+              status: 'qr_ready'
+            });
+            emitSessionsUpdate();
+          } catch (error) {
+            console.error('❌ Erro ao gerar QR Code:', error);
+            sessionQRs.set(session.whatsappId, qr);
+            sessionStatus.set(session.whatsappId, 'qr_ready');
+          }
+        });
+
+      } else if (session.library === 'baileys') {
+        const sock = await createBaileysSession(
+          session.whatsappId,
+          async (qr) => {
+            try {
+              const QRCode = await import('qrcode');
+              const qrDataURL = await QRCode.toDataURL(qr);
+              sessionQRs.set(session.whatsappId, qrDataURL);
+              sessionStatus.set(session.whatsappId, 'qr_ready');
+              console.log(`📱 Novo QR Code gerado para sessão Baileys ${session.whatsappId}`);
+              
+              // Emitir QR code via WebSocket
+              emitToAll('session-qr-update', { 
+                sessionId: session.id, 
+                qrCode: qrDataURL,
+                status: 'qr_ready'
+              });
+              emitSessionsUpdate();
+            } catch (error) {
+              console.error('❌ Erro ao gerar QR Code:', error);
+              sessionQRs.set(session.whatsappId, qr);
+              sessionStatus.set(session.whatsappId, 'qr_ready');
+            }
+          },
+          (sock) => {
+            sessionStatus.set(session.whatsappId, 'connected');
+            sessionQRs.delete(session.whatsappId);
+            session.update({ status: 'connected' });
+            console.log(`✅ Sessão Baileys ${session.whatsappId} conectada via QR Code`);
+            
+            // Emitir atualização de conexão
+            emitToAll('session-status-update', { 
+              sessionId: session.id, 
+              status: 'connected' 
+            });
+            emitSessionsUpdate();
+          },
+          (message, sock) => {
+            console.log('📨 Mensagem recebida via Baileys:', message);
+          }
+        );
+      }
+
+      await session.update({ status: 'connecting' });
+
+      res.json({ 
+        message: 'Novo QR Code sendo gerado', 
+        status: 'generating_qr',
+        sessionId: session.whatsappId,
+        library: session.library
+      });
+
+    } catch (error) {
+      console.error(`❌ Erro ao gerar QR Code para sessão ${session.whatsappId}:`, error);
+      sessionStatus.set(session.whatsappId, 'error');
+      await session.update({ status: 'error' });
+      
+      emitToAll('session-status-update', { 
+        sessionId: session.id, 
+        status: 'error' 
+      });
+      
+      res.status(500).json({ error: 'Erro ao gerar QR Code: ' + error.message });
+    }
+
+  } catch (error) {
+    console.error('❌ Erro ao gerar QR Code:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });

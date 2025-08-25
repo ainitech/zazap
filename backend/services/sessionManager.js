@@ -10,6 +10,10 @@ import {
   listBaileysSessions 
 } from './baileysService.js';
 import { emitToAll } from './socket.js';
+import { 
+  createWhatsappJsMessageCallback,
+  createBaileysMessageCallback 
+} from './messageCallbacks.js';
 
 // Função para verificar se uma sessão está realmente ativa
 const isSessionActuallyActive = (whatsappId, library) => {
@@ -30,15 +34,21 @@ const isSessionActuallyActive = (whatsappId, library) => {
 // Função para reativar uma sessão específica
 const reactivateSession = async (session) => {
   try {
-    console.log(`🔄 Reativando sessão ${session.whatsappId} (${session.library})...`);
+    console.log(`🔄 Reativando sessão ${session.whatsappId} (${session.library}) com callbacks de mídia...`);
     
     if (session.library === 'whatsappjs') {
-      await createWhatsappJsSession(session.whatsappId);
+      // Criar callback para processamento de mensagens
+      const onMessage = createWhatsappJsMessageCallback(session);
+      // WhatsApp.js: (sessionId, onReady, onMessage)
+      await createWhatsappJsSession(session.whatsappId, null, onMessage);
     } else if (session.library === 'baileys') {
-      await createBaileysSession(session.whatsappId);
+      // Criar callback para processamento de mensagens
+      const onMessage = createBaileysMessageCallback(session);
+      // Baileys: (sessionId, onQR, onReady, onMessage)
+      await createBaileysSession(session.whatsappId, null, null, onMessage);
     }
     
-    console.log(`✅ Sessão ${session.whatsappId} reativada com sucesso`);
+    console.log(`✅ Sessão ${session.whatsappId} reativada com sucesso com callbacks de mensagens e mídia`);
     return true;
   } catch (error) {
     console.error(`❌ Erro ao reativar sessão ${session.whatsappId}:`, error.message);

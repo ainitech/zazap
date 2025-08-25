@@ -13,6 +13,7 @@ import RecentPage from './pages/RecentPage';
 import FavoritesPage from './pages/FavoritesPage';
 import ArchivedPage from './pages/ArchivedPage';
 import TrashPage from './pages/TrashPage';
+import QuickRepliesPage from './pages/QuickRepliesPage';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SocketProvider } from './context/SocketContext';
 
@@ -40,6 +41,7 @@ function MainApp() {
         <Route path="/sessions" element={<ProtectedRoute><SessionsPage /></ProtectedRoute>} />
         <Route path="/integrations" element={<ProtectedRoute><IntegrationsPage /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+  <Route path="/quick-replies" element={<ProtectedRoute><QuickRepliesPage /></ProtectedRoute>} />
         <Route path="/recent" element={<ProtectedRoute><RecentPage /></ProtectedRoute>} />
         <Route path="/favorites" element={<ProtectedRoute><FavoritesPage /></ProtectedRoute>} />
         <Route path="/archived" element={<ProtectedRoute><ArchivedPage /></ProtectedRoute>} />

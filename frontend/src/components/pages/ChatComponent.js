@@ -43,12 +43,17 @@ useEffect(() => {
 }, []);
   // Setup WebSocket listeners quando socket está disponível
   useEffect(() => {
-    if (!socket || !isConnected) return;
+    if (!socket || !isConnected) {
+      console.log('⚠️ Socket não disponível ou não conectado', { socket: !!socket, isConnected });
+      return;
+    }
 
     console.log('🔗 Configurando listeners WebSocket...');
+    console.log('🎯 Ticket selecionado:', selectedTicket?.id);
     
     // Se há um ticket selecionado quando o WebSocket reconecta, entrar na sala novamente
     if (selectedTicket) {
+      console.log(`🔄 Reconectando - entrando na sala do ticket ${selectedTicket.id}`);
       joinTicket(selectedTicket.id);
       console.log(`🔄 Reconectado - entrando novamente na sala do ticket ${selectedTicket.id}`);
     }
@@ -61,51 +66,98 @@ useEffect(() => {
     
     // Listener para novas mensagens
     const handleNewMessage = (message) => {
-      console.log('🔔 Nova mensagem recebida via WebSocket:', message);
-      console.log('🔍 Ticket atual:', selectedTicket?.id, 'Mensagem para ticket:', message.ticketId);
-      
-      // Adicionar mensagem se for do ticket atual
-      if (selectedTicket && message.ticketId === selectedTicket.id) {
-        console.log('✅ Adicionando mensagem ao ticket atual');
-        setMessages(prevMessages => {
-          // Verificar se a mensagem já existe para evitar duplicatas
-          const exists = prevMessages.some(m => m.id === message.id);
-          if (exists) {
-            console.log('⚠️ Mensagem já existe, ignorando duplicata');
-            return prevMessages;
-          }
-          
-          console.log('➕ Adicionando nova mensagem:', message);
-          return [...prevMessages, message];
-        });
+      try {
+        console.log('🔔 ChatComponent: handleNewMessage chamado');
+        console.log('📝 Dados recebidos (raw):', message);
         
-        // Reproduzir som de notificação se for de contato
-        if (message.sender === 'contact') {
-          try {
-            const audio = new Audio('/notification.mp3');
-            audio.volume = 0.3;
-            audio.play().catch(e => console.log('Não foi possível reproduzir som'));
-          } catch (e) {
-            // Som não disponível
+        // Normalize Sequelize instances: message may be wrapped in dataValues
+        const normalized = message && message.dataValues ? message.dataValues : message;
+        // Ensure numeric ticketId
+        const msgTicketId = normalized?.ticketId ? Number(normalized.ticketId) : undefined;
+        console.log('🔔 Nova mensagem recebida via WebSocket:', normalized);
+        console.log('🔍 Ticket atual:', selectedTicket?.id, 'Mensagem para ticket:', msgTicketId);
+        console.log('🧮 Tipos:', typeof selectedTicket?.id, typeof msgTicketId);
+
+        // Adicionar mensagem se for do ticket atual
+        if (selectedTicket && msgTicketId === selectedTicket.id) {
+          console.log('✅ Adicionando mensagem ao ticket atual');
+          setMessages(prevMessages => {
+            console.log('📊 Mensagens anteriores:', prevMessages.length);
+            // Verificar se a mensagem já existe para evitar duplicatas
+            const exists = prevMessages.some(m => (m.id || m.dataValues?.id) === (normalized.id || normalized.dataValues?.id));
+            if (exists) {
+              console.log('⚠️ Mensagem já existe, ignorando duplicata');
+              return prevMessages;
+            }
+
+            console.log('➕ Adicionando nova mensagem:', normalized);
+            const newMessages = [...prevMessages, normalized];
+            console.log('📊 Total de mensagens após adicionar:', newMessages.length);
+            return newMessages;
+          });
+
+          // Reproduzir som de notificação se for de contato
+          if (normalized.sender === 'contact') {
+            try {
+              const audio = new Audio('/notification.mp3');
+              audio.volume = 0.3;
+              audio.play().catch(e => console.log('Não foi possível reproduzir som'));
+            } catch (e) {
+              // Som não disponível
+            }
           }
+        } else {
+          console.log('❌ Mensagem não é para o ticket atual, ignorando');
+          console.log('❌ Comparação falhou:', { 
+            selectedTicketExists: !!selectedTicket,
+            selectedTicketId: selectedTicket?.id,
+            msgTicketId,
+            areEqual: selectedTicket && msgTicketId === selectedTicket.id
+          });
         }
-      } else {
-        console.log('❌ Mensagem não é para o ticket atual, ignorando');
+      } catch (err) {
+        console.error('Erro em handleNewMessage:', err);
       }
     };
 
     // Listener para atualizações de mensagens
     const handleMessageUpdate = ({ ticketId, message }) => {
-      console.log('🔄 Atualização de mensagem via WebSocket:', { ticketId, message });
-      
-      // Se for do ticket atual, adicionar mensagem
-      if (selectedTicket && ticketId === selectedTicket.id) {
-        setMessages(prevMessages => {
-          const exists = prevMessages.some(m => m.id === message.id);
-          if (exists) return prevMessages;
-          
-          return [...prevMessages, message];
-        });
+      try {
+        console.log('🔄 ChatComponent: handleMessageUpdate chamado');
+        console.log('📝 Dados recebidos (raw):', { ticketId, message });
+        
+        const tid = ticketId ? Number(ticketId) : undefined;
+        const normalized = message && message.dataValues ? message.dataValues : message;
+        console.log('🔄 Atualização de mensagem via WebSocket:', { ticketId: tid, message: normalized });
+        console.log('🔍 Ticket atual:', selectedTicket?.id, 'Update para ticket:', tid);
+        console.log('🧮 Tipos:', typeof selectedTicket?.id, typeof tid);
+
+        // Se for do ticket atual, adicionar mensagem
+        if (selectedTicket && tid === selectedTicket.id) {
+          console.log('✅ Processando atualização para ticket atual');
+          setMessages(prevMessages => {
+            console.log('📊 Mensagens anteriores:', prevMessages.length);
+            const exists = prevMessages.some(m => (m.id || m.dataValues?.id) === (normalized.id || normalized.dataValues?.id));
+            if (exists) {
+              console.log('⚠️ Mensagem já existe no message-update, ignorando');
+              return prevMessages;
+            }
+            console.log('➕ Adicionando mensagem via message-update:', normalized);
+            const newMessages = [...prevMessages, normalized];
+            console.log('📊 Total de mensagens após message-update:', newMessages.length);
+            return newMessages;
+          });
+        } else {
+          console.log('❌ Message-update não é para o ticket atual, ignorando');
+          console.log('❌ Comparação falhou:', { 
+            selectedTicketExists: !!selectedTicket,
+            selectedTicketId: selectedTicket?.id,
+            updateTicketId: tid,
+            areEqual: selectedTicket && tid === selectedTicket.id
+          });
+        }
+      } catch (err) {
+        console.error('Erro em handleMessageUpdate:', err);
       }
     };
 
@@ -113,12 +165,28 @@ useEffect(() => {
     socket.on('new-message', handleNewMessage);
     socket.on('message-update', handleMessageUpdate);
 
+    console.log('✅ Listeners WebSocket registrados:', {
+      'tickets-update': true,
+      'new-message': true,
+      'message-update': true
+    });
+
+    // Garantir que estamos na sala do ticket após configurar listeners
+    if (selectedTicket) {
+      console.log(`🎯 Garantindo entrada na sala do ticket ${selectedTicket.id} após configurar listeners`);
+      setTimeout(() => {
+        joinTicket(selectedTicket.id);
+        console.log(`🔄 Entrada forçada na sala do ticket ${selectedTicket.id}`);
+      }, 100);
+    }
+
     // Listener de teste para verificar se eventos estão chegando
     socket.on('test-event', (data) => {
       console.log('🧪 Evento de teste recebido:', data);
     });
 
     return () => {
+      console.log('🧹 Removendo listeners WebSocket do ChatComponent');
       socket.off('tickets-update', handleTicketsUpdate);
       socket.off('new-message', handleNewMessage);
       socket.off('message-update', handleMessageUpdate);
@@ -220,8 +288,11 @@ useEffect(() => {
   };
 
   const handleTicketSelect = (ticket) => {
+    console.log('🎯 ChatComponent: Selecionando ticket:', ticket.id);
+    
     // Sair do ticket anterior se houver
     if (currentTicketIdRef.current) {
+      console.log('🚪 Saindo do ticket anterior:', currentTicketIdRef.current);
       leaveTicket(currentTicketIdRef.current);
     }
     
@@ -229,15 +300,31 @@ useEffect(() => {
     setMessages([]); // Limpar mensagens anteriores
     currentTicketIdRef.current = ticket.id;
     
+    console.log('📋 Estado atualizado:', {
+      selectedTicketId: ticket.id,
+      messagesCleared: true,
+      currentTicketIdRef: currentTicketIdRef.current
+    });
+    
     // Buscar mensagens iniciais apenas uma vez via API
     fetchMessagesOnce(ticket.id);
     
     // Entrar na sala do ticket para receber mensagens em tempo real
     if (socket && isConnected) {
+      console.log('🚪 Entrando na sala do ticket:', ticket.id);
       joinTicket(ticket.id);
       console.log(`📱 Ticket selecionado: ${ticket.id} - WebSocket conectado`);
+      
+      // Garantir entrada na sala com retry
+      setTimeout(() => {
+        console.log(`🔄 Retry: Garantindo entrada na sala do ticket ${ticket.id}`);
+        joinTicket(ticket.id);
+      }, 200);
     } else {
-      console.log(`⚠️ WebSocket não conectado ao selecionar ticket ${ticket.id}`);
+      console.log(`⚠️ WebSocket não conectado ao selecionar ticket ${ticket.id}`, {
+        socket: !!socket,
+        isConnected
+      });
     }
   };
 

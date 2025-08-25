@@ -258,8 +258,16 @@ export default function ContactInfo({ selectedTicket, showContactInfo }) {
                 alt={displayName}
                 className="w-full h-full object-cover transition-transform duration-300 hover:scale-110"
                 onError={(e) => {
-                  e.target.style.display = 'none';
-                  e.target.nextSibling.style.display = 'flex';
+                  try {
+                    if (e && e.target) {
+                      if (e.target.style) e.target.style.display = 'none';
+                      if (e.target.nextSibling && e.target.nextSibling.style) {
+                        e.target.nextSibling.style.display = 'flex';
+                      }
+                    }
+                  } catch (err) {
+                    console.warn('onError image handler failed', err);
+                  }
                 }}
               />
             ) : null}

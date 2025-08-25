@@ -1,9 +1,10 @@
-import { TicketMessage, Ticket, Session, Contact, MessageReaction, User } from '../models/index.js';
+import { TicketMessage, Ticket, Session, Contact, MessageReaction, User, Queue } from '../models/index.js';
 import { sendText as sendTextWhatsappJs, getWhatsappJsSession } from '../services/whatsappjsService.js';
 import { sendText as sendTextBaileys, getBaileysSession } from '../services/baileysService.js';
 import { emitToTicket, emitToAll } from '../services/socket.js';
 import path from 'path';
 import fs from 'fs';
+
 
 // Função para atualizar informações do contato ao enviar mensagem
 const updateContactOnSend = async (ticket, sessionId) => {
@@ -164,87 +165,73 @@ export const sendMessage = async (req, res) => {
     
     // Enviar mensagem via WhatsApp se sender for 'user'
     if (sender === 'user') {
-      console.log(`📱 Enviando mensagem via WhatsApp para ${ticket.contact} na sessão ${ticket.sessionId}`);
+      console.log(`📱 Enviando mensagem via WhatsApp para ${ticket.contact}`);
       
       // Atualizar informações do contato ao enviar mensagem
       await updateContactOnSend(ticket, ticket.sessionId);
       
-      // Buscar informações da sessão para saber qual biblioteca usar
+      // Buscar informações da sessão
       const session = await Session.findByPk(ticket.sessionId);
       if (!session) {
         console.error(`❌ Sessão ${ticket.sessionId} não encontrada no banco de dados`);
       } else {
-        console.log(`🔍 Sessão encontrada: ${session.library} (${session.whatsappId}) - Status: ${session.status}`);
-        console.log(`🔑 Usando whatsappId "${session.whatsappId}" para buscar sessão ativa`);
+        console.log(`🔍 Tentando enviar mensagem para ${ticket.contact} - Sessão: ${session.whatsappId}`);
         
-        // Verificar se a sessão está realmente ativa
-        let isSessionActive = false;
+        let messageSent = false;
         
-        if (session.library === 'whatsapp-web.js' || session.library === 'whatsappjs') {
-          const activeSession = getWhatsappJsSession(session.whatsappId);
-          isSessionActive = activeSession && activeSession.info && activeSession.info.wid;
-          console.log(`🔍 Sessão WhatsApp.js ativa: ${isSessionActive ? 'Sim' : 'Não'}`);
-        } else if (session.library === 'baileys') {
-          const activeSession = getBaileysSession(session.whatsappId);
-          isSessionActive = activeSession && activeSession.user;
-          console.log(`🔍 Sessão Baileys ativa: ${isSessionActive ? 'Sim' : 'Não'}`);
-        }
-        
-        if (!isSessionActive) {
-          console.error(`❌ Sessão ${session.whatsappId} não está realmente ativa. Atualizando status no banco...`);
-          
-          // Atualizar status no banco
-          await session.update({ status: 'disconnected' });
-          
-          console.log(`⚠️ Para reconectar, vá até a página de sessões e clique em "Iniciar" na sessão ${session.whatsappId}`);
-          
-          // Emitir atualização via WebSocket para o frontend
+        // Tentar WhatsApp.js primeiro (se disponível)
+        if (!messageSent) {
           try {
-            emitToAll('session-status-update', { 
-              sessionId: session.id, 
-              status: 'disconnected' 
-            });
-          } catch (socketError) {
-            console.error('❌ Erro ao emitir status via WebSocket:', socketError);
+            const activeSession = getWhatsappJsSession(session.whatsappId);
+            if (activeSession && activeSession.info && activeSession.info.wid) {
+              console.log(`� Tentando envio via WhatsApp-Web.js para ${ticket.contact}`);
+              await sendTextWhatsappJs(session.whatsappId, ticket.contact, content);
+              console.log(`✅ Mensagem enviada com sucesso via WhatsApp-Web.js`);
+              messageSent = true;
+            } else {
+              console.log(`⚠️ WhatsApp-Web.js não disponível ou não conectado para sessão ${session.whatsappId}`);
+            }
+          } catch (whatsappJsError) {
+            console.error(`❌ Erro no WhatsApp-Web.js:`, whatsappJsError.message);
           }
-          
-          return; // Não tentar enviar mensagem
         }
         
-        // Verificar apenas o status do banco de dados
-        if (session.status !== 'connected') {
-          console.error(`❌ Sessão ${ticket.sessionId} não está conectada no banco (status: ${session.status})`);
-        } else {
-          console.log(`✅ Sessão está conectada e ativa, enviando mensagem...`);
-          
-          let messageSent = false;
-          
-          if (session.library === 'whatsapp-web.js' || session.library === 'whatsappjs') {
-            try {
-              console.log(`📤 Enviando mensagem via WhatsApp-Web.js para ${ticket.contact}`);
-              // Usar session.whatsappId em vez de ticket.sessionId
-              await sendTextWhatsappJs(session.whatsappId, ticket.contact, content);
-              console.log(`✅ Mensagem enviada via WhatsApp-Web.js`);
-              messageSent = true;
-            } catch (whatsappJsError) {
-              console.error(`❌ Erro no WhatsApp-Web.js:`, whatsappJsError.message);
-            }
-          } else if (session.library === 'baileys') {
-            try {
-              console.log(`📤 Enviando mensagem via Baileys para ${ticket.contact}`);
-              // Usar session.whatsappId em vez de ticket.sessionId
+        // Tentar Baileys se WhatsApp.js falhou
+        if (!messageSent) {
+          try {
+            const activeSession = getBaileysSession(session.whatsappId);
+            if (activeSession && activeSession.user) {
+              console.log(`📤 Tentando envio via Baileys para ${ticket.contact}`);
               await sendTextBaileys(session.whatsappId, ticket.contact, content);
-              console.log(`✅ Mensagem enviada via Baileys`);
+              console.log(`✅ Mensagem enviada com sucesso via Baileys`);
               messageSent = true;
-            } catch (baileysError) {
-              console.error(`❌ Erro no Baileys:`, baileysError.message);
+            } else {
+              console.log(`⚠️ Baileys não disponível ou não conectado para sessão ${session.whatsappId}`);
             }
-          } else {
-            console.error(`❌ Biblioteca desconhecida: ${session.library}`);
+          } catch (baileysError) {
+            console.error(`❌ Erro no Baileys:`, baileysError.message);
           }
+        }
+        
+        // Se nenhuma biblioteca funcionou
+        if (!messageSent) {
+          console.error(`❌ Falha ao enviar mensagem via qualquer biblioteca disponível`);
+          console.error(`❌ Verifique se a sessão ${session.whatsappId} está realmente conectada`);
           
-          if (!messageSent) {
-            console.error(`❌ Falha ao enviar mensagem via ${session.library}`);
+          // Atualizar status no banco se necessário
+          if (session.status === 'connected') {
+            await session.update({ status: 'disconnected' });
+            console.log(`🔄 Status da sessão ${session.whatsappId} atualizado para 'disconnected'`);
+            
+            // Emitir atualização via WebSocket
+            try {
+              emitToAll('session-status-update', { 
+                sessionId: session.id, 
+                status: 'disconnected' 
+              });
+            } catch (socketError) {
+              console.error('❌ Erro ao emitir status via WebSocket:', socketError);
+            }
           }
         }
       }
@@ -327,12 +314,13 @@ export const sendMediaMessage = async (req, res) => {
     
     const message = await TicketMessage.create({
       ticketId,
-      sender: sender || 'user',
-      content: '',
+      sender: 'user', // Registrar como 'user' para parecer gravado
+      content: req.body.content || '',
       fileUrl,
       fileName: file.originalname,
       fileType: file.mimetype,
-      timestamp: new Date()
+      timestamp: new Date(),
+      isQuickReply: sender === 'quick-reply'
     });
 
     console.log(`📡 Emitindo evento 'message-update' para todos os clientes:`, { ticketId, message });
@@ -342,6 +330,84 @@ export const sendMediaMessage = async (req, res) => {
     emitToAll('message-update', { ticketId, message });
     
     console.log(`✅ Evento 'message-update' emitido para todos os clientes`);
+
+  // Enviar arquivo via WhatsApp se for enviado pelo usuário ou via resposta rápida
+  if (sender === 'user' || sender === 'quick-reply') {
+      console.log(`📱 Enviando arquivo via WhatsApp para ${ticket.contact}`);
+      
+      // Importar funções de envio de mídia
+      const { sendMedia: sendMediaWhatsappJs, getWhatsappJsSession } = await import('../services/whatsappjsService.js');
+      const { sendMedia: sendMediaBaileys, getBaileysSession } = await import('../services/baileysService.js');
+      
+      // Buscar informações da sessão para saber qual biblioteca usar
+      const session = await Session.findByPk(ticket.sessionId);
+      if (!session) {
+        console.error(`❌ Sessão ${ticket.sessionId} não encontrada no banco de dados`);
+      } else {
+        console.log(`🔍 Tentando enviar arquivo para ${ticket.contact} - Sessão: ${session.whatsappId}`);
+        
+        let fileSent = false;
+        const filePath = path.join(process.cwd(), file.path);
+        const fileBuffer = fs.readFileSync(filePath);
+        
+    // Tentar WhatsApp.js primeiro (se disponível)
+        if (!fileSent) {
+          try {
+      const activeSessionJs = getWhatsappJsSession(session.whatsappId);
+            if (activeSessionJs && activeSessionJs.info && activeSessionJs.info.wid) {
+              console.log(`📤 Tentando envio via WhatsApp-Web.js para ${ticket.contact}`);
+              const base64Data = fileBuffer.toString('base64');
+              await sendMediaWhatsappJs(session.whatsappId, ticket.contact, base64Data, file.originalname, file.mimetype);
+              console.log(`✅ Arquivo enviado com sucesso via WhatsApp-Web.js`);
+              fileSent = true;
+            } else {
+              console.log(`⚠️ WhatsApp-Web.js não disponível ou não conectado para sessão ${session.whatsappId}`);
+            }
+          } catch (whatsappJsError) {
+            console.error(`❌ Erro no WhatsApp-Web.js:`, whatsappJsError.message);
+          }
+        }
+        
+        // Tentar Baileys se WhatsApp.js falhou
+    if (!fileSent) {
+          try {
+            const activeSessionBaileys = getBaileysSession(session.whatsappId);
+            if (activeSessionBaileys && activeSessionBaileys.user) {
+              console.log(`📤 Tentando envio via Baileys para ${ticket.contact}`);
+      await sendMediaBaileys(session.whatsappId, ticket.contact, fileBuffer, file.mimetype);
+              console.log(`✅ Arquivo enviado com sucesso via Baileys`);
+              fileSent = true;
+            } else {
+              console.log(`⚠️ Baileys não disponível ou não conectado para sessão ${session.whatsappId}`);
+            }
+          } catch (baileysError) {
+            console.error(`❌ Erro no Baileys:`, baileysError.message);
+          }
+        }
+        
+        // Se nenhuma biblioteca funcionou
+        if (!fileSent) {
+          console.error(`❌ Falha ao enviar arquivo via qualquer biblioteca disponível`);
+          console.error(`❌ Verifique se a sessão ${session.whatsappId} está realmente conectada`);
+          
+          // Atualizar status no banco se necessário
+          if (session.status === 'connected') {
+            await session.update({ status: 'disconnected' });
+            console.log(`🔄 Status da sessão ${session.whatsappId} atualizado para 'disconnected'`);
+            
+            // Emitir atualização via WebSocket
+            try {
+              emitToAll('session-status-update', { 
+                sessionId: session.id, 
+                status: 'disconnected' 
+              });
+            } catch (socketError) {
+              console.error('❌ Erro ao emitir status via WebSocket:', socketError);
+            }
+          }
+        }
+      }
+    }
 
     res.json(message);
   } catch (err) {

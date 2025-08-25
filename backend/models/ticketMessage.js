@@ -40,6 +40,11 @@ const TicketMessage = sequelize.define('TicketMessage', {
     type: DataTypes.STRING,
     allowNull: true,
   },
+  isQuickReply: {
+    type: DataTypes.BOOLEAN,
+    allowNull: true,
+    defaultValue: false,
+  },
 }, {
   tableName: 'ticket_messages',
   timestamps: true, // Habilita createdAt e updatedAt

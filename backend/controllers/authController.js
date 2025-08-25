@@ -2,7 +2,10 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { User } from '../models/index.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'supersecret';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.warn('[authController] WARNING: process.env.JWT_SECRET is not set. Tokens signed/verified may be inconsistent.');
+}
 
 export const register = async (req, res) => {
   const { name, email, password } = req.body;
@@ -24,7 +27,7 @@ export const login = async (req, res) => {
     if (!user) return res.status(400).json({ error: 'Usuário não encontrado.' });
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(400).json({ error: 'Senha inválida.' });
-    const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '1d' });
+  const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET || 'supersecret', { expiresIn: '1d' });
     res.json({ token, user: { id: user.id, name: user.name, email: user.email } });
   } catch (err) {
     res.status(500).json({ error: err.message });

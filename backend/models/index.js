@@ -10,6 +10,8 @@ import Integration from './integration.js';
 import IntegrationTicket from './integrationTicket.js';
 import IntegrationQueue from './integrationQueue.js';
 import Contact from './contact.js';
+import PushSubscription from './pushSubscription.js';
+import QuickReply from './quickReply.js';
 import messageReactionFactory from './messageReaction.js';
 
 // Definir associações
@@ -59,6 +61,10 @@ Ticket.belongsTo(Queue, { foreignKey: 'queueId' });
 User.hasMany(Ticket, { foreignKey: 'assignedUserId', as: 'AssignedTickets' });
 Ticket.belongsTo(User, { foreignKey: 'assignedUserId', as: 'AssignedUser' });
 
+// User <-> QuickReply
+User.hasMany(QuickReply, { foreignKey: 'userId', as: 'QuickReplies' });
+QuickReply.belongsTo(User, { foreignKey: 'userId', as: 'User' });
+
 const MessageReaction = messageReactionFactory(sequelize);
 
 // Chamar associate se existir
@@ -84,5 +90,7 @@ export {
   IntegrationTicket, 
   IntegrationQueue,
   Contact,
+  PushSubscription,
+  QuickReply,
   MessageReaction
 };

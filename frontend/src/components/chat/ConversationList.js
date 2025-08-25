@@ -4,7 +4,8 @@ import {
   AdjustmentsHorizontalIcon,
   ClockIcon,
   ChatBubbleLeftRightIcon,
-  CheckCircleIcon
+  CheckCircleIcon,
+  EyeIcon
 } from '@heroicons/react/24/outline';
 import { useSocket } from '../../context/SocketContext';
 
@@ -21,6 +22,10 @@ export default function ConversationList({
 }) {
   const { socket } = useSocket();
   const [activeTab, setActiveTab] = useState('waiting'); // 'waiting', 'accepted', 'resolved'
+  const [collapsed, setCollapsed] = useState(false); // mobile collapse
+  const [previewTicket, setPreviewTicket] = useState(null); // ticket sendo visualizado
+  const [previewMessages, setPreviewMessages] = useState([]); // mensagens do preview
+  const [loadingPreview, setLoadingPreview] = useState(false); // carregando preview
 
   // Atualização em tempo real quando um ticket é vinculado a uma fila
   useEffect(() => {
@@ -39,18 +44,22 @@ export default function ConversationList({
     };
   }, [socket, tickets]);
 
-  // Mudar automaticamente para a aba correta se o ticket selecionado mudar de status
+  // Mudar automaticamente para a aba correta apenas quando o ticket selecionado mudar
+  // Removemos `activeTab` das dependências para evitar que mudanças manuais do usuário
+  // (clicando nas tabs) sejam sobrescritas enquanto o ticket selecionado não mudou.
   useEffect(() => {
-    if (selectedTicket) {
-      if (selectedTicket.chatStatus === 'accepted' && activeTab !== 'accepted') {
-        setActiveTab('accepted');
-      } else if (selectedTicket.chatStatus === 'resolved' && activeTab !== 'resolved') {
-        setActiveTab('resolved');
-      } else if (selectedTicket.chatStatus === 'waiting' && activeTab !== 'waiting') {
-        setActiveTab('waiting');
-      }
+    if (!selectedTicket) return;
+
+    const status = selectedTicket.chatStatus;
+    if (status === 'accepted') {
+      setActiveTab('accepted');
+    } else if (status === 'resolved') {
+      setActiveTab('resolved');
+    } else {
+      // fallback para 'waiting' ou estados indefinidos
+      setActiveTab('waiting');
     }
-  }, [selectedTicket?.chatStatus, activeTab]);
+  }, [selectedTicket?.id, selectedTicket?.chatStatus]);
   const formatTime = (timestamp) => {
     const date = new Date(timestamp);
     const now = new Date();
@@ -128,6 +137,45 @@ export default function ConversationList({
   const resolvedTickets = filteredTickets.filter(ticket => ticket.chatStatus === 'resolved');
   const closedTickets = filteredTickets.filter(ticket => ticket.chatStatus === 'closed');
 
+  // Função para buscar preview das mensagens
+  const fetchPreviewMessages = async (ticketId) => {
+    try {
+      setLoadingPreview(true);
+      const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+      const token = localStorage.getItem('token');
+      
+  const response = await fetch(`${API_URL}/api/ticket-messages/${ticketId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (response.ok) {
+        const messages = await response.json();
+        setPreviewMessages(messages); // Mostrar todas as mensagens em ordem cronológica
+      } else {
+        setPreviewMessages([]);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar preview das mensagens:', error);
+      setPreviewMessages([]);
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  // Handler para abrir preview
+  const handlePreviewClick = async (ticket) => {
+    setPreviewTicket(ticket);
+    await fetchPreviewMessages(ticket.id);
+  };
+
+  // Fechar preview
+  const closePreview = () => {
+    setPreviewTicket(null);
+    setPreviewMessages([]);
+  };
+
   const renderTicket = (ticket, showQueueInfo = true, isWaiting = false) => {
     const isRecent = isRecentlyActive(ticket.updatedAt);
     const displayName = ticket.Contact?.name || ticket.Contact?.pushname || ticket.contact;
@@ -146,7 +194,7 @@ export default function ConversationList({
       <div
         key={ticket.id}
         onClick={() => onTicketSelect(ticket)}
-        className={`p-4 cursor-pointer border-b border-slate-700 hover:bg-slate-700 transition-colors ${
+        className={`px-3 py-2 sm:p-4 cursor-pointer border-b border-slate-700 hover:bg-slate-700 transition-colors touch-manipulation ${
           selectedTicket?.id === ticket.id 
             ? 'bg-slate-700 border-l-4 border-l-yellow-500' 
             : isRecent && isRealTime 
@@ -154,18 +202,26 @@ export default function ConversationList({
               : ''
         }`}
       >
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-2 sm:space-x-3">
           {/* Avatar */}
           <div className="relative">
-            <div className="w-12 h-12 rounded-full overflow-hidden flex items-center justify-center">
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full overflow-hidden flex items-center justify-center">
               {avatarUrl ? (
                 <img 
                   src={avatarUrl} 
                   alt={displayName}
                   className="w-full h-full object-cover"
                   onError={(e) => {
-                    e.target.style.display = 'none';
-                    e.target.nextSibling.style.display = 'flex';
+                    try {
+                      if (e && e.target) {
+                        if (e.target.style) e.target.style.display = 'none';
+                        if (e.target.nextSibling && e.target.nextSibling.style) {
+                          e.target.nextSibling.style.display = 'flex';
+                        }
+                      }
+                    } catch (err) {
+                      console.warn('onError image handler failed', err);
+                    }
                   }}
                 />
               ) : null}
@@ -178,10 +234,10 @@ export default function ConversationList({
             
             {/* Status indicators */}
             {isRecent && isRealTime && (
-              <div className="absolute -top-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-slate-800 animate-pulse"></div>
+              <div className="absolute -top-1 -right-1 w-3 h-3 sm:w-4 sm:h-4 bg-green-500 rounded-full border-2 border-slate-800 animate-pulse"></div>
             )}
             {ticket.unreadCount > 0 && (
-              <div className="absolute -bottom-1 -right-1 bg-yellow-500 text-slate-900 text-xs font-medium px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+              <div className="absolute -bottom-1 -right-1 bg-yellow-500 text-slate-900 text-[10px] sm:text-xs font-medium px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
                 {ticket.unreadCount > 99 ? '99+' : ticket.unreadCount}
               </div>
             )}
@@ -190,25 +246,25 @@ export default function ConversationList({
           {/* Content */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-2 flex-1 min-w-0">
                 <h3 className="text-white font-medium truncate">{displayName}</h3>
                 {showQueueInfo && (
                   <>
                     {ticket.priority && ticket.priority !== 'normal' && (
-                      <span className="text-xs">{getPriorityLabel(ticket.priority)}</span>
+                      <span className="text-xs flex-shrink-0">{getPriorityLabel(ticket.priority)}</span>
                     )}
                     {ticket.isBot && (
-                      <span className="bg-blue-500 text-white text-xs px-1.5 py-0.5 rounded-full">BOT</span>
+                      <span className="bg-blue-500 text-white text-xs px-1.5 py-0.5 rounded-full flex-shrink-0">BOT</span>
                     )}
                   </>
                 )}
               </div>
-              <div className="flex items-center space-x-2">
-                <span className="text-slate-400 text-xs">{formatTime(ticket.updatedAt)}</span>
+              <div className="flex items-center space-x-2 flex-shrink-0 ml-2">
+                <span className="text-slate-400 text-[11px] sm:text-xs whitespace-nowrap">{formatTime(ticket.updatedAt)}</span>
                 {isWaiting && onAcceptTicket && (
                   <button
                     onClick={handleAcceptClick}
-                    className="bg-green-600 hover:bg-green-700 text-white text-xs px-2 py-1 rounded transition-colors"
+                    className="bg-green-600 hover:bg-green-700 text-white text-xs px-2 py-1 rounded transition-colors flex-shrink-0"
                     title="Aceitar ticket"
                   >
                     Aceitar
@@ -219,28 +275,51 @@ export default function ConversationList({
             
             {/* Queue and status info */}
             {showQueueInfo && (
-              <div className="flex items-center space-x-2 mb-1">
+              <div className="flex items-center space-x-2 mb-1 overflow-hidden">
                 {ticket.Queue ? (
-                  <span className="bg-purple-600 text-white text-xs px-2 py-0.5 rounded-full">
+                  <span className="bg-purple-600 text-white text-xs px-2 py-0.5 rounded-full flex-shrink-0">
                     {ticket.Queue.name}
                   </span>
                 ) : (
-                  <span className="bg-gray-600 text-white text-xs px-2 py-0.5 rounded-full">
+                  <span className="bg-gray-600 text-white text-xs px-2 py-0.5 rounded-full flex-shrink-0">
                     Sem fila
                   </span>
                 )}
                 
                 {ticket.assignedUserId && ticket.AssignedUser && (
-                  <span className="bg-green-600 text-white text-xs px-2 py-0.5 rounded-full">
+                  <span className="bg-green-600 text-white text-xs px-2 py-0.5 rounded-full flex-shrink-0 truncate">
                     {ticket.AssignedUser.name}
                   </span>
                 )}
               </div>
             )}
             
-            <p className="text-slate-400 text-sm truncate">
-              {ticket.lastMessage || 'Nenhuma mensagem ainda'}
-            </p>
+            <div className="relative group">
+              <p className="text-slate-400 text-sm truncate pr-16">
+                {ticket.lastMessage || 'Nenhuma mensagem ainda'}
+              </p>
+              
+              {/* Tooltip com mensagem completa */}
+              {ticket.lastMessage && ticket.lastMessage.length > 50 && (
+                <div className="absolute bottom-full left-0 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20 max-w-xs break-words pointer-events-none">
+                  {ticket.lastMessage}
+                  <div className="absolute top-full left-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-slate-900"></div>
+                </div>
+              )}
+              
+              {/* Botão espiar conversa - sempre visível */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handlePreviewClick(ticket);
+                }}
+                className="absolute right-0 top-0 bg-slate-600 hover:bg-slate-500 text-white text-xs px-2 py-1 rounded flex-shrink-0 flex items-center space-x-1 transition-colors"
+                title="Espiar conversa"
+              >
+                <EyeIcon className="w-3 h-3" />
+                <span className="hidden sm:inline">Espiar</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -248,27 +327,37 @@ export default function ConversationList({
   };
 
   return (
-    <div className="w-80 bg-slate-800 flex flex-col border-r border-slate-700">
+    <div className="w-full sm:w-80 bg-slate-800 flex flex-col border-r border-slate-700 h-full">
       {/* Header */}
-      <div className="p-4 border-b border-slate-700">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center">
-            <h1 className="text-white text-xl font-semibold">Atendimentos</h1>
+      <div className="p-3 sm:p-4 border-b border-slate-700 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <button
+            className="sm:hidden p-2 rounded-md bg-slate-700 text-slate-200"
+            onClick={() => setCollapsed(!collapsed)}
+            aria-expanded={!collapsed}
+            aria-controls="conversation-list"
+          >
+            {collapsed ? 'Abrir' : 'Fechar'}
+          </button>
+          <div>
+            <h1 className="text-white text-lg sm:text-xl font-semibold">Atendimentos</h1>
             {unreadCount > 0 && (
-              <div className="ml-2 bg-yellow-500 text-slate-900 text-xs font-medium px-2 py-1 rounded-full">
+              <div className="mt-1 bg-yellow-500 text-slate-900 text-xs font-medium px-2 py-0.5 rounded-full inline-block">
                 {unreadCount}
               </div>
             )}
           </div>
-          <div className="flex items-center space-x-2">
-            <div className="flex items-center text-green-400 text-sm">
-              <div className="w-2 h-2 bg-green-400 rounded-full mr-2 animate-pulse"></div>
-              Online
-            </div>
+        </div>
+        <div className="hidden sm:flex items-center space-x-2">
+          <div className="flex items-center text-green-400 text-sm">
+            <div className="w-2 h-2 bg-green-400 rounded-full mr-2 animate-pulse"></div>
+            Online
           </div>
         </div>
+      </div>
 
-        {/* Search Bar */}
+      {/* Search Bar */}
+      <div className="p-3 border-b border-slate-700">
         <div className="relative">
           <MagnifyingGlassIcon className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
           <input
@@ -283,10 +372,71 @@ export default function ConversationList({
 
       {/* Tabs Navigation */}
       <div className="border-b border-slate-700">
-        <div className="flex">
+        {/* Versão com ícones (mais compacta) */}
+        <div className="flex sm:hidden">
           <button
             onClick={() => setActiveTab('waiting')}
-            className={`flex-1 px-4 py-3 text-sm font-medium flex items-center justify-center space-x-2 transition-colors ${
+            className={`flex-1 px-2 py-3 flex flex-col items-center justify-center space-y-1 transition-colors ${
+              activeTab === 'waiting'
+                ? 'text-yellow-400 border-b-2 border-yellow-400 bg-slate-700'
+                : 'text-slate-400 hover:text-white hover:bg-slate-700'
+            }`}
+          >
+            <div className="relative">
+              <ClockIcon className="w-5 h-5" />
+              {waitingTickets.length > 0 && (
+                <div className="absolute -top-1 -right-1 bg-yellow-500 text-slate-900 text-[10px] font-bold px-1 rounded-full min-w-[16px] text-center">
+                  {waitingTickets.length > 9 ? '9+' : waitingTickets.length}
+                </div>
+              )}
+            </div>
+            <span className="text-[10px] font-medium">Aguard.</span>
+          </button>
+          
+          <button
+            onClick={() => setActiveTab('accepted')}
+            className={`flex-1 px-2 py-3 flex flex-col items-center justify-center space-y-1 transition-colors ${
+              activeTab === 'accepted'
+                ? 'text-green-400 border-b-2 border-green-400 bg-slate-700'
+                : 'text-slate-400 hover:text-white hover:bg-slate-700'
+            }`}
+          >
+            <div className="relative">
+              <ChatBubbleLeftRightIcon className="w-5 h-5" />
+              {acceptedTickets.length > 0 && (
+                <div className="absolute -top-1 -right-1 bg-green-500 text-white text-[10px] font-bold px-1 rounded-full min-w-[16px] text-center">
+                  {acceptedTickets.length > 9 ? '9+' : acceptedTickets.length}
+                </div>
+              )}
+            </div>
+            <span className="text-[10px] font-medium">Atend.</span>
+          </button>
+          
+          <button
+            onClick={() => setActiveTab('resolved')}
+            className={`flex-1 px-2 py-3 flex flex-col items-center justify-center space-y-1 transition-colors ${
+              activeTab === 'resolved'
+                ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-700'
+                : 'text-slate-400 hover:text-white hover:bg-slate-700'
+            }`}
+          >
+            <div className="relative">
+              <CheckCircleIcon className="w-5 h-5" />
+              {resolvedTickets.length > 0 && (
+                <div className="absolute -top-1 -right-1 bg-blue-500 text-white text-[10px] font-bold px-1 rounded-full min-w-[16px] text-center">
+                  {resolvedTickets.length > 9 ? '9+' : resolvedTickets.length}
+                </div>
+              )}
+            </div>
+            <span className="text-[10px] font-medium">Resolv.</span>
+          </button>
+        </div>
+
+        {/* Versão com texto (desktop) */}
+        <div className="hidden sm:flex">
+          <button
+            onClick={() => setActiveTab('waiting')}
+            className={`flex-1 px-3 py-3 text-sm font-medium flex items-center justify-center space-x-2 transition-colors ${
               activeTab === 'waiting'
                 ? 'text-yellow-400 border-b-2 border-yellow-400 bg-slate-700'
                 : 'text-slate-400 hover:text-white hover:bg-slate-700'
@@ -303,14 +453,14 @@ export default function ConversationList({
           
           <button
             onClick={() => setActiveTab('accepted')}
-            className={`flex-1 px-4 py-3 text-sm font-medium flex items-center justify-center space-x-2 transition-colors ${
+            className={`flex-1 px-3 py-3 text-sm font-medium flex items-center justify-center space-x-2 transition-colors ${
               activeTab === 'accepted'
                 ? 'text-green-400 border-b-2 border-green-400 bg-slate-700'
                 : 'text-slate-400 hover:text-white hover:bg-slate-700'
             }`}
           >
             <ChatBubbleLeftRightIcon className="w-4 h-4" />
-            <span>Em Atendimento</span>
+            <span>Atendimento</span>
             {acceptedTickets.length > 0 && (
               <div className="bg-green-500 text-white text-xs font-medium px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
                 {acceptedTickets.length}
@@ -320,7 +470,7 @@ export default function ConversationList({
           
           <button
             onClick={() => setActiveTab('resolved')}
-            className={`flex-1 px-4 py-3 text-sm font-medium flex items-center justify-center space-x-2 transition-colors ${
+            className={`flex-1 px-3 py-3 text-sm font-medium flex items-center justify-center space-x-2 transition-colors ${
               activeTab === 'resolved'
                 ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-700'
                 : 'text-slate-400 hover:text-white hover:bg-slate-700'
@@ -337,11 +487,11 @@ export default function ConversationList({
         </div>
       </div>
 
-      {/* Tab Content */}
-      <div className="flex-1 overflow-y-auto">
+  {/* Tab Content */}
+  <div id="conversation-list" className={`${collapsed ? 'hidden' : 'flex'} flex-1 flex-col overflow-hidden` }>
         {/* Aguardando Tab */}
         {activeTab === 'waiting' && (
-          <div>
+          <div className="flex-1 overflow-y-auto">
             {waitingTickets.length > 0 ? (
               <>
                 <div className="px-4 py-3 bg-slate-750 border-b border-slate-700">
@@ -373,7 +523,7 @@ export default function ConversationList({
 
         {/* Em Atendimento Tab */}
         {activeTab === 'accepted' && (
-          <div>
+          <div className="flex-1 overflow-y-auto">
             {acceptedTickets.length > 0 ? (
               <>
                 <div className="px-4 py-3 bg-slate-750 border-b border-slate-700">
@@ -397,7 +547,7 @@ export default function ConversationList({
 
         {/* Resolvidos Tab */}
         {activeTab === 'resolved' && (
-          <div>
+          <div className="flex-1 overflow-y-auto">
             {resolvedTickets.length > 0 ? (
               <>
                 <div className="px-4 py-3 bg-slate-750 border-b border-slate-700">
@@ -419,6 +569,112 @@ export default function ConversationList({
           </div>
         )}
       </div>
+
+      {/* Modal de Preview */}
+      {previewTicket && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
+          <div className="bg-slate-800 rounded-lg shadow-xl max-w-lg w-full max-h-[95vh] overflow-hidden">
+            {/* Header do Modal */}
+            <div className="p-3 sm:p-4 border-b border-slate-700 flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center">
+                  {previewTicket.Contact?.profilePicUrl ? (
+                    <img 
+                      src={previewTicket.Contact.profilePicUrl} 
+                      alt="Avatar"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className={`w-full h-full flex items-center justify-center text-white text-xs font-medium ${getRandomAvatarColor(previewTicket.Contact?.name || previewTicket.contact)}`}>
+                      {getAvatarInitials(previewTicket.Contact?.name || previewTicket.contact)}
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-white font-medium text-sm truncate">
+                    {previewTicket.Contact?.name || previewTicket.Contact?.pushname || previewTicket.contact}
+                  </h3>
+                  <p className="text-slate-400 text-xs">
+                    Histórico Completo • {previewMessages.length} mensagens
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={closePreview}
+                className="text-slate-400 hover:text-white text-xl leading-none p-1"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Conteúdo das Mensagens */}
+            <div className="flex-1 max-h-[70vh] overflow-y-auto bg-slate-900">
+              {loadingPreview ? (
+                <div className="flex justify-center items-center py-12">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500"></div>
+                  <span className="ml-3 text-slate-400">Carregando histórico...</span>
+                </div>
+              ) : previewMessages.length > 0 ? (
+                <div className="p-4 space-y-4">
+                  {previewMessages.map((message, index) => (
+                    <div key={index} className={`flex ${message.fromMe ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[80%] px-4 py-3 rounded-lg text-sm ${
+                        message.fromMe 
+                          ? 'bg-green-600 text-white rounded-br-sm' 
+                          : 'bg-slate-700 text-slate-100 rounded-bl-sm'
+                      }`}>
+                        <p className="break-words leading-relaxed">
+                          {message.body || message.content || 'Mensagem sem conteúdo'}
+                        </p>
+                        <div className="flex items-center justify-between mt-2 pt-1">
+                          <p className={`text-xs ${message.fromMe ? 'text-green-200' : 'text-slate-400'}`}>
+                            {new Date(message.createdAt).toLocaleString('pt-BR', { 
+                              day: '2-digit',
+                              month: '2-digit',
+                              year: '2-digit',
+                              hour: '2-digit', 
+                              minute: '2-digit' 
+                            })}
+                          </p>
+                          {message.fromMe && (
+                            <span className="text-xs text-green-200 ml-2">
+                              {message.ack === 3 ? '✓✓' : message.ack === 2 ? '✓✓' : message.ack === 1 ? '✓' : '⏳'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <div className="text-slate-500 mb-2">💬</div>
+                  <p className="text-slate-400 text-sm">Nenhuma mensagem encontrada nesta conversa</p>
+                </div>
+              )}
+            </div>
+
+            {/* Footer do Modal */}
+            <div className="p-3 sm:p-4 border-t border-slate-700 flex justify-between gap-3">
+              <button
+                onClick={closePreview}
+                className="flex-1 px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white text-sm rounded transition-colors"
+              >
+                Fechar
+              </button>
+              <button
+                onClick={() => {
+                  closePreview();
+                  onTicketSelect(previewTicket);
+                }}
+                className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded transition-colors font-medium"
+              >
+                Abrir Conversa
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -19,6 +19,8 @@ import integrationRoutes from './routes/integrationRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
 import sessionRoutes from './routes/sessionRoutes.js';
 import contactRoutes from './routes/contactRoutes.js';
+import pushRoutes from './routes/pushRoutes.js';
+import quickReplyRoutes from './routes/quickReplyRoutes.js';
 import path from 'path';
 
 dotenv.config();
@@ -76,10 +78,12 @@ app.use('/api/ticket-comments', ticketCommentRoutes);
 app.use('/api/ticket-status', ticketStatusRoutes);
 app.use('/api/ticket-messages', ticketMessageRoutes);
 app.use('/api/ticket-messages', ticketMessageFileRoutes);
+app.use('/api/quick-replies', quickReplyRoutes);
 app.use('/api/integrations', integrationRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/contacts', contactRoutes);
+app.use('/api/push', pushRoutes);
 
 app.get('/', (req, res) => {
   res.send('Zazap Backend API');
