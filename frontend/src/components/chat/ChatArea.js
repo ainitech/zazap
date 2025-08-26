@@ -6,6 +6,7 @@ import io from 'socket.io-client';
 import TransferModal from './TransferModal';
 import { FileText } from 'lucide-react';
 import PriorityModal from './PriorityModal';
+import TagSelector from '../TagSelector';
 import { 
   ChatBubbleBottomCenterTextIcon,
   EllipsisVerticalIcon,
@@ -189,6 +190,9 @@ export default function ChatArea({
   const [qrQuery, setQrQuery] = useState('');
   const [qrLoading, setQrLoading] = useState(false);
   const qrRef = useRef(null);
+  
+  // Tags state
+  const [ticketTags, setTicketTags] = useState([]);
 
   // Reações disponíveis
   const availableReactions = ['👍', '❤️', '😂', '😮', '😢', '😡', '👏', '🙏'];
@@ -247,6 +251,45 @@ export default function ChatArea({
       setContactInfo(null);
     }
   }, [selectedTicket?.contactId, selectedTicket?.Contact]);
+
+  // Load ticket tags when ticket changes
+  useEffect(() => {
+    if (selectedTicket?.id) {
+      // If ticket already has tags, use them
+      if (selectedTicket.tags) {
+        setTicketTags(selectedTicket.tags);
+      } else {
+        // Otherwise fetch tags
+        fetchTicketTags();
+      }
+    } else {
+      setTicketTags([]);
+    }
+  }, [selectedTicket?.id, selectedTicket?.tags]);
+
+  const fetchTicketTags = async () => {
+    if (!selectedTicket?.id) return;
+    
+    try {
+      const response = await fetch(`${API_URL}/api/tags/ticket/${selectedTicket.id}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        const tags = data.map(item => item.tag).filter(Boolean);
+        setTicketTags(tags);
+      }
+    } catch (error) {
+      console.error('Error fetching ticket tags:', error);
+    }
+  };
+
+  const handleTagsChange = (newTags) => {
+    setTicketTags(newTags);
+  };
 
   const fetchContactInfo = async () => {
     if (!selectedTicket?.contactId) return;
@@ -1395,6 +1438,19 @@ return (
                     </button>
                 </div>
             </div>
+            
+            {/* Tags Section */}
+            {selectedTicket?.id && (
+                <div className="mt-3 pt-3 border-t border-slate-600/30">
+                    <TagSelector
+                        ticketId={selectedTicket.id}
+                        selectedTags={ticketTags}
+                        onTagsChange={handleTagsChange}
+                        compact={true}
+                        className="flex-wrap"
+                    />
+                </div>
+            )}
         </div>
 
         {/* Messages Area */}

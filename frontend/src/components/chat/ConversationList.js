@@ -5,9 +5,23 @@ import {
   ClockIcon,
   ChatBubbleLeftRightIcon,
   CheckCircleIcon,
-  EyeIcon
+  EyeIcon,
+  TagIcon
 } from '@heroicons/react/24/outline';
 import { useSocket } from '../../context/SocketContext';
+
+const predefinedColors = [
+  { name: 'Azul', value: 'bg-blue-500', text: 'text-blue-400', bg: 'bg-blue-900/20', border: 'border-blue-500/30' },
+  { name: 'Verde', value: 'bg-green-500', text: 'text-green-400', bg: 'bg-green-900/20', border: 'border-green-500/30' },
+  { name: 'Amarelo', value: 'bg-yellow-500', text: 'text-yellow-400', bg: 'bg-yellow-900/20', border: 'border-yellow-500/30' },
+  { name: 'Vermelho', value: 'bg-red-500', text: 'text-red-400', bg: 'bg-red-900/20', border: 'border-red-500/30' },
+  { name: 'Roxo', value: 'bg-purple-500', text: 'text-purple-400', bg: 'bg-purple-900/20', border: 'border-purple-500/30' },
+  { name: 'Rosa', value: 'bg-pink-500', text: 'text-pink-400', bg: 'bg-pink-900/20', border: 'border-pink-500/30' },
+  { name: 'Laranja', value: 'bg-orange-500', text: 'text-orange-400', bg: 'bg-orange-900/20', border: 'border-orange-500/30' },
+  { name: 'Cinza', value: 'bg-gray-500', text: 'text-gray-400', bg: 'bg-gray-900/20', border: 'border-gray-500/30' },
+  { name: 'Índigo', value: 'bg-indigo-500', text: 'text-indigo-400', bg: 'bg-indigo-900/20', border: 'border-indigo-500/30' },
+  { name: 'Teal', value: 'bg-teal-500', text: 'text-teal-400', bg: 'bg-teal-900/20', border: 'border-teal-500/30' }
+];
 
 export default function ConversationList({ 
   tickets, 
@@ -91,6 +105,11 @@ export default function ConversationList({
       hash = name.charCodeAt(i) + ((hash << 5) - hash);
     }
     return colors[Math.abs(hash) % colors.length];
+  };
+
+  const getColorClasses = (color) => {
+    const colorMap = predefinedColors.find(c => c.value === color);
+    return colorMap || predefinedColors[0];
   };
 
   const getPriorityColor = (priority) => {
@@ -289,6 +308,29 @@ export default function ConversationList({
                 {ticket.assignedUserId && ticket.AssignedUser && (
                   <span className="bg-green-600 text-white text-xs px-2 py-0.5 rounded-full flex-shrink-0 truncate">
                     {ticket.AssignedUser.name}
+                  </span>
+                )}
+              </div>
+            )}
+            
+            {/* Tags */}
+            {ticket.tags && ticket.tags.length > 0 && (
+              <div className="flex items-center gap-1 mb-1 flex-wrap">
+                {ticket.tags.slice(0, 3).map(tag => {
+                  const colorClasses = getColorClasses(tag.color);
+                  return (
+                    <div
+                      key={tag.id}
+                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${colorClasses.text} ${colorClasses.bg} border ${colorClasses.border}`}
+                    >
+                      <TagIcon className="w-2.5 h-2.5" />
+                      {tag.name}
+                    </div>
+                  );
+                })}
+                {ticket.tags.length > 3 && (
+                  <span className="text-slate-400 text-[10px] font-medium px-1">
+                    +{ticket.tags.length - 3}
                   </span>
                 )}
               </div>

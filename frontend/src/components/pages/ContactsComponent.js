@@ -11,8 +11,7 @@ import {
   XMarkIcon,
   TrashIcon
 } from '@heroicons/react/24/outline';
-
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+import { apiFetch, safeJson, API_BASE_URL } from '../../utils/apiClient';
 
 export default function ContactsComponent() {
   const navigate = useNavigate();
@@ -23,13 +22,16 @@ export default function ContactsComponent() {
   const [showNewContactModal, setShowNewContactModal] = useState(false);
   const [newContact, setNewContact] = useState({ name: '', number: '' });
   const [deletingContact, setDeletingContact] = useState(null);
+  const [sessions, setSessions] = useState([]);
+  const [selectedSessionId, setSelectedSessionId] = useState('');
 
   useEffect(() => {
     fetchContacts();
+    loadSessions();
     
     // Conectar ao WebSocket
     if (!socketRef.current) {
-      socketRef.current = io(API_URL, {
+      socketRef.current = io(API_BASE_URL, {
         auth: {
           token: localStorage.getItem('token')
         }
@@ -66,6 +68,22 @@ export default function ContactsComponent() {
     };
   }, []);
 
+  const loadSessions = async () => {
+    try {
+      const res = await apiFetch('/api/sessions');
+      const all = await safeJson(res);
+      // Prefer only active sessions; fallback to all if none
+      const active = all.filter(s => (s.currentStatus || s.status) === 'connected');
+      const list = active.length ? active : all;
+      setSessions(list);
+      if (list.length && !selectedSessionId) {
+        setSelectedSessionId(String(list[0].id));
+      }
+    } catch (e) {
+      console.error('Erro ao carregar sessões:', e);
+    }
+  };
+
   const updateContactInList = (updatedContact) => {
     setContacts(prevContacts => 
       prevContacts.map(contact => {
@@ -86,55 +104,48 @@ export default function ContactsComponent() {
   const fetchContacts = async () => {
     try {
       // Buscar tickets com dados dos contatos incluídos
-      const response = await fetch(`${API_URL}/api/tickets`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      
-      if (response.ok) {
-        const tickets = await response.json();
-        
-        // Extrair contatos únicos dos tickets com dados mais completos
-        const uniqueContacts = tickets.reduce((acc, ticket) => {
-          const contactNumber = ticket.Contact?.formattedNumber || ticket.contact;
-          const contactName = ticket.Contact?.name || ticket.Contact?.pushname || contactNumber;
-          const contactId = ticket.Contact?.id || ticket.contactId;
-          const profilePicUrl = ticket.Contact?.profilePicUrl;
-          
-          const existingContact = acc.find(c => c.number === contactNumber);
-          if (!existingContact) {
-            acc.push({
-              id: ticket.id,
-              contactId: contactId,
-              name: contactName,
-              number: contactNumber,
-              profilePicUrl: profilePicUrl,
-              lastMessage: ticket.lastMessage,
-              lastContact: ticket.updatedAt,
-              ticketCount: 1,
-              status: ticket.status
-            });
-          } else {
-            existingContact.ticketCount++;
-            if (new Date(ticket.updatedAt) > new Date(existingContact.lastContact)) {
-              existingContact.lastMessage = ticket.lastMessage;
-              existingContact.lastContact = ticket.updatedAt;
-              // Atualizar dados do contato se disponíveis
-              if (contactId && !existingContact.contactId) {
-                existingContact.contactId = contactId;
-                existingContact.name = contactName;
-                existingContact.profilePicUrl = profilePicUrl;
-              }
+      const res = await apiFetch('/api/tickets');
+      const tickets = await safeJson(res);
+
+      // Extrair contatos únicos dos tickets com dados mais completos
+      const uniqueContacts = tickets.reduce((acc, ticket) => {
+        const contactNumber = ticket.Contact?.formattedNumber || ticket.contact;
+        const contactName = ticket.Contact?.name || ticket.Contact?.pushname || contactNumber;
+        const contactId = ticket.Contact?.id || ticket.contactId;
+        const profilePicUrl = ticket.Contact?.profilePicUrl;
+
+        const existingContact = acc.find(c => c.number === contactNumber);
+        if (!existingContact) {
+          acc.push({
+            id: ticket.id,
+            contactId: contactId,
+            name: contactName,
+            number: contactNumber,
+            profilePicUrl: profilePicUrl,
+            lastMessage: ticket.lastMessage,
+            lastContact: ticket.updatedAt,
+            ticketCount: 1,
+            status: ticket.status
+          });
+        } else {
+          existingContact.ticketCount++;
+          if (new Date(ticket.updatedAt) > new Date(existingContact.lastContact)) {
+            existingContact.lastMessage = ticket.lastMessage;
+            existingContact.lastContact = ticket.updatedAt;
+            // Atualizar dados do contato se disponíveis
+            if (contactId && !existingContact.contactId) {
+              existingContact.contactId = contactId;
+              existingContact.name = contactName;
+              existingContact.profilePicUrl = profilePicUrl;
             }
           }
-          return acc;
-        }, []);
-        
-        // Ordenar por último contato
-        uniqueContacts.sort((a, b) => new Date(b.lastContact) - new Date(a.lastContact));
-        setContacts(uniqueContacts);
-      }
+        }
+        return acc;
+      }, []);
+
+      // Ordenar por último contato
+      uniqueContacts.sort((a, b) => new Date(b.lastContact) - new Date(a.lastContact));
+      setContacts(uniqueContacts);
     } catch (error) {
       console.error('Erro ao buscar contatos:', error);
     } finally {
@@ -186,27 +197,29 @@ export default function ContactsComponent() {
       alert('Por favor, preencha nome e número do contato');
       return;
     }
+    if (!selectedSessionId) {
+      alert('Selecione uma sessão para vincular o contato');
+      return;
+    }
 
     try {
-      const response = await fetch(`${API_URL}/api/tickets`, {
+      const res = await apiFetch('/api/tickets', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contact_name: newContact.name,
           contact_number: newContact.number,
+          sessionId: Number(selectedSessionId),
           status: 'open'
         })
       });
-
-      if (response.ok) {
+      if (res.ok) {
         setNewContact({ name: '', number: '' });
         setShowNewContactModal(false);
         fetchContacts(); // Recarregar contatos
       } else {
-        alert('Erro ao criar contato');
+        const err = await res.text();
+        alert(`Erro ao criar contato: ${err}`);
       }
     } catch (error) {
       console.error('Erro ao criar contato:', error);
@@ -415,6 +428,23 @@ export default function ContactsComponent() {
             </div>
             
             <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Sessão
+                </label>
+                <select
+                  value={selectedSessionId}
+                  onChange={(e) => setSelectedSessionId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 text-white"
+                >
+                  <option value="">Selecione uma sessão</option>
+                  {sessions.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.whatsappId} {((s.currentStatus || s.status) === 'connected') ? '(ativa)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">
                   Nome

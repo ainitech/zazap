@@ -690,6 +690,20 @@ router.get('/active', authenticateToken, async (req, res) => {
   }
 });
 
+// GET /api/sessions - Listar todas as sessões
+router.get('/', authenticateToken, async (req, res) => {
+  try {
+    const sessions = await Session.findAll({
+      attributes: ['id', 'whatsappId', 'status', 'library'],
+      order: [['createdAt', 'DESC']]
+    });
+    res.json({ sessions });
+  } catch (error) {
+    console.error('Erro ao buscar sessões:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
 // GET /api/sessions/status - Verificar status de todas as sessões
 router.get('/status', authenticateToken, getSessionsStatus);
 

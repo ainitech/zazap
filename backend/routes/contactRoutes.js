@@ -8,6 +8,64 @@ import { emitToAll } from '../services/socket.js';
 
 const router = express.Router();
 
+// GET /api/contacts - Listar contatos (com busca e filtros opcionais)
+router.get('/', authenticateToken, async (req, res) => {
+  try {
+  const { search = '', sessionId, limit = 50 } = req.query;
+    const includeGroups = (req.query.includeGroups === 'true' || req.query.includeGroups === true);
+
+    const andConds = [];
+
+    // Garantir que sessionId seja número, quando fornecido
+    if (sessionId) {
+      const sid = parseInt(sessionId, 10);
+      if (!Number.isNaN(sid)) {
+        andConds.push({ sessionId: sid });
+      }
+    }
+
+    // Por padrão NÃO incluir grupos; considerar isGroup null como contato (não grupo)
+    if (!includeGroups) {
+      andConds.push({ [Op.or]: [{ isGroup: false }, { isGroup: null }] });
+    }
+
+    if (search) {
+      const like = `%${search}%`;
+      andConds.push({
+        [Op.or]: [
+          { name: { [Op.iLike]: like } },
+          { pushname: { [Op.iLike]: like } },
+          { whatsappId: { [Op.iLike]: like } },
+          { formattedNumber: { [Op.iLike]: like } }
+        ]
+      });
+    }
+
+    const where = andConds.length ? { [Op.and]: andConds } : undefined;
+
+    // Compute limit: support limit=all to return all rows
+    let finalLimit = undefined;
+    if (!(String(limit).toLowerCase() === 'all')) {
+      const n = parseInt(limit) || 50;
+      finalLimit = Math.min(n, 500);
+    }
+
+    const contacts = await Contact.findAll({
+      where,
+      order: [
+        ['updatedAt', 'DESC'],
+        ['name', 'ASC']
+      ],
+      ...(finalLimit ? { limit: finalLimit } : {})
+    });
+
+    res.json(contacts);
+  } catch (error) {
+    console.error('Erro ao listar contatos:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/contacts/:ticketId/info - Buscar informações do contato
 router.get('/:ticketId/info', authenticateToken, async (req, res) => {
   try {

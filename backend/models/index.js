@@ -13,6 +13,11 @@ import Contact from './contact.js';
 import PushSubscription from './pushSubscription.js';
 import QuickReply from './quickReply.js';
 import messageReactionFactory from './messageReaction.js';
+import Schedule from './schedule.js';
+import Tag from './tag.js';
+import TicketTag from './ticketTag.js';
+import Campaign from './campaign.js';
+import CampaignMessage from './campaignMessage.js';
 
 // Definir associações
 User.hasMany(Session, { foreignKey: 'userId' });
@@ -67,6 +72,41 @@ QuickReply.belongsTo(User, { foreignKey: 'userId', as: 'User' });
 
 const MessageReaction = messageReactionFactory(sequelize);
 
+// Schedule associations
+User.hasMany(Schedule, { foreignKey: 'userId' });
+Schedule.belongsTo(User, { foreignKey: 'userId' });
+Session.hasMany(Schedule, { foreignKey: 'sessionId' });
+Schedule.belongsTo(Session, { foreignKey: 'sessionId' });
+Contact.hasMany(Schedule, { foreignKey: 'contactId' });
+Schedule.belongsTo(Contact, { foreignKey: 'contactId' });
+Queue.hasMany(Schedule, { foreignKey: 'queueId' });
+Schedule.belongsTo(Queue, { foreignKey: 'queueId' });
+
+// Tag associations
+User.hasMany(Tag, { foreignKey: 'createdBy', as: 'createdTags' });
+Tag.belongsTo(User, { foreignKey: 'createdBy', as: 'creator' });
+
+// Ticket <-> Tag (many-to-many)
+Ticket.belongsToMany(Tag, { through: TicketTag, foreignKey: 'ticketId', as: 'tags' });
+Tag.belongsToMany(Ticket, { through: TicketTag, foreignKey: 'tagId', as: 'tickets' });
+
+// TicketTag associations
+TicketTag.belongsTo(Ticket, { foreignKey: 'ticketId', as: 'ticket' });
+TicketTag.belongsTo(Tag, { foreignKey: 'tagId', as: 'tag' });
+TicketTag.belongsTo(User, { foreignKey: 'addedBy', as: 'addedByUser' });
+
+// Campaign associations
+User.hasMany(Campaign, { foreignKey: 'createdBy', as: 'campaigns' });
+Campaign.belongsTo(User, { foreignKey: 'createdBy', as: 'creator' });
+Session.hasMany(Campaign, { foreignKey: 'sessionId', as: 'campaigns' });
+Campaign.belongsTo(Session, { foreignKey: 'sessionId', as: 'session' });
+
+// Campaign <-> CampaignMessage
+Campaign.hasMany(CampaignMessage, { foreignKey: 'campaignId', as: 'messages' });
+CampaignMessage.belongsTo(Campaign, { foreignKey: 'campaignId', as: 'campaign' });
+Contact.hasMany(CampaignMessage, { foreignKey: 'contactId', as: 'campaignMessages' });
+CampaignMessage.belongsTo(Contact, { foreignKey: 'contactId', as: 'contact' });
+
 // Chamar associate se existir
 if (typeof TicketMessage.associate === 'function') TicketMessage.associate({
   Ticket,
@@ -92,5 +132,10 @@ export {
   Contact,
   PushSubscription,
   QuickReply,
-  MessageReaction
+  MessageReaction,
+  Schedule,
+  Tag,
+  TicketTag,
+  Campaign,
+  CampaignMessage
 };

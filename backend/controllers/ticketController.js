@@ -1,4 +1,4 @@
-import { Ticket, Queue, Contact, User, TicketMessage, TicketComment, MessageReaction } from '../models/index.js';
+import { Ticket, Queue, Contact, User, TicketMessage, TicketComment, MessageReaction, Tag, TicketTag } from '../models/index.js';
 import { Op } from 'sequelize';
 import { emitToAll } from '../services/socket.js';
 import fs from 'fs';
@@ -21,6 +21,12 @@ const emitTicketsUpdate = async () => {
           model: User,
           as: 'AssignedUser',
           required: false // LEFT JOIN para incluir tickets sem usuário atribuído
+        },
+        {
+          model: Tag,
+          as: 'tags',
+          through: { attributes: ['addedAt'] },
+          required: false // LEFT JOIN para incluir tickets sem tags
         }
       ],
       order: [['updatedAt', 'DESC']]
@@ -77,6 +83,12 @@ export const listTickets = async (req, res) => {
           model: User,
           as: 'AssignedUser',
           required: false // LEFT JOIN para incluir tickets sem usuário atribuído
+        },
+        {
+          model: Tag,
+          as: 'tags',
+          through: { attributes: ['addedAt'] },
+          required: false // LEFT JOIN para incluir tickets sem tags
         }
       ],
       order: [['updatedAt', 'DESC']], // Ordenar por updatedAt para mostrar mais recentes primeiro
@@ -551,6 +563,73 @@ export const permanentDeleteTicket = async (req, res) => {
     
   } catch (err) {
     console.error('❌ Erro ao deletar ticket permanentemente:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Criar ticket (endereço: POST /api/tickets)
+export const createTicket = async (req, res) => {
+  try {
+    const { contact_name, contact_number, sessionId, queueId, status } = req.body;
+
+    if (!contact_number) {
+      return res.status(400).json({ error: 'contact_number é obrigatório' });
+    }
+
+  // sessionId is optional now: if provided we'll validate and create/find Contact,
+  // otherwise we'll create a ticket without contactId (no contact record created).
+
+    // Normalizar whatsappId (garantir formato esperado)
+    const whatsappId = contact_number.includes('@') ? contact_number : `${contact_number}@c.us`;
+
+    let contact = null;
+    if (sessionId) {
+      // Validar sessão
+      const sessionExists = await (await import('../models/index.js')).Session.findByPk(sessionId);
+      if (!sessionExists) {
+        return res.status(400).json({ error: `sessionId ${sessionId} não encontrado` });
+      }
+
+      // Tentar encontrar contato existente pela sessionId + whatsappId
+      const contactWhere = { whatsappId, sessionId };
+      contact = await Contact.findOne({ where: contactWhere });
+
+      if (!contact) {
+        contact = await Contact.create({
+          whatsappId,
+          sessionId,
+          name: contact_name || null,
+          pushname: contact_name || null,
+          formattedNumber: contact_number
+        });
+      }
+    }
+
+    // Criar ticket
+    const ticket = await Ticket.create({
+      sessionId: sessionId || null,
+      contactId: contact ? contact.id : null,
+      queueId: queueId || null,
+      contact: whatsappId,
+      status: status || 'open',
+      chatStatus: 'waiting'
+    });
+
+    // Buscar ticket com associações para retorno
+    const created = await Ticket.findByPk(ticket.id, {
+      include: [
+        { model: Contact, required: false },
+        { model: Queue, required: false },
+        { model: User, as: 'AssignedUser', required: false }
+      ]
+    });
+
+    // Emitir atualização via WebSocket
+    await emitTicketsUpdate();
+
+    res.status(201).json(created);
+  } catch (err) {
+    console.error('❌ Erro ao criar ticket:', err);
     res.status(500).json({ error: err.message });
   }
 };

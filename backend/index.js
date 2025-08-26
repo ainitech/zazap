@@ -21,6 +21,9 @@ import sessionRoutes from './routes/sessionRoutes.js';
 import contactRoutes from './routes/contactRoutes.js';
 import pushRoutes from './routes/pushRoutes.js';
 import quickReplyRoutes from './routes/quickReplyRoutes.js';
+import scheduleRoutes from './routes/scheduleRoutes.js';
+import tagRoutes from './routes/tagRoutes.js';
+import campaignRoutes from './routes/campaignRoutes.js';
 import path from 'path';
 
 dotenv.config();
@@ -79,6 +82,9 @@ app.use('/api/ticket-status', ticketStatusRoutes);
 app.use('/api/ticket-messages', ticketMessageRoutes);
 app.use('/api/ticket-messages', ticketMessageFileRoutes);
 app.use('/api/quick-replies', quickReplyRoutes);
+app.use('/api/schedules', scheduleRoutes);
+app.use('/api/tags', tagRoutes);
+app.use('/api/campaigns', campaignRoutes);
 app.use('/api/integrations', integrationRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/sessions', sessionRoutes);
@@ -103,6 +109,15 @@ server.listen(PORT, async () => {
     
     // Iniciar verificação de saúde das sessões
     startSessionHealthCheck();
+
+    // Iniciar despachante de agendamentos
+    try {
+      const { startScheduleDispatcher } = await import('./services/scheduleDispatcher.js');
+      startScheduleDispatcher();
+      console.log('⏰ Dispatcher de agendamentos iniciado');
+    } catch (e) {
+      console.error('Erro ao iniciar dispatcher de agendamentos:', e);
+    }
     
   }, 3000); // Aguardar 3 segundos
 });

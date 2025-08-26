@@ -1,0 +1,231 @@
+/* Estilos personalizados para componentes específicos */
+
+/* Line clamp utility para texto truncado */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.line-clamp-1 {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Scrollbar customizado */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgb(51 65 85); /* slate-700 */
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgb(100 116 139); /* slate-500 */
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgb(148 163 184); /* slate-400 */
+}
+
+/* Animações suaves */
+.fade-in {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Checkbox personalizado */
+.custom-checkbox {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgb(100 116 139); /* slate-500 */
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.custom-checkbox:checked {
+  background: rgb(234 179 8); /* yellow-500 */
+  border-color: rgb(234 179 8);
+}
+
+.custom-checkbox:checked::after {
+  content: '✓';
+  position: absolute;
+  top: -2px;
+  left: 1px;
+  color: rgb(15 23 42); /* slate-900 */
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.custom-checkbox:hover {
+  border-color: rgb(234 179 8); /* yellow-500 */
+}
+
+/* Input focus states customizados */
+.custom-input:focus {
+  outline: none;
+  border-color: rgb(234 179 8) !important;
+  box-shadow: 0 0 0 3px rgba(234, 179, 8, 0.1);
+}
+
+/* Tooltip simples */
+.tooltip {
+  position: relative;
+}
+
+.tooltip::before {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  background: rgb(15 23 42); /* slate-900 */
+  color: white;
+  font-size: 12px;
+  border-radius: 4px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+  z-index: 1000;
+}
+
+.tooltip:hover::before {
+  opacity: 1;
+}
+
+/* Loading spinner personalizado */
+.spinner {
+  border: 2px solid rgb(51 65 85); /* slate-700 */
+  border-top: 2px solid rgb(234 179 8); /* yellow-500 */
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Badge styles */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid;
+}
+
+.badge-primary {
+  background: rgba(59, 130, 246, 0.1);
+  color: rgb(147, 197, 253);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.badge-success {
+  background: rgba(34, 197, 94, 0.1);
+  color: rgb(134, 239, 172);
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.badge-warning {
+  background: rgba(234, 179, 8, 0.1);
+  color: rgb(253, 224, 71);
+  border-color: rgba(234, 179, 8, 0.3);
+}
+
+.badge-danger {
+  background: rgba(239, 68, 68, 0.1);
+  color: rgb(252, 165, 165);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* Card hover effects */
+.card-hover {
+  transition: all 0.2s ease;
+}
+
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+/* Button loading state */
+.btn-loading {
+  position: relative;
+  pointer-events: none;
+}
+
+.btn-loading::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border: 2px solid transparent;
+  border-top: 2px solid currentColor;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* Modal backdrop blur */
+.modal-backdrop {
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* Color picker customizado */
+.color-picker {
+  appearance: none;
+  border: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.color-picker:hover {
+  transform: scale(1.05);
+}
+
+/* Responsive grid auto-fit */
+.grid-auto-fit {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.5rem;
+}
+
+@media (max-width: 640px) {
+  .grid-auto-fit {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,7 +1,7 @@
 import { DataTypes } from 'sequelize';
 import sequelize from '../services/sequelize.js';
 
-const Contact = sequelize.define('Contacts', {
+const Contact = sequelize.define('Contact', {
   id: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -58,7 +58,7 @@ const Contact = sequelize.define('Contacts', {
     comment: 'Última vez que foi visto online'
   }
 }, {
-  tableName: 'Contacts',
+  tableName: 'contacts',
   indexes: [
     {
       fields: ['whatsappId']

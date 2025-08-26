@@ -52,12 +52,12 @@ export default function QuickRepliesComponent() {
   }, [items, query]);
 
   return (
-    <div className="p-6">
+    <div className="p-6 min-h-screen bg-slate-900">
       {/* Toolbar */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex-1" />
         <button
-          className="px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700"
+          className="px-4 py-2 bg-gradient-to-r from-yellow-500 to-yellow-600 text-white rounded-lg hover:from-yellow-600 hover:to-yellow-700 transition-all duration-200"
           onClick={() => { setShowCreateModal(true); setError(''); setSuccess(''); }}
         >
           Nova resposta rápida
@@ -68,28 +68,28 @@ export default function QuickRepliesComponent() {
       <div className="flex items-center gap-3 mb-4">
         <input
           type="text"
-          className="flex-1 bg-white border border-gray-200 rounded-lg px-3 py-2"
+          className="flex-1 bg-slate-800 border border-slate-700 text-white placeholder-slate-400 rounded-lg px-3 py-2 focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
           placeholder="Buscar por título, atalho ou conteúdo..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
         <button
           onClick={fetchItems}
-          className="px-3 py-2 bg-slate-800 text-white rounded-lg"
+          className="px-3 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg hover:bg-slate-600 transition-colors"
         >
           Atualizar
         </button>
       </div>
 
       {loading ? (
-        <div>Carregando...</div>
+        <div className="text-white">Carregando...</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((item) => (
-            <div key={item.id} className="bg-white rounded-lg border border-gray-200 p-4">
+            <div key={item.id} className="bg-slate-800 rounded-lg border border-slate-700 p-4">
               <div className="flex items-center justify-between mb-2">
-                <div className="font-semibold">{item.title || '(sem título)'}</div>
-                <span className="text-xs bg-slate-800 text-white rounded px-2 py-0.5">/{item.shortcut}</span>
+                <div className="font-semibold text-white">{item.title || '(sem título)'}</div>
+                <span className="text-xs bg-gradient-to-r from-yellow-500 to-yellow-600 text-white rounded px-2 py-0.5">/{item.shortcut}</span>
               </div>
               {item.mediaUrl ? (
                 <div className="mb-2">
@@ -100,14 +100,14 @@ export default function QuickRepliesComponent() {
                   ) : item.mediaType?.startsWith('video') ? (
                     <video controls src={`${API_URL}${item.mediaUrl}`} className="w-full rounded" />
                   ) : (
-                    <a href={`${API_URL}${item.mediaUrl}`} className="text-blue-600 underline" target="_blank" rel="noreferrer">
+                    <a href={`${API_URL}${item.mediaUrl}`} className="text-yellow-400 underline hover:text-yellow-300" target="_blank" rel="noreferrer">
                       {item.fileName || 'Baixar arquivo'}
                     </a>
                   )}
                 </div>
               ) : null}
               {item.content ? (
-                <div className="text-sm text-gray-700 whitespace-pre-wrap">{item.content}</div>
+                <div className="text-sm text-slate-300 whitespace-pre-wrap">{item.content}</div>
               ) : null}
             </div>
           ))}
@@ -121,65 +121,65 @@ export default function QuickRepliesComponent() {
           <div className="absolute inset-0 bg-black/60" onClick={()=>setShowCreateModal(false)} />
           {/* Centered modal content */}
           <div className="relative z-10 flex items-center justify-center w-full h-full p-4">
-          <div className="bg-white rounded-xl border border-gray-200 shadow-2xl w-full max-w-2xl p-5" onClick={(e)=>e.stopPropagation()}>
+          <div className="bg-slate-800 border border-slate-700 rounded-xl shadow-2xl w-full max-w-2xl p-5" onClick={(e)=>e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold">Criar resposta rápida</h2>
-              <button className="p-2 text-gray-500 hover:text-gray-700" onClick={()=>setShowCreateModal(false)} aria-label="Fechar">
+              <h2 className="text-lg font-semibold text-white">Criar resposta rápida</h2>
+              <button className="p-2 text-slate-400 hover:text-white" onClick={()=>setShowCreateModal(false)} aria-label="Fechar">
                 ✕
               </button>
             </div>
-            {error && <div className="mb-3 text-red-600 text-sm">{error}</div>}
-            {success && <div className="mb-3 text-green-600 text-sm">{success}</div>}
+            {error && <div className="mb-3 text-red-400 text-sm bg-red-900/20 border border-red-500 rounded px-3 py-2">{error}</div>}
+            {success && <div className="mb-3 text-green-400 text-sm bg-green-900/20 border border-green-500 rounded px-3 py-2">{success}</div>}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Título</label>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Título</label>
                 <input
                   type="text"
-                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2"
+                  className="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
                   placeholder="Ex.: Saudação padrão"
                   value={title}
                   onChange={(e)=>setTitle(e.target.value)}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Atalho</label>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Atalho</label>
                 <div className="flex items-center gap-2">
-                  <span className="px-2 py-2 rounded bg-gray-100 border border-gray-300">/</span>
+                  <span className="px-2 py-2 rounded bg-slate-700 border border-slate-600 text-white">/</span>
                   <input
                     type="text"
-                    className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2"
+                    className="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
                     placeholder="Ex.: saudacao"
                     value={shortcut}
                     onChange={(e)=>setShortcut(e.target.value.replace(/\s+/g,'').toLowerCase())}
                   />
                 </div>
-                <p className="text-xs text-gray-500 mt-1">Digite sem espaços; será usado como /atalho no chat</p>
+                <p className="text-xs text-slate-400 mt-1">Digite sem espaços; será usado como /atalho no chat</p>
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Conteúdo (texto)</label>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Conteúdo (texto)</label>
                 <textarea
                   rows={4}
-                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2"
+                  className="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
                   placeholder="Texto da resposta. Suporta variáveis: {{saudacao}}, {{hora}}, {{data}}, {{dia_semana}}, {{nome_empresa}}."
                   value={content}
                   onChange={(e)=>setContent(e.target.value)}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Arquivo opcional</label>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Arquivo opcional</label>
                 <input
                   type="file"
-                  className="w-full"
+                  className="w-full text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-gradient-to-r file:from-yellow-500 file:to-yellow-600 file:text-white hover:file:from-yellow-600 hover:file:to-yellow-700"
                   accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.zip,.rar,.7z"
                   onChange={(e)=> setFile(e.target.files?.[0] || null)}
                 />
-                <p className="text-xs text-gray-500 mt-1">Se enviar arquivo, o tipo será detectado automaticamente.</p>
+                <p className="text-xs text-slate-400 mt-1">Se enviar arquivo, o tipo será detectado automaticamente.</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Variáveis (JSON opcional)</label>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Variáveis (JSON opcional)</label>
                 <textarea
                   rows={3}
-                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 font-mono text-sm"
+                  className="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 font-mono text-sm focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
                   placeholder='Ex.: { "nome_empresa": "Minha Empresa" }'
                   value={variablesText}
                   onChange={(e)=>setVariablesText(e.target.value)}
@@ -187,9 +187,9 @@ export default function QuickRepliesComponent() {
               </div>
             </div>
             <div className="mt-4 flex items-center gap-2 justify-end">
-              <button className="px-4 py-2 bg-gray-100 text-gray-800 rounded-lg" onClick={()=>setShowCreateModal(false)}>Cancelar</button>
+              <button className="px-4 py-2 bg-slate-700 border border-slate-600 text-slate-300 rounded-lg hover:bg-slate-600 transition-colors" onClick={()=>setShowCreateModal(false)}>Cancelar</button>
               <button
-                className="px-4 py-2 bg-slate-800 text-white rounded-lg disabled:opacity-60"
+                className="px-4 py-2 bg-gradient-to-r from-yellow-500 to-yellow-600 text-white rounded-lg hover:from-yellow-600 hover:to-yellow-700 transition-all duration-200 disabled:opacity-60 disabled:hover:from-yellow-500 disabled:hover:to-yellow-600"
                 disabled={submitting}
                 onClick={async ()=>{
                   setError(''); setSuccess('');

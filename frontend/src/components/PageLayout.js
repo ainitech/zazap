@@ -9,28 +9,78 @@ import {
   StarIcon,
   ArchiveBoxIcon,
   TrashIcon,
+  TagIcon,
   Cog6ToothIcon,
   PhoneIcon,
   PuzzlePieceIcon,
-  AdjustmentsHorizontalIcon
+  AdjustmentsHorizontalIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  SpeakerWaveIcon
 } from '@heroicons/react/24/outline';
 import { 
   ChatBubbleBottomCenterTextIcon as ChatBubbleBottomCenterTextIconSolid
 } from '@heroicons/react/24/solid';
+import { apiFetch, safeJson } from '../utils/apiClient';
 
-const sidebarItems = [
-  { icon: HomeIcon, label: 'Dashboard', route: '/dashboard' },
-  { icon: ChatBubbleBottomCenterTextIcon, label: 'Messages', route: '/chat' },
-  { icon: UserGroupIcon, label: 'Contacts', route: '/contacts' },
-  { icon: AdjustmentsHorizontalIcon, label: 'Queues', route: '/queues' },
-  { icon: PhoneIcon, label: 'Sessions', route: '/sessions' },
-  { icon: PuzzlePieceIcon, label: 'Integrations', route: '/integrations' },
-  { icon: ChatBubbleBottomCenterTextIcon, label: 'Quick Replies', route: '/quick-replies' },
-  { icon: ClockIcon, label: 'Recent', route: '/recent' },
-  { icon: StarIcon, label: 'Favorites', route: '/favorites' },
-  { icon: ArchiveBoxIcon, label: 'Archived', route: '/archived' },
-  { icon: TrashIcon, label: 'Trash', route: '/trash' },
-  { icon: Cog6ToothIcon, label: 'Settings', route: '/settings' }
+const sidebarMenus = [
+  { 
+    type: 'single',
+    icon: HomeIcon, 
+    label: 'Dashboard', 
+    route: '/dashboard' 
+  },
+  {
+    type: 'group',
+    icon: ChatBubbleBottomCenterTextIcon,
+    label: 'Conversas',
+    description: 'Gerencie suas mensagens',
+    items: [
+      { icon: ChatBubbleBottomCenterTextIcon, label: 'Mensagens', route: '/chat', description: 'Chat principal' },
+      { icon: ClockIcon, label: 'Recentes', route: '/recent', description: 'Conversas recentes' },
+      { icon: StarIcon, label: 'Favoritos', route: '/favorites', description: 'Conversas favoritas' },
+      { icon: ArchiveBoxIcon, label: 'Arquivadas', route: '/archived', description: 'Conversas arquivadas' },
+      { icon: TrashIcon, label: 'Lixeira', route: '/trash', description: 'Conversas excluídas' }
+    ]
+  },
+  {
+    type: 'group',
+    icon: UserGroupIcon,
+    label: 'Contatos',
+    description: 'Gerencie contatos e filas',
+    items: [
+      { icon: UserGroupIcon, label: 'Contatos', route: '/contacts', description: 'Lista de contatos' },
+      { icon: AdjustmentsHorizontalIcon, label: 'Filas', route: '/queues', description: 'Filas de atendimento' },
+      { icon: TagIcon, label: 'Tags', route: '/tags', description: 'Organização de atendimentos' }
+    ]
+  },
+  {
+    type: 'group',
+    icon: PhoneIcon,
+    label: 'Conexões',
+    description: 'Sessões e integrações',
+    items: [
+      { icon: PhoneIcon, label: 'Sessões', route: '/sessions', description: 'Sessões WhatsApp' },
+      { icon: PuzzlePieceIcon, label: 'Integrações', route: '/integrations', description: 'Integrações externas' }
+    ]
+  },
+  {
+    type: 'group',
+    icon: ClockIcon,
+    label: 'Automação',
+    description: 'Ferramentas de automação',
+    items: [
+      { icon: ChatBubbleBottomCenterTextIcon, label: 'Respostas Rápidas', route: '/quick-replies', description: 'Templates de mensagem' },
+      { icon: ClockIcon, label: 'Agendamentos', route: '/schedules', description: 'Mensagens programadas', hasCounter: true },
+      { icon: SpeakerWaveIcon, label: 'Campanhas', route: '/campaigns', description: 'Disparos em massa' }
+    ]
+  },
+  { 
+    type: 'single',
+    icon: Cog6ToothIcon, 
+    label: 'Configurações', 
+    route: '/settings' 
+  }
 ];
 
 const getAvatarInitials = (name) => {
@@ -43,6 +93,8 @@ export default function PageLayout({ children, title, subtitle }) {
   const navigate = useNavigate();
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [scheduleCount, setScheduleCount] = useState(0);
+  const [expandedGroups, setExpandedGroups] = useState({});
 
   useEffect(() => {
     try {
@@ -51,6 +103,33 @@ export default function PageLayout({ children, title, subtitle }) {
     } catch (e) {
       // ignore
     }
+
+    // Auto-expand groups based on current route
+    const currentGroup = sidebarMenus.find(menu => {
+      if (menu.type === 'group') {
+        return menu.items.some(item => isActiveRoute(item.route));
+      }
+      return false;
+    });
+    
+    if (currentGroup) {
+      setExpandedGroups(prev => ({ ...prev, [currentGroup.label]: true }));
+    }
+  }, [location.pathname]);
+
+  useEffect(() => {
+    const loadCounts = async () => {
+      try {
+        const r = await apiFetch('/api/schedules/counts');
+        const data = await safeJson(r);
+        setScheduleCount(data?.total || 0);
+      } catch (e) {
+        console.error('Falha ao carregar contadores', e);
+      }
+    };
+    loadCounts();
+    const t = setInterval(loadCounts, 15000);
+    return () => clearInterval(t);
   }, []);
 
   useEffect(() => {
@@ -60,6 +139,20 @@ export default function PageLayout({ children, title, subtitle }) {
   const isActiveRoute = (route) => {
     return location.pathname === route || 
            (route === '/chat' && location.pathname.startsWith('/chat'));
+  };
+
+  const isGroupActive = (group) => {
+    if (group.type === 'single') {
+      return isActiveRoute(group.route);
+    }
+    return group.items.some(item => isActiveRoute(item.route));
+  };
+
+  const toggleGroup = (groupLabel) => {
+    setExpandedGroups(prev => ({
+      ...prev,
+      [groupLabel]: !prev[groupLabel]
+    }));
   };
 
   const handleNavigation = (route) => {
@@ -91,36 +184,139 @@ export default function PageLayout({ children, title, subtitle }) {
 
         {/* Navigation Items */}
         <nav className="flex flex-col flex-1 w-full px-3">
-          {sidebarItems.map((item, index) => {
-            const Icon = item.icon;
-            const isActive = isActiveRoute(item.route);
+          {sidebarMenus.map((menu, index) => {
+            const needsSeparator = index > 0 && (
+              (index === 1) || // After Dashboard
+              (index === sidebarMenus.length - 1) // Before Settings
+            );
 
             return (
-              <div key={index} className="relative w-full mb-1">
-                <button
-                  onClick={() => handleNavigation(item.route)}
-                  className={`group relative flex items-center w-full gap-3 px-3 py-3 rounded-lg transition-all duration-200 ${
-                    isActive 
-                      ? 'bg-yellow-500 text-slate-900' 
-                      : 'text-slate-300 hover:text-white hover:bg-slate-700'
-                  }`}
-                >
-                  <div className="flex items-center justify-center w-5 h-5">
-                    <Icon className="w-5 h-5" />
+              <React.Fragment key={index}>
+                {needsSeparator && sidebarOpen && (
+                  <div className="my-2">
+                    <div className="h-px bg-slate-700"></div>
                   </div>
+                )}
+                
+                {menu.type === 'single' ? (
+                  <div className="relative w-full mb-1">
+                    <button
+                      onClick={() => handleNavigation(menu.route)}
+                      className={`group relative flex items-center w-full gap-3 px-3 py-3 rounded-lg transition-all duration-200 ${
+                        isActiveRoute(menu.route) 
+                          ? 'bg-yellow-500 text-slate-900' 
+                          : 'text-slate-300 hover:text-white hover:bg-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-center w-5 h-5">
+                        <menu.icon className="w-5 h-5" />
+                      </div>
 
-                  {sidebarOpen && (
-                    <span className="text-sm font-medium">{item.label}</span>
-                  )}
+                      {sidebarOpen && (
+                        <span className="text-sm font-medium">
+                          {menu.label}
+                        </span>
+                      )}
 
-                  {/* Tooltip when collapsed */}
-                  {!sidebarOpen && (
-                    <div className="absolute left-full ml-3 top-1/2 transform -translate-y-1/2 bg-gray-900 text-white text-xs rounded-md px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
-                      {item.label}
-                    </div>
-                  )}
-                </button>
-              </div>
+                      {/* Tooltip when collapsed */}
+                      {!sidebarOpen && (
+                        <div className="absolute left-full ml-3 top-1/2 transform -translate-y-1/2 bg-gray-900 text-white text-xs rounded-md px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
+                          {menu.label}
+                        </div>
+                      )}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative w-full mb-2">
+                    {/* Group Header */}
+                    <button
+                      onClick={() => sidebarOpen ? toggleGroup(menu.label) : setSidebarOpen(true)}
+                      className={`group relative flex items-center w-full gap-3 px-3 py-3 rounded-lg transition-all duration-200 ${
+                        isGroupActive(menu) 
+                          ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 shadow-sm' 
+                          : 'text-slate-300 hover:text-white hover:bg-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-center w-5 h-5">
+                        <menu.icon className="w-5 h-5" />
+                      </div>
+
+                      {sidebarOpen && (
+                        <>
+                          <span className="text-sm font-medium flex-1 text-left">
+                            {menu.label}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            {!expandedGroups[menu.label] && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-700 text-slate-400 border border-slate-600">
+                                {menu.items.length}
+                              </span>
+                            )}
+                            <div className="flex items-center justify-center w-4 h-4">
+                              {expandedGroups[menu.label] ? (
+                                <ChevronDownIcon className="w-4 h-4" />
+                              ) : (
+                                <ChevronRightIcon className="w-4 h-4" />
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      )}
+
+                      {/* Tooltip when collapsed */}
+                      {!sidebarOpen && (
+                        <div className="absolute left-full ml-3 top-1/2 transform -translate-y-1/2 bg-gray-900 text-white text-xs rounded-md px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
+                          {menu.label}
+                          {menu.description && (
+                            <div className="text-gray-400 text-[10px] mt-0.5">{menu.description}</div>
+                          )}
+                        </div>
+                      )}
+                    </button>
+
+                    {/* Submenu Items */}
+                    {sidebarOpen && (
+                      <div className={`ml-6 mt-1 space-y-1 overflow-hidden transition-all duration-300 ease-in-out ${
+                        expandedGroups[menu.label] 
+                          ? 'max-h-96 opacity-100' 
+                          : 'max-h-0 opacity-0'
+                      }`}>
+                        {menu.items.map((item, itemIndex) => {
+                          const ItemIcon = item.icon;
+                          const isActive = isActiveRoute(item.route);
+
+                          return (
+                            <button
+                              key={itemIndex}
+                              onClick={() => handleNavigation(item.route)}
+                              className={`group relative flex items-center w-full gap-3 px-3 py-2 rounded-lg transition-all duration-200 ${
+                                isActive 
+                                  ? 'bg-yellow-500 text-slate-900 shadow-sm' 
+                                  : 'text-slate-400 hover:text-white hover:bg-slate-700 hover:translate-x-1'
+                              }`}
+                            >
+                              <div className="flex items-center justify-center w-4 h-4">
+                                <ItemIcon className="w-4 h-4" />
+                              </div>
+                              <span className="text-sm font-medium flex items-center gap-2">
+                                {item.label}
+                                {item.hasCounter && (
+                                  <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 border border-yellow-400/40">{scheduleCount}</span>
+                                )}
+                              </span>
+                              
+                              {/* Active indicator */}
+                              {isActive && (
+                                <div className="absolute left-0 top-1/2 transform -translate-y-1/2 w-1 h-6 bg-yellow-600 rounded-r-full"></div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </React.Fragment>
             );
           })}
         </nav>

@@ -8,6 +8,13 @@ const router = express.Router();
 // Listar tickets com filtros e busca avançada
 router.get('/', authenticateToken, listTickets);
 
+// Criar ticket
+router.post('/', authenticateToken, async (req, res, next) => {
+  // delegate to controller
+  const { createTicket } = await import('../controllers/ticketController.js');
+  return createTicket(req, res, next);
+});
+
 // Aceitar ticket
 router.put('/:ticketId/accept', authenticateToken, acceptTicket);
 

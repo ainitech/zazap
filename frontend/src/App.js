@@ -14,6 +14,9 @@ import FavoritesPage from './pages/FavoritesPage';
 import ArchivedPage from './pages/ArchivedPage';
 import TrashPage from './pages/TrashPage';
 import QuickRepliesPage from './pages/QuickRepliesPage';
+import SchedulesPage from './pages/SchedulesPage';
+import TagsPage from './pages/TagsPage';
+import CampaignsPage from './pages/CampaignsPage';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SocketProvider } from './context/SocketContext';
 
@@ -38,6 +41,9 @@ function MainApp() {
         <Route path="/chat/:ticketId" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
         <Route path="/contacts" element={<ProtectedRoute><ContactsPage /></ProtectedRoute>} />
         <Route path="/queues" element={<ProtectedRoute><QueuesPage /></ProtectedRoute>} />
+        <Route path="/tags" element={<ProtectedRoute><TagsPage /></ProtectedRoute>} />
+        <Route path="/campaigns" element={<ProtectedRoute><CampaignsPage /></ProtectedRoute>} />
+  <Route path="/schedules" element={<ProtectedRoute><SchedulesPage /></ProtectedRoute>} />
         <Route path="/sessions" element={<ProtectedRoute><SessionsPage /></ProtectedRoute>} />
         <Route path="/integrations" element={<ProtectedRoute><IntegrationsPage /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />

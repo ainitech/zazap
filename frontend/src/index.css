@@ -2,6 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Import custom styles */
+@import './styles/custom.css';
+
 /* Custom animations for futuristic dashboard */
 @keyframes blob {
   0%,

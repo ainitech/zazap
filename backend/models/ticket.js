@@ -9,7 +9,7 @@ const Ticket = sequelize.define('Ticket', {
   },
   sessionId: {
     type: DataTypes.INTEGER,
-    allowNull: false,
+    allowNull: true,
     references: {
       model: 'sessions',
       key: 'id',
