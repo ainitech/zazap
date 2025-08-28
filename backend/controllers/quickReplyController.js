@@ -99,9 +99,13 @@ const processVariables = (content, variables = {}) => {
 // Listar todas as respostas rápidas do usuário
 export const getQuickReplies = async (req, res) => {
   try {
+    console.log('🔧 Backend QuickReplyController: Requisição recebida, user:', req.user);
+    
     if (!req.user || !req.user.id) {
+      console.log('🔧 Backend QuickReplyController: Usuário não autenticado');
       return res.status(401).json({ error: 'Não autenticado' });
     }
+    
     const { page = 1, limit = 50, search = '', type = 'all' } = req.query;
     const offset = (page - 1) * limit;
     
@@ -109,6 +113,8 @@ export const getQuickReplies = async (req, res) => {
       userId: req.user.id,
       isActive: true
     };
+    
+    console.log('🔧 Backend QuickReplyController: Buscando com whereClause:', whereClause);
     
     // Filtro por busca
     if (search) {
@@ -141,12 +147,15 @@ export const getQuickReplies = async (req, res) => {
       ]
     });
     
+    console.log('🔧 Backend QuickReplyController: Encontrados', count, 'registros, retornando', quickReplies.length, 'itens');
+    
     // Processar variáveis nos conteúdos para preview
     const processedReplies = quickReplies.map(reply => ({
       ...reply.toJSON(),
       contentPreview: processVariables(reply.content, reply.variables)
     }));
     
+    console.log('🔧 Backend QuickReplyController: Enviando resposta com', processedReplies.length, 'itens processados');
     res.json({
       quickReplies: processedReplies,
       pagination: {

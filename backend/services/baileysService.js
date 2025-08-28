@@ -1,4 +1,5 @@
-import makeWASocket, { useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason } from '@whiskeysockets/baileys';
+import baileys from '@whiskeysockets/baileys';
+const { makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason } = baileys;
 import { Boom } from '@hapi/boom';
 import qrcode from 'qrcode';
 import fs from 'fs/promises';
@@ -95,157 +96,6 @@ const createOrUpdateContactBaileys = async (whatsappId, sessionId, sock) => {
 };
 
 /**
- * Processar mensagens recebidas
- */
-const handleMessage = async (msg, sock) => {
-  try {
-    if (msg.key && msg.key.remoteJid && msg.key.remoteJid.includes('status@broadcast')) return;
-    
-    const messageText = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
-    const fromJid = msg.key.remoteJid;
-    
-    console.log(`📨 Nova mensagem Baileys de ${fromJid}: ${messageText}`);
-    
-    // Buscar a sessão no banco de dados usando o sessionId do socket
-    const session = await Session.findOne({
-      where: { whatsappId: sock.sessionId }
-    });
-    
-    if (!session) {
-      console.error(`❌ Sessão não encontrada no banco: ${sock.sessionId}`);
-      return;
-    }
-    
-    console.log(`✅ Sessão encontrada no banco: ID ${session.id}, whatsappId: ${session.whatsappId}`);
-    
-    // Criar ou atualizar contato
-    const contact = await createOrUpdateContactBaileys(fromJid, session.id, sock);
-    
-    // Buscar ou criar ticket
-    let ticket = await Ticket.findOne({ 
-      where: { 
-        sessionId: session.id,
-        contact: fromJid 
-      } 
-    });
-    
-    if (!ticket) {
-      ticket = await Ticket.create({
-        sessionId: session.id,
-        contact: fromJid,
-        contactId: contact ? contact.id : null, // Vincular ao contato criado
-        lastMessage: messageText,
-        unreadCount: 1,
-        status: 'open',
-        chatStatus: 'waiting' // Iniciar como aguardando
-      });
-      console.log(`🎫 Novo ticket criado: #${ticket.id} para ${fromJid} na sessão ${sock.sessionId} (ID: ${session.id}) com contato ${contact?.id || 'N/A'}`);
-      try {
-        const payload = {
-          title: 'Nova mensagem',
-          body: contact?.name ? `${contact.name}: ${messageText}` : `${fromJid}: ${messageText}`,
-          ticketId: ticket.id,
-          contact: fromJid,
-          iconUrl: contact?.profilePicUrl || null
-        };
-        emitToAll('notification', payload);
-        try {
-          const push = await import('./push.js');
-          if (push && push.broadcastPush) await push.broadcastPush(payload);
-        } catch (pushErr) {
-          console.warn('⚠️ Push broadcast failed (baileys new ticket):', pushErr);
-        }
-      } catch (notifyErr) {
-        console.error('❌ Falha ao emitir notificação via socket (baileys):', notifyErr);
-      }
-    } else {
-      // Atualizar ticket existente e vincular ao contato se não estiver vinculado
-      ticket.lastMessage = messageText;
-      ticket.unreadCount += 1;
-      ticket.updatedAt = new Date();
-      
-      if (!ticket.contactId && contact) {
-        ticket.contactId = contact.id;
-        console.log(`🔗 Ticket #${ticket.id} vinculado ao contato ${contact.id}`);
-      }
-      
-      // Reabrir ticket se estiver fechado ou resolvido
-      const wasResolvedOrClosed = (ticket.status === 'closed' || ticket.chatStatus === 'resolved');
-      if (wasResolvedOrClosed) {
-        const prev = { status: ticket.status, chatStatus: ticket.chatStatus };
-        ticket.status = 'open';
-        ticket.chatStatus = 'waiting'; // Reabrir como aguardando
-        console.log(`🔄 Ticket #${ticket.id} reaberto por nova mensagem (status anterior: ${prev.status}/${prev.chatStatus})`);
-        try {
-          const payload = {
-            title: 'Novo contato',
-            body: contact?.name ? `${contact.name}: ${messageText}` : `${fromJid}: ${messageText}`,
-            ticketId: ticket.id,
-            contact: fromJid,
-            iconUrl: contact?.profilePicUrl || null
-          };
-          emitToAll('notification', payload);
-          try {
-            const push = await import('./push.js');
-            if (push && push.broadcastPush) await push.broadcastPush(payload);
-          } catch (pushErr) {
-            console.warn('⚠️ Push broadcast failed (baileys reopen):', pushErr);
-          }
-        } catch (notifyErr) {
-          console.error('❌ Falha ao emitir notificação via socket (baileys reopen):', notifyErr);
-        }
-      }
-      await ticket.save();
-    }
-    
-    // Salvar mensagem
-    const message = await TicketMessage.create({
-      ticketId: ticket.id,
-      sender: 'contact',
-      content: messageText,
-      timestamp: new Date()
-    });
-    
-    console.log(`💾 Mensagem salva no ticket #${ticket.id}`);
-    
-    // Emitir nova mensagem via WebSocket
-    try {
-      console.log(`🔄 Emitindo nova mensagem via WebSocket para ticket ${ticket.id}`);
-      emitToTicket(ticket.id, 'new-message', message);
-      emitToAll('message-update', { ticketId: ticket.id, message });
-      
-      // Também emitir atualização de tickets para refletir nova atividade
-      const tickets = await Ticket.findAll({
-        include: [
-          {
-            model: Contact,
-            required: false
-          },
-          {
-            model: Queue,
-            required: false
-          },
-          {
-            model: User,
-            as: 'AssignedUser',
-            required: false
-          }
-        ],
-        order: [['updatedAt', 'DESC']]
-      });
-      emitToAll('tickets-update', tickets);
-      
-      console.log(`✅ Eventos WebSocket emitidos com sucesso`);
-    } catch (socketError) {
-      console.error(`❌ Erro ao emitir evento WebSocket:`, socketError);
-    }
-    
-  } catch (error) {
-    console.error('Erro ao processar mensagem Baileys:', error);
-  }
-};
-
-/**
  * Criar uma nova sessão Baileys
  */
 export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) => {
@@ -266,6 +116,8 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
     
     // Obter versão mais recente do Baileys
     const { version } = await fetchLatestBaileysVersion();
+    console.log(`📱 Versão do Baileys: ${version}`);
+    console.log(`🔌 makeWASocket disponível: ${typeof makeWASocket}`);
 
     // Criar socket
     const sock = makeWASocket({
@@ -274,18 +126,37 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
       printQRInTerminal: false,
       generateHighQualityLinkPreview: true,
       syncFullHistory: false,
-      markOnlineOnConnect: true,
-      connectTimeoutMs: 60_000,
+      markOnlineOnConnect: false, // Reduzir carga inicial
+      connectTimeoutMs: 90_000, // Aumentar timeout
       defaultQueryTimeoutMs: 0,
-      keepAliveIntervalMs: 10_000,
+      keepAliveIntervalMs: 30_000, // Reduzir frequência de keep-alive
       emitOwnEvents: true,
-      fireInitQueries: true,
+      fireInitQueries: false, // Reduzir queries iniciais
       browser: ['ZaZap', 'Desktop', '1.0.0'],
+      retryRequestDelayMs: 250,
+      maxMsgRetryCount: 5,
+      appStateMacVerification: {
+        patch: false,
+        snapshot: false
+      }
     });
 
     // Criar instância da sessão
     const session = new BaileysSession(sock, sessionId);
     sessions.push(session);
+
+    // LOG DO SOCKET CRIADO PARA ANÁLISE
+    console.log(`🔍 === ANÁLISE DO SOCKET BAILEYS CRIADO ===`);
+    console.log(`📋 Tipo do socket:`, typeof sock);
+    console.log(`📋 Propriedades do socket:`, Object.keys(sock));
+    console.log(`📋 Métodos do socket:`, Object.getOwnPropertyNames(Object.getPrototypeOf(sock)));
+    if (sock.user) {
+      console.log(`📋 sock.user:`, JSON.stringify(sock.user, null, 2));
+    }
+    if (sock.authState) {
+      console.log(`📋 sock.authState existe:`, !!sock.authState);
+    }
+    console.log(`🔍 === FIM DA ANÁLISE DO SOCKET ===`);
 
     // Evento para salvar credenciais
     sock.ev.on('creds.update', saveCreds);
@@ -306,7 +177,7 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
             // Buscar sessão no banco para obter o ID
             const sessionRecord = await Session.findOne({ where: { whatsappId: sessionId } });
             if (sessionRecord) {
-              emitToAll("qr-code-update", {
+              emitToAll("session-qr-update", {
                 sessionId: sessionRecord.id,
                 qrCode: qrCodeDataURL,
                 status: 'qr_ready'
@@ -324,6 +195,29 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
       if (connection === 'open') {
         console.log(`🟢 Sessão Baileys ${sessionId} conectada e pronta`);
         session.status = 'connected';
+
+        // Atualizar whatsappId no banco se disponível
+        if (sock.user && sock.user.id) {
+          const actualWhatsAppId = sock.user.id.split('@')[0];
+          console.log(`📱 Atualizando whatsappId no banco: ${sessionId} -> ${actualWhatsAppId}`);
+
+          try {
+            const sessionRecord = await Session.findOne({ where: { whatsappId: sessionId } });
+            if (sessionRecord) {
+              await sessionRecord.update({
+                status: 'CONNECTED',
+                whatsappId: actualWhatsAppId,
+                number: actualWhatsAppId
+              });
+
+              // Atualizar sessionId na sessão ativa para manter consistência
+              session.sessionId = actualWhatsAppId;
+              console.log(`🔄 SessionId Baileys atualizado na memória: ${session.sessionId}`);
+            }
+          } catch (updateError) {
+            console.error('❌ Erro ao atualizar whatsappId no banco:', updateError);
+          }
+        }
         
         // Emitir via WebSocket
         try {
@@ -334,7 +228,7 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
               sessionId: sessionRecord.id,
               status: 'connected'
             });
-            emitToAll("qr-code-update", {
+            emitToAll("session-qr-update", {
               sessionId: sessionRecord.id,
               qrCode: '',
               status: 'connected'
@@ -356,13 +250,38 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
         
         session.status = 'disconnected';
         
+        // Emitir status de desconexão via WebSocket
+        try {
+          const { emitToAll } = await import('./socket.js');
+          const sessionRecord = await Session.findOne({ where: { whatsappId: sessionId } });
+          if (sessionRecord) {
+            emitToAll("session-status-update", {
+              sessionId: sessionRecord.id,
+              status: 'disconnected'
+            });
+          }
+        } catch (socketError) {
+          console.log('Socket não disponível para emitir desconexão Baileys');
+        }
+        
         // Remover da lista de sessões
         const sessionIndex = sessions.findIndex(s => s.sessionId === sessionId);
         if (sessionIndex !== -1) {
           sessions.splice(sessionIndex, 1);
         }
         
-        if (!shouldReconnect) {
+        // Para erro 515 (stream error), tentar reconectar automaticamente
+        if (lastDisconnect?.error?.output?.statusCode === 515) {
+          console.log(`🔄 Erro de stream detectado, tentando reconectar sessão ${sessionId} em 5 segundos...`);
+          setTimeout(async () => {
+            try {
+              console.log(`🔄 Reconectando sessão Baileys ${sessionId}...`);
+              await createBaileysSession(sessionId, onQR, onReady, onMessage);
+            } catch (reconnectError) {
+              console.error(`❌ Erro ao reconectar sessão ${sessionId}:`, reconnectError);
+            }
+          }, 5000);
+        } else if (!shouldReconnect) {
           console.log(`Limpando sessão Baileys ${sessionId}`);
           await cleanupBaileysSession(sessionId);
         }
@@ -379,8 +298,7 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
       if (type === 'notify' && messages && messages.length > 0) {
         for (const msg of messages) {
           if (!msg.key.fromMe && !msg.key.remoteJid.includes('@broadcast')) {
-            await handleMessage(msg, sock);
-            
+            // Usar apenas o callback onMessage que já está configurado corretamente
             if (onMessage) {
               await onMessage(msg, sock);
             }

@@ -5,6 +5,23 @@ import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth, MessageMedia } = pkg;
 import { Session, Ticket, TicketMessage, Contact } from '../models/index.js';
 import { emitToTicket, emitToAll } from './socket.js';
+import { sessionQRs, sessionStatus } from './sessionState.js';
+
+// Array global para armazenar sessões ativas
+let sessions = [];
+
+// Handlers globais para capturar erros não tratados
+process.on('uncaughtException', (error) => {
+  console.error('❌ Erro não tratado (uncaughtException):', error);
+  console.error('Stack trace:', error.stack);
+  // Não encerrar o processo, apenas logar
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Promessa rejeitada não tratada (unhandledRejection):', reason);
+  console.error('Stack trace:', reason?.stack || reason);
+  // Não encerrar o processo, apenas logar
+});
 
 // Interface para sessão estendida
 class SessionExtended extends Client {
@@ -15,17 +32,212 @@ class SessionExtended extends Client {
   }
 }
 
-// Armazenar sessões ativas
-const sessions = [];
+// Função para limpar arquivos de autenticação
+const cleanupAuthFiles = async (sessionId, whatsappId) => {
+  try {
+    console.log(`🧹 Iniciando limpeza de arquivos de autenticação para sessão ${sessionId || whatsappId}`);
+
+    const fs = await import('fs/promises');
+    const path = await import('path');
+
+    // Lista de diretórios/padrões a limpar
+    const authPaths = [
+      // WhatsApp Web.js
+      path.resolve(process.cwd(), `.wwebjs_auth/session-bd_${sessionId || whatsappId}`),
+      path.resolve(process.cwd(), `.wwebjs_cache/session-bd_${sessionId || whatsappId}`),
+      path.resolve(process.cwd(), `backend/.wwebjs_auth/session-bd_${sessionId || whatsappId}`),
+      path.resolve(process.cwd(), `backend/.wwebjs_cache/session-bd_${sessionId || whatsappId}`),
+
+      // Baileys
+      path.resolve(process.cwd(), `baileys_auth_${sessionId || whatsappId}`),
+      path.resolve(process.cwd(), `backend/baileys_auth_${sessionId || whatsappId}`),
+    ];
+
+    // Também limpar padrões globais se sessionId específico não funcionar
+    if (sessionId) {
+      authPaths.push(
+        path.resolve(process.cwd(), `.wwebjs_auth/session-bd_${sessionId}`),
+        path.resolve(process.cwd(), `.wwebjs_cache/session-bd_${sessionId}`),
+        path.resolve(process.cwd(), `backend/.wwebjs_auth/session-bd_${sessionId}`),
+        path.resolve(process.cwd(), `backend/.wwebjs_cache/session-bd_${sessionId}`),
+        path.resolve(process.cwd(), `baileys_auth_${sessionId}`),
+        path.resolve(process.cwd(), `backend/baileys_auth_${sessionId}`),
+      );
+    }
+
+    let cleanedCount = 0;
+
+    for (const authPath of authPaths) {
+      try {
+        // Verificar se o caminho existe
+        await fs.access(authPath);
+
+        // Se existir, remover recursivamente
+        await fs.rm(authPath, { recursive: true, force: true });
+        console.log(`✅ Arquivo/pasta removido: ${authPath}`);
+        cleanedCount++;
+      } catch (error) {
+        // Se não existir, apenas continuar silenciosamente
+        if (error.code !== 'ENOENT') {
+          console.warn(`⚠️ Erro ao remover ${authPath}:`, error.message);
+        }
+      }
+    }
+
+    // Também tentar limpar padrões com curinga (baileys_auth_*)
+    try {
+      const { glob } = await import('glob');
+
+      const patterns = [
+        path.resolve(process.cwd(), `baileys_auth_${sessionId || whatsappId}*`),
+        path.resolve(process.cwd(), `backend/baileys_auth_${sessionId || whatsappId}*`),
+        path.resolve(process.cwd(), `.wwebjs_auth/session-bd_${sessionId || whatsappId}*`),
+        path.resolve(process.cwd(), `.wwebjs_cache/session-bd_${sessionId || whatsappId}*`),
+        path.resolve(process.cwd(), `backend/.wwebjs_auth/session-bd_${sessionId || whatsappId}*`),
+        path.resolve(process.cwd(), `backend/.wwebjs_cache/session-bd_${sessionId || whatsappId}*`),
+      ];
+
+      for (const pattern of patterns) {
+        const matches = await glob(pattern);
+        for (const match of matches) {
+          try {
+            await fs.rm(match, { recursive: true, force: true });
+            console.log(`✅ Arquivo/pasta removido (padrão): ${match}`);
+            cleanedCount++;
+          } catch (error) {
+            console.warn(`⚠️ Erro ao remover ${match}:`, error.message);
+          }
+        }
+      }
+    } catch (globError) {
+      console.warn(`⚠️ Erro ao usar glob para limpeza:`, globError.message);
+    }
+
+    console.log(`🧹 Limpeza concluída: ${cleanedCount} arquivos/pastas removidos para sessão ${sessionId || whatsappId}`);
+    return cleanedCount;
+  } catch (error) {
+    console.error(`❌ Erro geral na limpeza de arquivos:`, error);
+    return 0;
+  }
+};
+
+// Função segura para destruir sessões WhatsApp com tratamento de erro EBUSY
+const safeDestroySession = async (client, sessionId, maxRetries = 3) => {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`🗑️ Tentativa ${attempt}/${maxRetries} de destruir sessão ${sessionId}`);
+
+      // Primeiro tentar logout se disponível
+      if (client.logout && typeof client.logout === 'function') {
+        try {
+          await client.logout();
+          console.log(`✅ Logout realizado para sessão ${sessionId}`);
+        } catch (logoutError) {
+          console.warn(`⚠️ Logout falhou para sessão ${sessionId}:`, logoutError.message);
+          // Continue mesmo se logout falhar
+        }
+      }
+
+      // Aguardar um pouco para o Chrome fechar completamente
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // Tentar destroy
+      await client.destroy();
+      console.log(`✅ Sessão ${sessionId} destruída com sucesso`);
+
+      // Limpar arquivos de autenticação após destruir a sessão
+      const cleanedCount = await cleanupAuthFiles(sessionId, client.id);
+      console.log(`🧹 Arquivos de autenticação limpos: ${cleanedCount} itens removidos`);
+
+      return true;
+    } catch (error) {
+      console.error(`❌ Erro na tentativa ${attempt} de destruir sessão ${sessionId}:`, error.message);
+
+      // Verificar se é erro de contexto destruído
+      if (error.message && error.message.includes('Execution context was destroyed')) {
+        console.log(`🚨 Contexto já destruído para sessão ${sessionId}, considerando como destruída`);
+        // Mesmo com erro, tentar limpar arquivos
+        const cleanedCount = await cleanupAuthFiles(sessionId, client.id);
+        console.log(`🧹 Arquivos de autenticação limpos (mesmo com erro): ${cleanedCount} itens removidos`);
+        return true;
+      }
+
+      if (attempt === maxRetries) {
+        console.error(`💥 Falhou após ${maxRetries} tentativas de destruir sessão ${sessionId}`);
+        // Mesmo falhando, tentar forçar limpeza dos arquivos
+        try {
+          const fs = await import('fs/promises');
+          const path = await import('path');
+          const sessionPath = path.resolve(process.cwd(), `.wwebjs_auth/session-bd_${client.id || sessionId}`);
+          await fs.rm(sessionPath, { recursive: true, force: true });
+          console.log(`🧹 Arquivos da sessão ${sessionId} removidos forçadamente`);
+
+          // Limpeza adicional com nossa função
+          const cleanedCount = await cleanupAuthFiles(sessionId, client.id);
+          console.log(`🧹 Limpeza adicional concluída: ${cleanedCount} itens removidos`);
+        } catch (cleanupError) {
+          console.error(`❌ Falha ao limpar arquivos da sessão ${sessionId}:`, cleanupError.message);
+        }
+        return false;
+      }
+
+      // Aguardar progressivamente mais tempo entre tentativas
+      const delay = attempt * 4000;
+      console.log(`⏳ Aguardando ${delay}ms antes da próxima tentativa...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  return false;
+};// Função para verificar saúde das sessões
+const checkSessionHealth = async (wbot, sessionId) => {
+  try {
+    console.log(`🏥 Verificando saúde da sessão ${sessionId}`);
+
+    // Tentar uma operação simples para verificar se a sessão está funcional
+    const chats = await wbot.getChats();
+    console.log(`✅ Sessão ${sessionId} saudável - ${chats.length} chats carregados`);
+    return true;
+  } catch (error) {
+    console.error(`❌ Sessão ${sessionId} com problemas de saúde:`, error.message);
+
+    // Verificar se é erro crítico
+    if (error.message && error.message.includes('Execution context was destroyed')) {
+      console.error(`🚨 Sessão ${sessionId} corrompida - Execution context was destroyed`);
+      return false;
+    }
+
+    // Para outros erros, pode ser temporário
+    console.warn(`⚠️ Sessão ${sessionId} com erro não crítico, mantendo ativa`);
+    return true;
+  }
+};
 
 // Função para sincronizar mensagens não lidas
 const syncUnreadMessages = async (wbot) => {
   try {
     console.log(`🔄 Sincronizando mensagens não lidas para sessão: ${wbot.sessionId}`);
     
+    // Verificar se wbot.sessionId está definido
     if (!wbot.sessionId) {
-      console.error(`❌ wbot.sessionId indefinido em syncUnreadMessages!`);
-      return;
+      console.error(`❌ wbot.sessionId indefinido em syncUnreadMessages! Tentando alternativas...`);
+      
+      // Tentar usar wbot.id como sessionId
+      if (wbot.id) {
+        wbot.sessionId = wbot.id.toString();
+        console.log(`🔧 Usando wbot.id como sessionId: ${wbot.sessionId}`);
+      }
+      
+      // Tentar usar o wid do WhatsApp
+      if (!wbot.sessionId && wbot.info && wbot.info.wid) {
+        const whatsappId = wbot.info.wid._serialized.split('@')[0];
+        wbot.sessionId = whatsappId;
+        console.log(`🔧 Usando wid como sessionId: ${whatsappId}`);
+      }
+      
+      if (!wbot.sessionId) {
+        console.error(`❌ Não foi possível determinar sessionId em syncUnreadMessages`);
+        return;
+      }
     }
     
     await new Promise((resolve) => setTimeout(resolve, 5000));
@@ -119,8 +331,19 @@ const createOrUpdateContact = async (whatsappId, sessionId, wbot) => {
 // Função para processar mensagens recebidas
 const handleMessage = async (msg, wbot) => {
   try {
-    if (msg.from === 'status@broadcast') return;
-    
+    console.log(`[DEBUG] Iniciando handleMessage para mensagem:`, {
+      from: msg.from,
+      body: msg.body?.substring(0, 100),
+      type: msg.type,
+      timestamp: msg.timestamp,
+      hasMedia: msg.hasMedia
+    });
+
+    if (msg.from === 'status@broadcast') {
+      console.log('[DEBUG] Ignorando mensagem de status@broadcast');
+      return;
+    }
+
     console.log(`📨 Nova mensagem WhatsApp.js de ${msg.from}: ${msg.body}`);
     console.log(`🔍 Dados do wbot:`, {
       sessionId: wbot.sessionId,
@@ -130,15 +353,69 @@ const handleMessage = async (msg, wbot) => {
     
     // Verificar se wbot.sessionId está definido
     if (!wbot.sessionId) {
-      console.error(`❌ wbot.sessionId está indefinido! Dados do wbot:`, wbot);
-      return;
+      console.error(`❌ wbot.sessionId está indefinido! Tentando alternativas...`);
+      
+      // Tentar usar wbot.id como sessionId
+      if (wbot.id) {
+        wbot.sessionId = wbot.id.toString();
+        console.log(`🔧 Usando wbot.id como sessionId: ${wbot.sessionId}`);
+      }
+      
+      // Tentar usar o wid do WhatsApp
+      if (!wbot.sessionId && wbot.info && wbot.info.wid) {
+        const whatsappId = wbot.info.wid._serialized.split('@')[0];
+        wbot.sessionId = whatsappId;
+        console.log(`🔧 Usando wid como sessionId: ${whatsappId}`);
+      }
+      
+      // Se ainda não conseguiu, tentar continuar sem sessionId
+      if (!wbot.sessionId) {
+        console.error(`❌ Não foi possível determinar sessionId, pulando processamento`);
+        return;
+      }
     }
     
     // Buscar a sessão no banco de dados usando o whatsappId
     console.log(`🔍 Buscando sessão no banco com whatsappId: ${wbot.sessionId}`);
-    const session = await Session.findOne({
+    let session = await Session.findOne({
       where: { whatsappId: wbot.sessionId }
     });
+
+    console.log(`[DEBUG] Resultado da busca por whatsappId:`, session ? {
+      id: session.id,
+      whatsappId: session.whatsappId,
+      name: session.name,
+      status: session.status
+    } : 'Nenhuma sessão encontrada');
+
+    // Se não encontrou pela primeira tentativa, tentar buscar pelo ID da sessão
+    if (!session && wbot.id) {
+      console.log(`🔍 Tentando buscar sessão pelo ID: ${wbot.id}`);
+      session = await Session.findOne({
+        where: { id: wbot.id }
+      });
+      console.log(`[DEBUG] Resultado da busca por ID:`, session ? {
+        id: session.id,
+        whatsappId: session.whatsappId,
+        name: session.name,
+        status: session.status
+      } : 'Nenhuma sessão encontrada');
+    }
+
+    // Se ainda não encontrou, tentar buscar pelo número do WhatsApp
+    if (!session && wbot.info && wbot.info.wid) {
+      const whatsappNumber = wbot.info.wid._serialized.split('@')[0];
+      console.log(`🔍 Tentando buscar sessão pelo número: ${whatsappNumber}`);
+      session = await Session.findOne({
+        where: { whatsappId: whatsappNumber }
+      });
+      console.log(`[DEBUG] Resultado da busca por número:`, session ? {
+        id: session.id,
+        whatsappId: session.whatsappId,
+        name: session.name,
+        status: session.status
+      } : 'Nenhuma sessão encontrada');
+    }
     
     if (!session) {
       console.error(`❌ Sessão não encontrada no banco: ${wbot.sessionId}`);
@@ -165,13 +442,36 @@ const handleMessage = async (msg, wbot) => {
       ticket = await Ticket.create({
         sessionId: session.id,
         contact: msg.from,
-        contactId: contact ? contact.id : null, // Vincular ao contato criado
+        contactId: contact ? contact.id : null,
         lastMessage: msg.body || '',
         unreadCount: 1,
         status: 'open',
         chatStatus: 'waiting' // Iniciar como aguardando
       });
       console.log(`🎫 Novo ticket criado: #${ticket.id} para ${msg.from} na sessão ${wbot.sessionId} (ID: ${session.id}) com contato ${contact?.id || 'N/A'}`);
+
+      // Atribuir automaticamente à fila da sessão
+      try {
+        const { Queue } = await import('../models/index.js');
+        const queue = await Queue.findOne({
+          where: {
+            sessionId: session.id,
+            isActive: true
+          }
+        });
+
+        if (queue) {
+          await ticket.update({
+            queueId: queue.id,
+            status: 'open'
+          });
+          console.log(`✅ Ticket #${ticket.id} atribuído automaticamente à fila "${queue.name}"`);
+        } else {
+          console.log(`ℹ️ Nenhuma fila ativa encontrada para a sessão ${session.id}`);
+        }
+      } catch (queueError) {
+        console.error(`❌ Erro ao atribuir fila automaticamente:`, queueError);
+      }
       // Emitir notificação para frontend (desktop/mobile)
       try {
         const payload = {
@@ -232,13 +532,90 @@ const handleMessage = async (msg, wbot) => {
       await ticket.save();
     }
     
+    // Verificar se é mensagem de grupo e obter informações do participante
+    let groupInfo = {
+      isFromGroup: false,
+      groupName: null,
+      participantName: null,
+      participantId: null
+    };
+
+    // Verificar se é resposta de botão interativo
+    let buttonResponse = null;
+    if (msg.type === 'buttons_response') {
+      buttonResponse = {
+        buttonId: msg.selectedButtonId,
+        buttonText: msg.selectedButtonText || msg.body
+      };
+      console.log(`🔘 Resposta de botão detectada:`, buttonResponse);
+    } else if (msg.type === 'list_response') {
+      buttonResponse = {
+        listId: msg.selectedRowId,
+        listText: msg.selectedRowTitle || msg.body,
+        listDescription: msg.selectedRowDescription
+      };
+      console.log(`📋 Resposta de lista detectada:`, buttonResponse);
+    }
+
+    if (contact && contact.isGroup && msg.author) {
+      groupInfo.isFromGroup = true;
+      groupInfo.participantId = msg.author;
+      
+      try {
+        // Obter informações do grupo
+        const groupContact = await wbot.getContactById(msg.from);
+        if (groupContact && groupContact.name) {
+          groupInfo.groupName = groupContact.name;
+        }
+        
+        // Obter informações do participante que enviou a mensagem
+        const participantContact = await wbot.getContactById(msg.author);
+        if (participantContact) {
+          groupInfo.participantName = participantContact.name || participantContact.pushname || msg.author.split('@')[0];
+        } else {
+          // Fallback: usar o ID sem @c.us
+          groupInfo.participantName = msg.author.split('@')[0];
+        }
+        
+        console.log(`👥 Mensagem de grupo detectada:`, {
+          groupName: groupInfo.groupName,
+          participantName: groupInfo.participantName,
+          participantId: groupInfo.participantId,
+          groupId: msg.from
+        });
+      } catch (groupError) {
+        console.warn(`⚠️ Erro ao obter informações do grupo:`, groupError.message);
+        groupInfo.participantName = msg.author ? msg.author.split('@')[0] : 'Participante';
+      }
+    }
+
     // Salvar mensagem
-    const message = await TicketMessage.create({
+    const messageData = {
       ticketId: ticket.id,
       sender: 'contact',
       content: msg.body || '',
-      timestamp: new Date()
-    });
+      timestamp: new Date(),
+      isFromGroup: groupInfo.isFromGroup,
+      groupName: groupInfo.groupName,
+      participantName: groupInfo.participantName,
+      participantId: groupInfo.participantId
+    };
+
+    // Adicionar informações de resposta de botão se aplicável
+    if (buttonResponse) {
+      messageData.content = `[BOTÃO] ${buttonResponse.buttonText || buttonResponse.listText}`;
+      if (buttonResponse.buttonId) {
+        messageData.buttonId = buttonResponse.buttonId;
+      }
+      if (buttonResponse.listId) {
+        messageData.listId = buttonResponse.listId;
+      }
+      if (buttonResponse.listDescription) {
+        messageData.buttonDescription = buttonResponse.listDescription;
+      }
+    }
+
+    const message = await TicketMessage.create(messageData);
     
     console.log(`💾 Mensagem salva no ticket #${ticket.id}`);
     
@@ -274,6 +651,20 @@ const handleMessage = async (msg, wbot) => {
     } catch (socketError) {
       console.error(`❌ Erro ao emitir evento WebSocket:`, socketError);
     }
+
+    // Processar regras da fila
+    try {
+      console.log(`🔧 Processando regras da fila para ticket #${ticket.id}`);
+      if (ticket.queueId) {
+        const { processQueueRules } = await import('./messageCallbacks.js');
+        await processQueueRules(ticket, session.id, !ticket.assignedUserId);
+        console.log(`✅ Regras da fila processadas com sucesso`);
+      } else {
+        console.log(`ℹ️ Ticket #${ticket.id} não tem fila atribuída, pulando processamento de regras`);
+      }
+    } catch (queueError) {
+      console.error(`❌ Erro ao processar regras da fila:`, queueError);
+    }
     
   } catch (error) {
     console.error('Erro ao processar mensagem WhatsApp.js:', error);
@@ -288,7 +679,15 @@ export const initWbot = async (whatsapp) => {
     try {
       console.log('🚀 Iniciando sessão WhatsApp.js para:', whatsapp.name);
       
-      const sessionName = whatsapp.name;
+      const sessionName = whatsapp.name || whatsapp.whatsappId;
+      
+      if (!sessionName) {
+        console.error(`❌ sessionName não definido! whatsapp.name: ${whatsapp.name}, whatsapp.whatsappId: ${whatsapp.whatsappId}`);
+        reject(new Error("Nome da sessão não definido"));
+        return;
+      }
+      
+      console.log(`🚀 Iniciando sessão WhatsApp.js para: ${sessionName}`);
       let sessionCfg;
 
       if (whatsapp && whatsapp.session) {
@@ -299,7 +698,7 @@ export const initWbot = async (whatsapp) => {
       const existingSessionIndex = sessions.findIndex(s => s.id === whatsapp.id);
       if (existingSessionIndex !== -1) {
         console.log(`Removendo sessão existente: ${whatsapp.id}`);
-        await sessions[existingSessionIndex].destroy();
+        await safeDestroySession(sessions[existingSessionIndex], whatsapp.id);
         sessions.splice(existingSessionIndex, 1);
       }
 
@@ -349,37 +748,63 @@ export const initWbot = async (whatsapp) => {
       wbot.initialize();
 
       wbot.on("qr", async qr => {
-        console.log("📱 QR Code gerado para sessão:", sessionName);
-        qrCode.generate(qr, { small: true });
-        
-        await whatsapp.update({ 
-          qrcode: qr, 
-          status: "qrcode", 
-          retries: 0 
-        });
-
-        // Adicionar à lista se não existir
-        const sessionIndex = sessions.findIndex(s => s.id === whatsapp.id);
-        if (sessionIndex === -1) {
-          sessions.push(wbot);
-        }
-
-        // Emitir evento via socket se disponível
         try {
-          const { emitToAll } = await import('./socket.js');
-          emitToAll("qr-code-update", {
-            sessionId: whatsapp.id,
-            qrCode: qr,
-            status: 'qr_ready'
+          console.log("📱 QR Code gerado para sessão:", sessionName);
+          qrCode.generate(qr, { small: true });
+
+          // Converter QR para base64 data URL
+          const QRCode = await import('qrcode');
+          const qrDataURL = await QRCode.toDataURL(qr);
+
+          await whatsapp.update({
+            qrcode: qr,
+            status: "qrcode",
+            retries: 0
           });
-          console.log('✅ QR Code emitido via WebSocket');
-        } catch (err) {
-          console.log('Socket não disponível para emitir QR');
+
+          // Adicionar à lista se não existir
+          const sessionIndex = sessions.findIndex(s => s.id === whatsapp.id);
+          if (sessionIndex === -1) {
+            sessions.push(wbot);
+          }
+
+          // Armazenar QR code para acesso via API
+          const { sessionQRs, sessionStatus } = await import('./sessionState.js');
+          sessionQRs.set(whatsapp.whatsappId, qrDataURL);
+          sessionStatus.set(whatsapp.whatsappId, 'qr_ready');
+
+          // Emitir evento via socket se disponível
+          try {
+            const { emitToAll } = await import('./socket.js');
+            console.log(`📡 Emitindo session-qr-update para sessão ${whatsapp.id} com status 'qr_ready'`);
+            emitToAll("session-qr-update", {
+              sessionId: whatsapp.id,
+              qrCode: qrDataURL,
+              status: 'qr_ready'
+            });
+            console.log('✅ QR Code emitido via WebSocket');
+          } catch (err) {
+            console.log('Socket não disponível para emitir QR');
+          }
+        } catch (error) {
+          console.error('❌ Erro ao processar QR code:', error);
         }
       });
 
       wbot.on("authenticated", async session => {
-        console.log(`✅ Sessão ${sessionName} AUTENTICADA`);
+        console.log(`✅ Sessão ${sessionName} AUTENTICADA - Emitindo evento de autenticação`);
+        
+        try {
+          const { emitToAll } = await import('./socket.js');
+          console.log(`📡 Emitindo session-status-update para sessão ${whatsapp.id} com status 'authenticated'`);
+          emitToAll("session-status-update", {
+            sessionId: whatsapp.id,
+            status: 'authenticated'
+          });
+          console.log('✅ Evento de autenticação emitido via WebSocket');
+        } catch (err) {
+          console.log('Socket não disponível para emitir autenticação');
+        }
       });
 
       wbot.on("auth_failure", async msg => {
@@ -408,7 +833,7 @@ export const initWbot = async (whatsapp) => {
             sessionId: whatsapp.id,
             status: 'error'
           });
-          emitToAll("qr-code-update", {
+          emitToAll("session-qr-update", {
             sessionId: whatsapp.id,
             qrCode: '',
             status: 'error'
@@ -422,74 +847,181 @@ export const initWbot = async (whatsapp) => {
       });
 
       wbot.on("ready", async () => {
-        console.log(`🟢 Sessão ${sessionName} PRONTA`);
-
-        await whatsapp.update({
-          status: "CONNECTED",
-          qrcode: "",
-          retries: 0,
-          number: wbot.info.wid._serialized.split("@")[0]
-        });
-
         try {
-          const { emitToAll } = await import('./socket.js');
-          emitToAll("session-status-update", {
-            sessionId: whatsapp.id,
-            status: 'connected'
+          console.log(`🟢 Sessão ${sessionName} PRONTA - Iniciando atualização do banco`);
+          console.log(`🔍 wbot.sessionId antes de definir: ${wbot.sessionId}`);
+
+          // Garantir que sessionId está definido
+          wbot.sessionId = sessionName;
+          console.log(`🔍 wbot.sessionId após definir: ${wbot.sessionId}`);
+
+          await whatsapp.update({
+            status: "CONNECTED",
+            qrcode: "",
+            retries: 0,
+            number: wbot.info.wid._serialized.split("@")[0],
+            whatsappId: wbot.info.wid._serialized.split("@")[0] // Atualizar whatsappId com o número real
           });
-          emitToAll("qr-code-update", {
-            sessionId: whatsapp.id,
-            qrCode: '',
-            status: 'connected'
-          });
-          console.log('✅ Status conectado emitido via WebSocket');
-        } catch (err) {
-          console.log('Socket não disponível');
+
+          // Atualizar sessionId na sessão ativa para manter consistência
+          wbot.sessionId = wbot.info.wid._serialized.split("@")[0];
+          console.log(`🔄 SessionId atualizado na memória: ${wbot.sessionId}`);
+
+          console.log(`🟢 Sessão ${sessionName} - Status atualizado no banco: CONNECTED`);
+
+          // Atualizar status para acesso via API
+          const { sessionStatus, sessionQRs } = await import('./sessionState.js');
+          sessionStatus.set(whatsapp.whatsappId, 'connected');
+          sessionQRs.delete(whatsapp.whatsappId); // Limpar QR code quando conectado
+
+          try {
+            const { emitToAll } = await import('./socket.js');
+
+            console.log(`📡 Emitindo session-status-update para sessão ${whatsapp.id} com status 'connected'`);
+            emitToAll("session-status-update", {
+              sessionId: whatsapp.id,
+              status: 'connected'
+            });
+
+            console.log(`📡 Emitindo session-qr-update para sessão ${whatsapp.id} com status 'connected'`);
+            emitToAll("session-qr-update", {
+              sessionId: whatsapp.id,
+              qrCode: '',
+              status: 'connected'
+            });
+
+            console.log('✅ Ambos os eventos de status conectado emitidos via WebSocket');
+          } catch (err) {
+            console.log('Socket não disponível para emitir status conectado');
+          }
+
+          // Adicionar à lista se não existir
+          const sessionIndex = sessions.findIndex(s => s.id === whatsapp.id);
+          if (sessionIndex === -1) {
+            sessions.push(wbot);
+          }
+
+          wbot.sendPresenceAvailable();
+          await syncUnreadMessages(wbot);
+
+          resolve(wbot);
+        } catch (error) {
+          console.error('❌ Erro no evento ready:', error);
+          reject(error);
         }
-
-        // Adicionar à lista se não existir
-        const sessionIndex = sessions.findIndex(s => s.id === whatsapp.id);
-        if (sessionIndex === -1) {
-          sessions.push(wbot);
-        }
-
-        wbot.sendPresenceAvailable();
-        await syncUnreadMessages(wbot);
-
-        resolve(wbot);
       });
 
       wbot.on("disconnected", async (reason) => {
-        console.log(`🔴 Sessão ${sessionName} desconectada:`, reason);
-        
-        await whatsapp.update({
-          status: "DISCONNECTED"
-        });
-
-        // Remover da lista de sessões
-        const sessionIndex = sessions.findIndex(s => s.id === whatsapp.id);
-        if (sessionIndex !== -1) {
-          sessions.splice(sessionIndex, 1);
-        }
-
         try {
-          const { getIO } = await import('./socket.js');
-          const io = getIO();
-          io.emit("whatsappSession", {
-            action: "update",
-            session: whatsapp
-          });
-        } catch (err) {
-          console.log('Socket não disponível');
-        }
-      });
+          console.log(`🔴 Sessão ${sessionName} desconectada:`, reason);
+          console.log(`[DEBUG] Tipo de desconexão:`, typeof reason);
 
-      wbot.on("message", async msg => {
-        await handleMessage(msg, wbot);
+          // Identificar o tipo de desconexão
+          const isLogout = reason === 'LOGOUT';
+          const isTimeout = reason === 'TIMEOUT';
+          const isNetworkError = reason && reason.includes('Network');
+
+          console.log(`[DEBUG] Análise da desconexão:`, {
+            isLogout,
+            isTimeout,
+            isNetworkError,
+            reason: reason
+          });
+
+          await whatsapp.update({
+            status: "DISCONNECTED"
+          });
+
+          // Remover da lista de sessões
+          const sessionIndex = sessions.findIndex(s => s.id === whatsapp.id);
+          if (sessionIndex !== -1) {
+            sessions.splice(sessionIndex, 1);
+          }
+
+          // Limpar arquivos de autenticação automaticamente
+          const cleanedCount = await cleanupAuthFiles(whatsapp.id, whatsapp.whatsappId);
+          console.log(`🧹 Arquivos de autenticação limpos automaticamente: ${cleanedCount} itens`);
+
+          try {
+            const { getIO } = await import('./socket.js');
+            const io = getIO();
+            io.emit("whatsappSession", {
+              action: "update",
+              session: whatsapp
+            });
+          } catch (err) {
+            console.log('Socket não disponível');
+          }
+
+          // Se foi logout forçado, não tentar reconectar automaticamente
+          if (isLogout) {
+            console.log(`🚫 Logout detectado para sessão ${sessionName}, não reconectando automaticamente`);
+            reject(new Error(`Sessão desconectada por logout: ${reason}`));
+            return;
+          }
+
+          // Para outros tipos de desconexão, podemos tentar reconectar
+          console.log(`🔄 Desconexão não forçada detectada (${reason}), mantendo possibilidade de reconexão`);
+
+          reject(new Error(`Sessão desconectada: ${reason}`));
+        } catch (error) {
+          console.error('❌ Erro no evento disconnected:', error);
+          reject(error);
+        }
+      });      wbot.on("message", async msg => {
+        try {
+          console.log(`📨 [DEBUG] Evento message disparado - Raw message:`, JSON.stringify({
+            from: msg.from,
+            to: msg.to,
+            body: msg.body,
+            type: msg.type,
+            timestamp: msg.timestamp,
+            hasMedia: msg.hasMedia,
+            fromMe: msg.fromMe,
+            author: msg.author,
+            deviceType: msg.deviceType,
+            isForwarded: msg.isForwarded,
+            isStatus: msg.isStatus,
+            isStarred: msg.isStarred,
+            quotedMsg: msg.quotedMsg ? {
+              from: msg.quotedMsg.from,
+              body: msg.quotedMsg.body,
+              type: msg.quotedMsg.type
+            } : null
+          }, null, 2));
+
+          await handleMessage(msg, wbot);
+        } catch (error) {
+          console.error('❌ Erro ao processar mensagem WhatsApp.js:', error);
+
+          // Verificar se é erro de contexto destruído
+          if (error.message && error.message.includes('Execution context was destroyed')) {
+            console.error('🚨 Erro crítico: Execution context was destroyed. Sessão provavelmente corrompida.');
+
+            // Tentar marcar a sessão como desconectada
+            try {
+              await whatsapp.update({ status: "DISCONNECTED" });
+              console.log('✅ Status da sessão atualizado para DISCONNECTED devido a erro crítico');
+            } catch (updateError) {
+              console.error('❌ Falha ao atualizar status da sessão:', updateError);
+            }
+
+            // Remover da lista de sessões ativas
+            const sessionIndex = sessions.findIndex(s => s.id === whatsapp.id);
+            if (sessionIndex !== -1) {
+              sessions.splice(sessionIndex, 1);
+              console.log('🗑️ Sessão removida da lista devido a erro crítico');
+            }
+          }
+
+          console.error('❌ Stack trace:', error.stack);
+          // Não lançar erro para não quebrar o fluxo
+        }
       });
 
     } catch (err) {
       console.error('Erro ao inicializar sessão WhatsApp.js:', err);
+      console.error('Stack trace completo:', err.stack);
       reject(err);
     }
   });
@@ -506,16 +1038,27 @@ export const getWbot = (whatsappId) => {
 };
 
 // Função para remover sessão
-export const removeWbot = (whatsappId) => {
+export const removeWbot = async (whatsappId) => {
   try {
     const sessionIndex = sessions.findIndex(s => s.id === whatsappId);
     if (sessionIndex !== -1) {
-      sessions[sessionIndex].destroy();
+      // Destruir a sessão (que já inclui limpeza de arquivos)
+      await safeDestroySession(sessions[sessionIndex], whatsappId);
       sessions.splice(sessionIndex, 1);
       console.log(`🗑️ Sessão WhatsApp.js ${whatsappId} removida`);
+    } else {
+      // Mesmo se não estiver na lista, tentar limpar arquivos
+      console.log(`⚠️ Sessão ${whatsappId} não encontrada na lista, limpando arquivos apenas`);
+      await cleanupAuthFiles(whatsappId, whatsappId);
     }
   } catch (err) {
     console.error('Erro ao remover sessão WhatsApp.js:', err);
+    // Mesmo com erro, tentar limpar arquivos
+    try {
+      await cleanupAuthFiles(whatsappId, whatsappId);
+    } catch (cleanupErr) {
+      console.error('Erro ao limpar arquivos na remoção:', cleanupErr);
+    }
   }
 };
 
@@ -528,7 +1071,7 @@ export const restartWbot = async (whatsappId) => {
       throw new Error("WhatsApp não encontrado.");
     }
     
-    sessions[sessionIndex].destroy();
+    await safeDestroySession(sessions[sessionIndex], whatsappId);
     sessions.splice(sessionIndex, 1);
 
     const newSession = await initWbot(whatsapp);
@@ -553,26 +1096,20 @@ export const shutdownWbot = async (whatsappId) => {
   const sessionIndex = sessions.findIndex(s => s.id === whatsappIDNumber);
   if (sessionIndex === -1) {
     console.warn(`Sessão com ID ${whatsappIDNumber} não foi encontrada.`);
+    // Mesmo sem sessão ativa, tentar limpar arquivos
+    const cleanedCount = await cleanupAuthFiles(whatsappIDNumber, whatsappIDNumber);
+    console.log(`🧹 Arquivos limpos para sessão inexistente: ${cleanedCount} itens`);
     throw new Error("Sessão WhatsApp não inicializada.");
   }
 
-  const sessionPath = path.resolve(
-    process.cwd(),
-    `.wwebjs_auth/session-bd_${whatsappIDNumber}`
-  );
-
   try {
     console.log(`🔌 Desligando sessão WhatsApp ID: ${whatsappIDNumber}`);
-    await sessions[sessionIndex].destroy();
+    await safeDestroySession(sessions[sessionIndex], whatsappIDNumber);
     console.log(`✅ Sessão ${whatsappIDNumber} desligada com sucesso.`);
-
-    console.log(`🗂️ Removendo arquivos da sessão: ${sessionPath}`);
-    await fs.rm(sessionPath, { recursive: true, force: true });
-    console.log(`✅ Arquivos da sessão removidos: ${sessionPath}`);
 
     sessions.splice(sessionIndex, 1);
     console.log(`📝 Sessão ${whatsappIDNumber} removida da lista.`);
-    
+
     const retry = whatsapp.retries;
     await whatsapp.update({
       status: "DISCONNECTED",
@@ -581,9 +1118,16 @@ export const shutdownWbot = async (whatsappId) => {
       retries: retry + 1,
       number: ""
     });
-    
+
   } catch (error) {
     console.error(`Erro ao desligar sessão ${whatsappIDNumber}:`, error);
+    // Mesmo com erro, tentar limpar arquivos
+    try {
+      const cleanedCount = await cleanupAuthFiles(whatsappIDNumber, whatsappIDNumber);
+      console.log(`🧹 Arquivos limpos após erro: ${cleanedCount} itens`);
+    } catch (cleanupErr) {
+      console.error('Erro ao limpar arquivos no shutdown:', cleanupErr);
+    }
     throw new Error("Falha ao destruir sessão WhatsApp.");
   }
 };
@@ -626,7 +1170,7 @@ export const createWhatsappJsSession = async (sessionId, onReady, onMessage) => 
     const existingSessionIndex = sessions.findIndex(s => s.sessionId === sessionId);
     if (existingSessionIndex !== -1) {
       console.log(`Removendo sessão existente: ${sessionId}`);
-      await sessions[existingSessionIndex].destroy();
+      await safeDestroySession(sessions[existingSessionIndex], sessionId);
       sessions.splice(existingSessionIndex, 1);
     }
 
@@ -727,10 +1271,32 @@ export const createWhatsappJsSession = async (sessionId, onReady, onMessage) => 
         
         console.log(`📨 Nova mensagem WhatsApp.js de ${msg.from}: ${msg.body}`);
         
+        // Garantir que sessionId está definido (pode ser chamado antes do ready)
+        if (!wbot.sessionId) {
+          console.log(`⚠️ wbot.sessionId não definido, definindo como: ${sessionName}`);
+          wbot.sessionId = sessionName;
+        }
+        
+        // Se ainda não tiver sessionId, usar o id do wbot como fallback
+        if (!wbot.sessionId && wbot.id) {
+          console.log(`🔧 Usando wbot.id como sessionId: ${wbot.id}`);
+          wbot.sessionId = wbot.id.toString();
+        }
+        
+        // Se ainda não tiver, tentar buscar pelo whatsappId
+        if (!wbot.sessionId) {
+          console.log(`🔍 Tentando encontrar sessionId pelo wbot.info.wid...`);
+          if (wbot.info && wbot.info.wid) {
+            const whatsappId = wbot.info.wid._serialized.split('@')[0];
+            wbot.sessionId = whatsappId;
+            console.log(`🔧 sessionId definido pelo wid: ${whatsappId}`);
+          }
+        }
+        
         // Verificar se sessionId está definido
         if (!wbot.sessionId) {
-          console.error(`❌ wbot.sessionId indefinido no evento message! SessionId original: ${sessionId}`);
-          return;
+          console.error(`❌ wbot.sessionId indefinido no evento message! Tentando continuar...`);
+          // Não retornar, tentar processar mesmo assim
         }
         
         // Chamar handleMessage
@@ -765,14 +1331,70 @@ export const createWhatsappJsSession = async (sessionId, onReady, onMessage) => 
 /**
  * Obter uma sessão por sessionId
  */
-export const getWhatsappJsSession = (sessionId) => {
-  const sessionIndex = sessions.findIndex(s => s.sessionId === sessionId);
-  
-  if (sessionIndex === -1) {
-    throw new Error("Sessão WhatsApp.js não encontrada");
+export const getWhatsappJsSession = async (sessionId) => {
+  console.log(`🔍 Procurando sessão WhatsApp.js: "${sessionId}"`);
+  console.log(`📊 Total de sessões ativas: ${sessions.length}`);
+
+  // Primeiro, buscar a sessão no banco de dados para obter o whatsappId
+  let dbSession = null;
+  try {
+    const { Session } = await import('../models/index.js');
+    
+    // Se sessionId parece ser um whatsappId (muito grande), buscar por whatsappId
+    if (sessionId && sessionId.toString().length > 10) {
+      dbSession = await Session.findOne({ where: { whatsappId: sessionId } });
+      console.log(`🗄️ Busca por whatsappId "${sessionId}":`, dbSession ? {
+        id: dbSession.id,
+        whatsappId: dbSession.whatsappId,
+        name: dbSession.name
+      } : 'Não encontrada');
+    } else {
+      // Caso contrário, buscar por ID
+      dbSession = await Session.findByPk(sessionId);
+      console.log(`🗄️ Busca por ID "${sessionId}":`, dbSession ? {
+        id: dbSession.id,
+        whatsappId: dbSession.whatsappId,
+        name: dbSession.name
+      } : 'Não encontrada');
+    }
+  } catch (error) {
+    console.warn(`⚠️ Erro ao buscar sessão no banco:`, error.message);
   }
+
+  // Log de todas as sessões ativas para debug
+  sessions.forEach((s, index) => {
+    console.log(`   [${index}] sessionId: "${s.sessionId}", id: ${s.id}`);
+  });
+
+  // Buscar por sessionId direto primeiro
+  let sessionIndex = sessions.findIndex(s => s.sessionId === sessionId);
   
-  return sessions[sessionIndex];
+  // Se não encontrou e temos o whatsappId do banco, buscar por ele
+  if (sessionIndex === -1 && dbSession?.whatsappId) {
+    console.log(`🔍 Tentando buscar por whatsappId: "${dbSession.whatsappId}"`);
+    sessionIndex = sessions.findIndex(s => s.sessionId === dbSession.whatsappId);
+  }
+
+  // Se ainda não encontrou, tentar buscar por ID numérico convertido para string
+  if (sessionIndex === -1 && dbSession?.id) {
+    console.log(`🔍 Tentando buscar por ID do banco convertido: "${dbSession.id}"`);
+    sessionIndex = sessions.findIndex(s => s.sessionId === dbSession.id.toString());
+  }
+
+  console.log(`🔍 Índice encontrado: ${sessionIndex}`);
+
+  if (sessionIndex === -1) {
+    console.error(`❌ Sessão WhatsApp.js não encontrada para ID: "${sessionId}"`);
+    console.error(`   Sessões disponíveis:`, sessions.map(s => ({ sessionId: s.sessionId, id: s.id })));
+    
+    // Retornar null em vez de lançar erro para evitar crashes
+    return null;
+  }
+
+  const session = sessions[sessionIndex];
+  console.log(`✅ Sessão encontrada: "${session.sessionId}"`);
+
+  return session;
 };
 
 /**
@@ -780,17 +1402,27 @@ export const getWhatsappJsSession = (sessionId) => {
  */
 export const sendText = async (sessionId, to, text) => {
   console.log(`🔍 Buscando sessão WhatsApp-Web.js: "${sessionId}"`);
-  
-  const client = getWhatsappJsSession(sessionId);
+
+  const client = await getWhatsappJsSession(sessionId);
   if (!client) {
     console.error(`❌ Sessão "${sessionId}" não encontrada no WhatsApp-Web.js`);
-    throw new Error(`Sessão "${sessionId}" não encontrada no WhatsApp-Web.js`);
+    throw new Error(`Sessão "${sessionId}" não encontrada ou não está ativa`);
   }
-  
+
   console.log(`✅ Sessão "${sessionId}" encontrada, enviando mensagem...`);
-  const result = await client.sendMessage(to, text);
-  
-  // Após enviar, tentar atualizar informações do contato
+
+  // Verificar se o cliente está pronto e conectado
+  try {
+    const state = await client.getState();
+    if (state !== 'CONNECTED') {
+      console.error(`❌ Cliente WhatsApp não está conectado (estado: ${state})`);
+      throw new Error(`Cliente WhatsApp não está conectado para sessão "${sessionId}"`);
+    }
+  } catch (stateError) {
+    console.warn(`⚠️ Não foi possível verificar estado da sessão, tentando enviar mesmo assim`);
+  }
+
+  const result = await client.sendMessage(to, text);  // Após enviar, tentar atualizar informações do contato
   try {
     const session = await Session.findOne({ where: { whatsappId: sessionId } });
     if (session) {
@@ -825,30 +1457,36 @@ export const sendMedia = async (sessionId, to, base64, filename, mimetype) => {
 };
 
 /**
- * Limpar uma sessão (alias para compatibilidade)
+ * Limpar arquivos de autenticação manualmente
  */
-export const cleanupSession = (sessionId) => {
-  const sessionIndex = sessions.findIndex(s => s.sessionId === sessionId);
-  if (sessionIndex !== -1) {
-    sessions[sessionIndex].destroy();
-    sessions.splice(sessionIndex, 1);
-    console.log(`Sessão WhatsApp.js removida: ${sessionId}`);
-  }
+export const cleanupSessionFiles = async (sessionId, whatsappId) => {
+  console.log(`🧹 Solicitação manual de limpeza para sessão ${sessionId || whatsappId}`);
+  return await cleanupAuthFiles(sessionId, whatsappId);
 };
 
 /**
  * Remover uma sessão por sessionId
  */
-export const removeWhatsappJsSession = (sessionId) => {
+export const removeWhatsappJsSession = async (sessionId) => {
   try {
     const sessionIndex = sessions.findIndex(s => s.sessionId === sessionId);
     if (sessionIndex !== -1) {
-      sessions[sessionIndex].destroy();
+      await safeDestroySession(sessions[sessionIndex], sessionId);
       sessions.splice(sessionIndex, 1);
       console.log(`Sessão WhatsApp.js removida: ${sessionId}`);
+    } else {
+      // Mesmo se não estiver na lista, tentar limpar arquivos
+      console.log(`⚠️ Sessão ${sessionId} não encontrada na lista, limpando arquivos apenas`);
+      await cleanupAuthFiles(sessionId, sessionId);
     }
   } catch (error) {
     console.error(`Erro ao remover sessão ${sessionId}:`, error);
+    // Mesmo com erro, tentar limpar arquivos
+    try {
+      await cleanupAuthFiles(sessionId, sessionId);
+    } catch (cleanupErr) {
+      console.error('Erro ao limpar arquivos na remoção:', cleanupErr);
+    }
   }
 };
 
@@ -879,33 +1517,30 @@ export const restartWhatsappJsSession = async (sessionId, onReady, onMessage) =>
 export const shutdownWhatsappJsSession = async (sessionId) => {
   try {
     console.log(`Desligando sessão WhatsApp.js: ${sessionId}`);
-    
+
     const sessionIndex = sessions.findIndex(s => s.sessionId === sessionId);
     if (sessionIndex === -1) {
       console.warn(`Sessão ${sessionId} não encontrada para desligar`);
+      // Mesmo sem sessão ativa, tentar limpar arquivos
+      const cleanedCount = await cleanupAuthFiles(sessionId, sessionId);
+      console.log(`🧹 Arquivos limpos para sessão inexistente: ${cleanedCount} itens`);
       return;
     }
 
-    // Destruir a sessão
-    await sessions[sessionIndex].destroy();
+    // Destruir a sessão (que já inclui limpeza)
+    await safeDestroySession(sessions[sessionIndex], sessionId);
     sessions.splice(sessionIndex, 1);
-    
-    // Remover arquivos da sessão
-    const sessionPath = path.resolve(
-      process.cwd(),
-      `.wwebjs_auth/session-zazap_${sessionId}`
-    );
-
-    try {
-      await fs.rm(sessionPath, { recursive: true, force: true });
-      console.log(`Arquivos da sessão removidos: ${sessionPath}`);
-    } catch (error) {
-      console.warn(`Erro ao remover arquivos da sessão: ${error.message}`);
-    }
 
     console.log(`Sessão ${sessionId} desligada com sucesso`);
   } catch (error) {
     console.error(`Erro ao desligar sessão ${sessionId}:`, error);
+    // Mesmo com erro, tentar limpar arquivos
+    try {
+      const cleanedCount = await cleanupAuthFiles(sessionId, sessionId);
+      console.log(`🧹 Arquivos limpos após erro: ${cleanedCount} itens`);
+    } catch (cleanupErr) {
+      console.error('Erro ao limpar arquivos no shutdown:', cleanupErr);
+    }
     throw error;
   }
 };
@@ -917,7 +1552,7 @@ export const disconnectSession = async (sessionId) => {
   try {
     const client = getWhatsappJsSession(sessionId);
     if (client) {
-      await client.logout();
+      await safeDestroySession(client, sessionId);
       removeWhatsappJsSession(sessionId);
       return true;
     }
@@ -1038,6 +1673,199 @@ export const getChatMedia = async (sessionId, contactId, limit = 50) => {
     return mediaInfo;
   } catch (error) {
     console.error(`❌ Erro ao buscar mídias do chat ${contactId}:`, error);
+    throw error;
+  }
+};
+
+/**
+ * Enviar mensagem com botões interativos
+ */
+export const sendButtons = async (sessionId, to, text, buttons, title = null, footer = null) => {
+  try {
+    console.log(`📤 Enviando botões via WhatsApp.js para ${to} na sessão ${sessionId}`);
+    
+    const session = await getWhatsappJsSession(sessionId);
+    if (!session) {
+      throw new Error(`Sessão ${sessionId} não encontrada ou não está ativa`);
+    }
+
+    // Verificar se a sessão está conectada através do estado do cliente
+    try {
+      const state = await session.getState();
+      if (state !== 'CONNECTED') {
+        throw new Error(`Sessão ${sessionId} não está conectada (estado: ${state})`);
+      }
+    } catch (stateError) {
+      console.warn(`⚠️ Não foi possível verificar estado da sessão, tentando enviar mesmo assim`);
+    }
+
+    // Formatar botões para o WhatsApp Web.js
+    const formattedButtons = buttons.map((button, index) => ({
+      buttonId: button.id || `btn_${index}`,
+      buttonText: {
+        displayText: button.text || button.displayText
+      },
+      type: 1
+    }));
+
+    // Criar a mensagem com botões
+    const buttonMessage = {
+      text: text,
+      buttons: formattedButtons,
+      headerType: 1
+    };
+
+    // Adicionar título se fornecido
+    if (title) {
+      buttonMessage.title = title;
+    }
+
+    // Adicionar rodapé se fornecido
+    if (footer) {
+      buttonMessage.footer = footer;
+    }
+
+    console.log(`📋 Estrutura dos botões:`, JSON.stringify(buttonMessage, null, 2));
+
+    // Enviar a mensagem
+    const message = await session.sendMessage(to, buttonMessage);
+    
+    console.log(`✅ Botões enviados com sucesso para ${to}`);
+    console.log(`📋 Resposta do WhatsApp:`, message);
+    
+    return {
+      success: true,
+      messageId: message?.id?._serialized || message?.key?.id || 'unknown',
+      data: message
+    };
+    
+  } catch (error) {
+    console.error(`❌ Erro ao enviar botões para ${to}:`, error);
+    throw error;
+  }
+};
+
+/**
+ * Enviar lista interativa (Menu)
+ */
+export const sendList = async (sessionId, to, text, buttonText, sections, title = null, footer = null) => {
+  try {
+    console.log(`📤 Enviando lista interativa via WhatsApp.js para ${to} na sessão ${sessionId}`);
+    
+    const session = await getWhatsappJsSession(sessionId);
+    if (!session) {
+      throw new Error(`Sessão ${sessionId} não encontrada ou não está ativa`);
+    }
+
+    // Verificar se a sessão está conectada através do estado do cliente
+    try {
+      const state = await session.getState();
+      if (state !== 'CONNECTED') {
+        throw new Error(`Sessão ${sessionId} não está conectada (estado: ${state})`);
+      }
+    } catch (stateError) {
+      console.warn(`⚠️ Não foi possível verificar estado da sessão, tentando enviar mesmo assim`);
+    }
+
+    // Formatar seções para o WhatsApp Web.js
+    const formattedSections = sections.map(section => ({
+      title: section.title,
+      rows: section.rows.map((row, index) => ({
+        rowId: row.id || `row_${index}`,
+        title: row.title,
+        description: row.description || ''
+      }))
+    }));
+
+    // Criar a mensagem com lista
+    const listMessage = {
+      text: text,
+      buttonText: buttonText,
+      sections: formattedSections,
+      listType: 1
+    };
+
+    // Adicionar título se fornecido
+    if (title) {
+      listMessage.title = title;
+    }
+
+    // Adicionar rodapé se fornecido
+    if (footer) {
+      listMessage.footer = footer;
+    }
+
+    console.log(`📋 Estrutura da lista:`, JSON.stringify(listMessage, null, 2));
+
+    // Enviar a mensagem
+    const message = await session.sendMessage(to, listMessage);
+    
+    console.log(`✅ Lista enviada com sucesso para ${to}`);
+    console.log(`📋 Resposta do WhatsApp:`, message);
+    
+    return {
+      success: true,
+      messageId: message?.id?._serialized || message?.key?.id || 'unknown',
+      data: message
+    };
+    
+  } catch (error) {
+    console.error(`❌ Erro ao enviar lista para ${to}:`, error);
+    throw error;
+  }
+};
+
+/**
+ * Enviar enquete (Poll) - Alternativa aos botões
+ */
+export const sendPoll = async (sessionId, to, question, options, optionsConfig = {}) => {
+  try {
+    console.log(`📊 Enviando enquete via WhatsApp.js para ${to} na sessão ${sessionId}`);
+    
+    const session = await getWhatsappJsSession(sessionId);
+    if (!session) {
+      throw new Error(`Sessão ${sessionId} não encontrada ou não está ativa`);
+    }
+
+    // Verificar se a sessão está conectada
+    try {
+      const state = await session.getState();
+      if (state !== 'CONNECTED') {
+        throw new Error(`Sessão ${sessionId} não está conectada (estado: ${state})`);
+      }
+    } catch (stateError) {
+      console.warn(`⚠️ Não foi possível verificar estado da sessão, tentando enviar mesmo assim`);
+    }
+
+    // Configurações padrão para a enquete
+    const pollConfig = {
+      messageSecret: optionsConfig.messageSecret || undefined,
+      options: optionsConfig.options || undefined,
+      allowMultipleAnswers: optionsConfig.allowMultipleAnswers || false,
+      ...optionsConfig
+    };
+
+    console.log(`📋 Estrutura da enquete:`, {
+      question,
+      options,
+      pollConfig
+    });
+
+    // Enviar a enquete usando Poll do whatsapp-web.js
+    const poll = new pkg.Poll(question, options, pollConfig);
+    const message = await session.sendMessage(to, poll);
+
+    console.log(`✅ Enquete enviada com sucesso para ${to}`);
+    console.log(`📋 Resposta do WhatsApp:`, message);
+
+    return {
+      success: true,
+      messageId: message?.id?._serialized || message?.key?.id || 'unknown',
+      data: message
+    };
+
+  } catch (error) {
+    console.error(`❌ Erro ao enviar enquete para ${to}:`, error);
     throw error;
   }
 };

@@ -24,6 +24,29 @@ export default function ContactsComponent() {
   const [deletingContact, setDeletingContact] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [selectedSessionId, setSelectedSessionId] = useState('');
+  const [contactFilter, setContactFilter] = useState('all'); // 'all', 'groups', 'individuals'
+
+  // Listener para eventos de filtro das configurações
+  useEffect(() => {
+    const handleFilterEvent = (event) => {
+      const { isGroup } = event.detail;
+      if (isGroup === true) {
+        setContactFilter('groups');
+      } else if (isGroup === false) {
+        setContactFilter('individuals');
+      } else {
+        setContactFilter('all');
+      }
+    };
+
+    window.addEventListener('filterContacts', handleFilterEvent);
+    return () => window.removeEventListener('filterContacts', handleFilterEvent);
+  }, []);
+
+  // Recarregar contatos quando o filtro mudar
+  useEffect(() => {
+    fetchContacts();
+  }, [contactFilter]);
 
   useEffect(() => {
     fetchContacts();
@@ -85,26 +108,64 @@ export default function ContactsComponent() {
   };
 
   const updateContactInList = (updatedContact) => {
-    setContacts(prevContacts => 
-      prevContacts.map(contact => {
-        // Procurar por ID do contato ou por número
-        if (contact.contactId === updatedContact.id || contact.number === updatedContact.whatsappId?.split('@')[0]) {
-          return {
+    console.log('🔄 Frontend - Recebido contact-updated:', updatedContact);
+    console.log('🔄 Frontend - ID do contato:', updatedContact.id);
+    console.log('🔄 Frontend - WhatsApp ID:', updatedContact.whatsappId);
+    console.log('🔄 Frontend - Nome:', updatedContact.name);
+    console.log('🔄 Frontend - Profile Pic URL:', updatedContact.profilePicUrl);
+    
+    setContacts(prevContacts => {
+      console.log('🔄 Frontend - Contatos atuais:', prevContacts.length);
+      
+      const updatedContacts = prevContacts.map(contact => {
+        // Extrair número limpo para comparação
+        const contactNumber = contact.number ? contact.number.split('@')[0] : '';
+        const updatedContactNumber = updatedContact.whatsappId ? updatedContact.whatsappId.split('@')[0] : '';
+        
+        console.log(`🔍 Comparando contato:`);
+        console.log(`  - contact.contactId (${contact.contactId}) === updatedContact.id (${updatedContact.id})`);
+        console.log(`  - contactNumber (${contactNumber}) === updatedContactNumber (${updatedContactNumber})`);
+        console.log(`  - contact.number original: ${contact.number}`);
+        
+        // Procurar por ID do contato ou por número limpo
+        if (contact.contactId === updatedContact.id || contactNumber === updatedContactNumber) {
+          console.log('✅ Contato encontrado para atualização!', contact);
+          const updatedContactData = {
             ...contact,
             name: updatedContact.name || updatedContact.pushname || contact.name,
             profilePicUrl: updatedContact.profilePicUrl,
             contactId: updatedContact.id
           };
+          console.log('✅ Dados do contato após atualização:', updatedContactData);
+          return updatedContactData;
         }
         return contact;
-      })
-    );
+      });
+      
+      console.log('🔄 Frontend - Contatos após atualização:', updatedContacts.length);
+      return updatedContacts;
+    });
   };
 
   const fetchContacts = async () => {
     try {
+      // Construir URL com filtro de grupos se aplicável
+      let url = '/api/tickets';
+      const params = new URLSearchParams();
+      
+      if (contactFilter === 'groups') {
+        params.append('isGroup', 'true');
+      } else if (contactFilter === 'individuals') {
+        params.append('isGroup', 'false');
+      }
+      
+      if (params.toString()) {
+        url += '?' + params.toString();
+      }
+      
       // Buscar tickets com dados dos contatos incluídos
-      const res = await apiFetch('/api/tickets');
+      console.log(`[FETCH TICKETS] Buscando com filtro: ${contactFilter} - URL: ${url}`);
+      const res = await apiFetch(url);
       const tickets = await safeJson(res);
 
       // Extrair contatos únicos dos tickets com dados mais completos
@@ -265,16 +326,42 @@ export default function ContactsComponent() {
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-white">Contatos</h1>
-          <p className="text-slate-400">Gerencie seus contatos do WhatsApp</p>
+          <div className="flex items-center space-x-3">
+            <h1 className="text-2xl font-bold text-white">Contatos</h1>
+            {contactFilter !== 'all' && (
+              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                contactFilter === 'groups' 
+                  ? 'bg-purple-100 text-purple-800' 
+                  : 'bg-green-100 text-green-800'
+              }`}>
+                {contactFilter === 'groups' ? '👥 Grupos' : '👤 Individuais'}
+              </span>
+            )}
+          </div>
+          <p className="text-slate-400">
+            Gerencie seus contatos do WhatsApp
+            {contactFilter === 'groups' && ' - Exibindo apenas grupos'}
+            {contactFilter === 'individuals' && ' - Exibindo apenas contatos individuais'}
+          </p>
         </div>
-        <button 
-          onClick={() => setShowNewContactModal(true)}
-          className="bg-gradient-to-r from-yellow-500 to-yellow-600 text-slate-900 px-4 py-2 rounded-lg flex items-center space-x-2 hover:from-yellow-600 hover:to-yellow-700 transition-all duration-200 font-semibold shadow-lg"
-        >
-          <UserPlusIcon className="h-5 w-5" />
-          <span>Novo Contato</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          {contactFilter !== 'all' && (
+            <button
+              onClick={() => setContactFilter('all')}
+              className="bg-slate-700 text-white px-3 py-2 rounded-lg flex items-center space-x-2 hover:bg-slate-600 transition-colors text-sm"
+            >
+              <XMarkIcon className="h-4 w-4" />
+              <span>Limpar Filtro</span>
+            </button>
+          )}
+          <button 
+            onClick={() => setShowNewContactModal(true)}
+            className="bg-gradient-to-r from-yellow-500 to-yellow-600 text-slate-900 px-4 py-2 rounded-lg flex items-center space-x-2 hover:from-yellow-600 hover:to-yellow-700 transition-all duration-200 font-semibold shadow-lg"
+          >
+            <UserPlusIcon className="h-5 w-5" />
+            <span>Novo Contato</span>
+          </button>
+        </div>
       </div>
 
       {/* Search */}

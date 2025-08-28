@@ -5,6 +5,8 @@ const tagController = {
   // Get all tags with filters and search
   async getTags(req, res) {
     try {
+      console.log('🏷️ Backend TagController: Requisição recebida, user:', req.user);
+      
       const {
         page = 1,
         limit = 50,
@@ -34,6 +36,7 @@ const tagController = {
       const validSortFields = ['name', 'category', 'priority', 'usageCount', 'createdAt'];
       const sortField = validSortFields.includes(sortBy) ? sortBy : 'name';
 
+      console.log('🏷️ Backend TagController: Buscando com where:', where);
       const tags = await Tag.findAndCountAll({
         where,
         include: [
@@ -48,6 +51,8 @@ const tagController = {
         limit: parseInt(limit),
         offset: parseInt(offset)
       });
+
+      console.log('🏷️ Backend TagController: Encontradas', tags.count, 'tags, retornando', tags.rows.length, 'itens');
 
       // Get categories for filtering
       const categories = await Tag.findAll({

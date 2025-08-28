@@ -16,13 +16,16 @@
 ✅ **Relatórios Avançados** - Analytics detalhados  
 ✅ **Tema Dark/Light** - Interface customizável  
 ✅ **Tags e Comentários** - Organização completa  
+✅ **Sistema de Enquetes** - Interação avançada com clientes  
+✅ **Integração WhatsApp** - Baileys + WhatsApp.js  
 
 ## 🛠 Tecnologias
 
-**Frontend:** React 18 + Tailwind CSS + Heroicons  
+**Frontend:** React 18 + Tailwind CSS + Heroicons + Lucide React  
 **Backend:** Node.js + Express + Sequelize + PostgreSQL  
-**WhatsApp:** Baileys + WhatsApp.js  
+**WhatsApp:** Baileys + WhatsApp.js (com suporte a Enquetes)  
 **Auth:** JWT + Middleware de segurança  
+**Real-time:** Socket.IO para comunicação em tempo real  
 
 ## ⚡ Instalação Rápida
 
@@ -56,7 +59,17 @@ CREATE DATABASE zazap_db;
 }
 ```
 
-### 4. Execute as migrações e inicie
+### 4. Configure as enquetes (opcional)
+```bash
+# Copie os arquivos de configuração
+cp .env.example backend/.env
+cp frontend/.env.example frontend/.env
+
+# Configure as variáveis de ambiente
+# Edite backend/.env e frontend/.env com suas configurações
+```
+
+### 5. Execute as migrações e inicie
 ```bash
 # Backend
 cd backend
@@ -71,29 +84,68 @@ npm start
 **Acesso:** http://localhost:3000  
 **Login:** admin@zazap.com / admin123
 
+### 🎯 Teste o Sistema de Enquetes
+1. Faça login no sistema
+2. Abra um ticket de atendimento
+3. Clique no botão "+" para nova mensagem
+4. Selecione "Enquete" e crie sua primeira enquete
+5. Envie para um contato WhatsApp válido
+
 ## 📁 Estrutura Simplificada
 
 ```
 zazap/
 ├── backend/           # API Node.js + Express
 │   ├── controllers/   # Lógica de negócio
+│   │   ├── pollController.js    # 🎯 Sistema de enquetes
+│   │   └── ...
 │   ├── models/       # Modelos Sequelize  
 │   ├── routes/       # Endpoints API
-│   └── services/     # Serviços WhatsApp
+│   ├── services/     # Serviços WhatsApp
+│   │   ├── whatsappjsService.js # 🔧 Integração WhatsApp
+│   │   └── ...
+│   └── ...
 ├── frontend/         # React App
-│   └── src/
-│       ├── pages/    # Páginas principais
-│       └── components/ # Componentes reutilizáveis
+│   ├── src/
+│   │   ├── modals/   # Modais da aplicação
+│   │   │   ├── PollModal.js     # 📝 Criação de enquetes
+│   │   │   ├── ButtonModal.js   # 📱 Modal atualizado
+│   │   │   └── ...
+│   │   └── ...
+│   └── ...
+├── docs/             # 📚 Documentação
+│   ├── ENQUETES-GUIDE.md       # 🎯 Guia completo de enquetes
+│   └── ...
+├── .env.example      # ⚙️ Configuração backend
+├── frontend/.env.example       # ⚙️ Configuração frontend
+├── PRODUCTION-README.md        # 🚀 Guia de produção
+├── CHANGELOG.md     # 📋 Histórico de versões
+└── README.md        # 📖 Este arquivo
 ```
 
-## 🌐 API Principais
+## 📊 Sistema de Enquetes
 
-**Auth:** `POST /api/auth/login`  
-**Tickets:** `GET|POST|PUT /api/tickets`  
-**Mensagens:** `GET|POST /api/ticket-messages/:id`  
-**Sessões:** `GET|POST|DELETE /api/sessions`  
-**Dashboard:** `GET /api/dashboard/stats`  
-**Campanhas:** `GET|POST /api/campaigns`  
+O ZaZap inclui um sistema avançado de enquetes para interação com clientes:
+
+### ✨ Funcionalidades
+- 📝 **Criação Simples** - Interface intuitiva para criar enquetes
+- 🔘 **Múltiplas Opções** - Até 12 opções por enquete
+- 📊 **Resultados em Tempo Real** - Acompanhe respostas instantaneamente
+- 📱 **Compatibilidade Total** - Funciona em todos os dispositivos
+- 🎯 **Integração WhatsApp** - Enviadas diretamente via WhatsApp
+
+### 🚀 Como Usar
+1. Abra um ticket de atendimento
+2. Clique no botão de mensagem (+)
+3. Selecione "Enquete" 
+4. Configure pergunta e opções
+5. Envie para o cliente
+
+### 📈 Benefícios
+- **Engajamento** - Clientes interagem diretamente
+- **Feedback** - Colete opiniões valiosas
+- **Automação** - Reduza tempo de resposta
+- **Analytics** - Métricas detalhadas de participação  
 
 ## � Apoie o Projeto
 

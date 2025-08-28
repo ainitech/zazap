@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
 export default function QuickRepliesComponent() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
@@ -22,18 +22,31 @@ export default function QuickRepliesComponent() {
 
   const controller = useRef(null);
 
+  console.log('🔧 QuickRepliesComponent: Inicializando, user:', user, 'token:', !!token);
+
   const fetchItems = async () => {
+    console.log('🔧 QuickRepliesComponent: Buscando respostas rápidas...');
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/quick-replies`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token') || token}` },
       });
-      if (!res.ok) throw new Error('Erro ao carregar respostas rápidas');
+      console.log('🔧 QuickRepliesComponent: Resposta da API:', res.status, res.statusText);
+      
+      if (!res.ok) {
+        const errorData = await res.json();
+        console.error('🔧 QuickRepliesComponent: Erro na API:', errorData);
+        throw new Error('Erro ao carregar respostas rápidas');
+      }
+      
       const data = await res.json();
+      console.log('🔧 QuickRepliesComponent: Dados recebidos:', data);
       const list = Array.isArray(data) ? data : (data.quickReplies || data.rows || []);
+      console.log('🔧 QuickRepliesComponent: Lista processada:', list.length, 'itens');
       setItems(list);
     } catch (e) {
-      console.error(e);
+      console.error('🔧 QuickRepliesComponent: Erro ao buscar:', e);
+      setError(e.message);
     } finally {
       setLoading(false);
     }

@@ -88,6 +88,7 @@ export default function QueuesComponent() {
     closeTicket: false,
     rotation: 'round-robin',
     integration: 'whatsapp',
+    autoReceiveMessages: false,
     fileList: [],
     options: {
       autoAssign: true,
@@ -98,7 +99,12 @@ export default function QueuesComponent() {
       },
       autoReply: false,
       transferToHuman: true,
-      collectFeedback: false
+      collectFeedback: false,
+      responseTimeLimit: 30,
+      priority: 'normal',
+      notifyNewTicket: true,
+      notifyTimeouts: true,
+      allowedFileTypes: ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'doc', 'docx', 'txt', 'mp3', 'mp4', 'avi', 'zip', 'xlsx', 'csv']
     }
   });
   const [sessions, setSessions] = useState([]);
@@ -137,10 +143,14 @@ export default function QueuesComponent() {
       });
       if (response.ok) {
         const data = await response.json();
-        setSessions(data);
+        setSessions(Array.isArray(data) ? data : []);
+      } else {
+        console.error('Erro na resposta da API de sessões:', response.status);
+        setSessions([]);
       }
     } catch (error) {
       console.error('Erro ao buscar sessões:', error);
+      setSessions([]);
     }
   };
 
@@ -154,10 +164,14 @@ export default function QueuesComponent() {
       });
       if (response.ok) {
         const data = await response.json();
-        setQueues(data);
+        setQueues(Array.isArray(data) ? data : []);
+      } else {
+        console.error('Erro na resposta da API de filas:', response.status);
+        setQueues([]);
       }
     } catch (error) {
       console.error('Erro ao buscar filas:', error);
+      setQueues([]);
     } finally {
       setLoading(false);
     }
@@ -172,10 +186,19 @@ export default function QueuesComponent() {
       });
       if (response.ok) {
         const data = await response.json();
-        setUsers(data);
+        // Verificar se a resposta é um array ou um objeto com users
+        const usersArray = Array.isArray(data) ? data : (data.users || []);
+        setUsers(usersArray);
+      } else if (response.status === 403) {
+        console.warn('Usuário não tem permissão para listar usuários');
+        setUsers([]);
+      } else {
+        console.error('Erro na resposta da API de usuários:', response.status);
+        setUsers([]);
       }
     } catch (error) {
       console.error('Erro ao buscar usuários:', error);
+      setUsers([]);
     }
   };
 
@@ -409,6 +432,7 @@ export default function QueuesComponent() {
       closeTicket: queue.closeTicket || false,
       rotation: queue.rotation || 'round-robin',
       integration: queue.integration || 'whatsapp',
+      autoReceiveMessages: queue.autoReceiveMessages || false,
       fileList: queue.fileList || [],
       options: queue.options || {
         autoAssign: true,
@@ -436,6 +460,7 @@ export default function QueuesComponent() {
       closeTicket: false,
       rotation: 'round-robin',
       integration: 'whatsapp',
+      autoReceiveMessages: false,
       fileList: [],
       options: {
         autoAssign: true,
@@ -453,13 +478,13 @@ export default function QueuesComponent() {
 
   const assignUserToQueue = async (queueId, userId) => {
     try {
-      const response = await fetch(`${API_URL}/api/queues/${queueId}/assign-user`, {
+      const response = await fetch(`${API_URL}/api/queues/assign`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify({ userId })
+        body: JSON.stringify({ queueId, userId })
       });
 
       if (response.ok) {
@@ -472,13 +497,13 @@ export default function QueuesComponent() {
 
   const removeUserFromQueue = async (queueId, userId) => {
     try {
-      const response = await fetch(`${API_URL}/api/queues/${queueId}/remove-user`, {
-        method: 'DELETE',
+      const response = await fetch(`${API_URL}/api/queues/remove-user`, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify({ userId })
+        body: JSON.stringify({ queueId, userId })
       });
 
       if (response.ok) {
@@ -1032,7 +1057,7 @@ export default function QueuesComponent() {
                       className="w-full bg-slate-700 text-white text-sm px-2 py-2 rounded border border-slate-600 custom-input transition-colors"
                     >
                       <option value="">+ Adicionar agente</option>
-                      {users
+                      {(users || [])
                         .filter(user => !queue.Users?.some(qu => qu.id === user.id))
                         .map(user => (
                           <option key={user.id} value={user.id}>{user.name}</option>
@@ -1228,6 +1253,20 @@ export default function QueuesComponent() {
                           className="custom-checkbox mr-3"
                         />
                         <label htmlFor="isActive" className="text-slate-300 text-sm">Fila ativa</label>
+                      </div>
+
+                      <div className="flex items-center">
+                        <input
+                          type="checkbox"
+                          id="autoReceiveMessages"
+                          checked={formData.autoReceiveMessages}
+                          onChange={(e) => setFormData({ ...formData, autoReceiveMessages: e.target.checked })}
+                          className="custom-checkbox mr-3"
+                        />
+                        <label htmlFor="autoReceiveMessages" className="text-slate-300 text-sm">Receber mensagens automaticamente</label>
+                        <div className="ml-2 text-xs text-slate-500">
+                          (Novas mensagens vão diretamente para esta fila)
+                        </div>
                       </div>
 
                       <div className="flex items-center">

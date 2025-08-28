@@ -7,6 +7,8 @@ import TransferModal from './TransferModal';
 import { FileText } from 'lucide-react';
 import PriorityModal from './PriorityModal';
 import TagSelector from '../TagSelector';
+import ButtonModal from '../modals/ButtonModal';
+import PollMessage from './PollMessage';
 import { 
   ChatBubbleBottomCenterTextIcon,
   EllipsisVerticalIcon,
@@ -193,6 +195,9 @@ export default function ChatArea({
   
   // Tags state
   const [ticketTags, setTicketTags] = useState([]);
+
+  // Button modal state
+  const [buttonModalOpen, setButtonModalOpen] = useState(false);
 
   // Reações disponíveis
   const availableReactions = ['👍', '❤️', '😂', '😮', '😢', '😡', '👏', '🙏'];
@@ -1458,56 +1463,67 @@ return (
             {messages.map((message, index) => (
                 <div
                     key={message.id}
-                    className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+                    className={`flex ${message.sender === 'user' ? 'justify-end' : message.sender === 'system' ? 'justify-end' : 'justify-start'}`}
                 >
                     <div className={`flex items-end space-x-3 max-w-xs lg:max-w-md xl:max-w-lg animate-fadeIn ${
-                        message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''
+                        message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : message.sender === 'system' ? 'flex-row-reverse space-x-reverse' : ''
                     }`}>
                         <div className="relative group">
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs overflow-hidden shadow-lg transition-all duration-300 ${
-                                message.sender === 'user' ? 'ring-2 ring-yellow-500/30' : 'ring-2 ring-slate-500/30'
-                            } group-hover:scale-110`}>
-                                {message.sender === 'user' ? (
-                                    <div className="w-full h-full bg-gradient-to-br from-slate-500 to-slate-600 flex items-center justify-center">
-                                        {user?.name ? getAvatarInitials(user.name) : 'U'}
-                                    </div>
-                                ) : (
-                                    <>
-                                        {avatarUrl ? (
-                                            <img 
-                                                src={avatarUrl} 
-                                                alt={displayName}
-                                                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
-                                                onError={(e) => {
-                                                    try {
-                                                      if (e && e.target) {
-                                                        if (e.target.style) e.target.style.display = 'none';
-                                                        if (e.target.nextSibling && e.target.nextSibling.style) {
-                                                          e.target.nextSibling.style.display = 'flex';
-                                                        }
-                                                      }
-                                                    } catch (err) {
-                                                      console.warn('onError image handler failed', err);
-                                                    }
-                                                }}
-                                            />
-                                        ) : null}
-                                        <div 
-                                            className={`w-full h-full flex items-center justify-center ${getRandomAvatarColor(displayName)} ${avatarUrl ? 'hidden' : 'flex'} bg-gradient-to-br shadow-inner`}
-                                        >
-                                            {getAvatarInitials(displayName)}
+                            {message.sender === 'system' ? (
+                                // Avatar especial para mensagens do sistema
+                                <div className="w-8 h-8 rounded-full flex items-center justify-center bg-gradient-to-br from-blue-500 to-indigo-600 shadow-lg ring-2 ring-blue-400/30">
+                                    <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                                    </svg>
+                                </div>
+                            ) : (
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs overflow-hidden shadow-lg transition-all duration-300 ${
+                                    message.sender === 'user' ? 'ring-2 ring-yellow-500/30' : 'ring-2 ring-slate-500/30'
+                                } group-hover:scale-110`}>
+                                    {message.sender === 'user' ? (
+                                        <div className="w-full h-full bg-gradient-to-br from-slate-500 to-slate-600 flex items-center justify-center">
+                                            {user?.name ? getAvatarInitials(user.name) : 'U'}
                                         </div>
-                                    </>
-                                )}
-                            </div>
+                                    ) : (
+                                        <>
+                                            {avatarUrl ? (
+                                                <img 
+                                                    src={avatarUrl} 
+                                                    alt={displayName}
+                                                    className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
+                                                    onError={(e) => {
+                                                        try {
+                                                          if (e && e.target) {
+                                                            if (e.target.style) e.target.style.display = 'none';
+                                                            if (e.target.nextSibling && e.target.nextSibling.style) {
+                                                              e.target.nextSibling.style.display = 'flex';
+                                                            }
+                                                          }
+                                                        } catch (err) {
+                                                          console.warn('onError image handler failed', err);
+                                                        }
+                                                    }}
+                                                />
+                                            ) : null}
+                                            <div 
+                                                className={`w-full h-full flex items-center justify-center ${getRandomAvatarColor(displayName)} ${avatarUrl ? 'hidden' : 'flex'} bg-gradient-to-br shadow-inner`}
+                                            >
+                                                {getAvatarInitials(displayName)}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            )}
                             {/* Indicador de status online para contato */}
-                            {message.sender !== 'user' && (
+                            {message.sender !== 'user' && message.sender !== 'system' && (
                                 <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-slate-700 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                             )}
                         </div>
                         <div className={`px-4 py-2 rounded-2xl shadow-lg transition-all duration-200 hover:shadow-xl relative group ${
                             message.sender === 'user'
                                 ? 'bg-gradient-to-r from-yellow-400 to-yellow-500 text-slate-900 rounded-br-md'
+                                : message.sender === 'system'
+                                ? 'bg-gradient-to-r from-blue-50/10 to-indigo-50/10 text-blue-100 rounded-bl-md border border-blue-400/40 backdrop-blur-sm'
                                 : 'bg-gradient-to-r from-slate-700 to-slate-800 text-white rounded-bl-md border border-slate-600/50'
                         }`}>
                             {/* Menu de contexto da mensagem */}
@@ -1698,7 +1714,51 @@ return (
                                 </div>
                             )}
                             {message.content && (
-                                <p className="text-sm leading-relaxed">{message.content}</p>
+                                <>
+                                    {/* Exibir informações do grupo se for mensagem de grupo */}
+                                    {message.isFromGroup && message.participantName && (
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <div className="w-5 h-5 rounded-full bg-green-400/20 flex items-center justify-center">
+                                                <svg className="w-3 h-3 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z"/>
+                                                </svg>
+                                            </div>
+                                            <span className="text-xs text-green-300 font-medium">
+                                                {message.participantName}
+                                            </span>
+                                            {message.groupName && (
+                                                <span className="text-xs text-slate-400">
+                                                    • {message.groupName}
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
+                                    
+                                    {message.sender === 'system' && (
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <div className="w-5 h-5 rounded-full bg-blue-400/20 flex items-center justify-center">
+                                                <svg className="w-3 h-3 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                                                </svg>
+                                            </div>
+                                            <span className="text-xs text-blue-300 font-medium uppercase tracking-wide">Sistema</span>
+                                        </div>
+                                    )}
+                                    <p className={`text-sm leading-relaxed ${message.sender === 'system' ? 'font-medium' : ''}`}>
+                                        {message.content}
+                                    </p>
+                                    {message.sender === 'system' && (
+                                        <div className="mt-2 text-xs text-blue-300/80 italic">
+                                            Mensagem automática do sistema
+                                        </div>
+                                    )}
+
+                                    {/* Exibir enquete se for uma mensagem de enquete */}
+                                    <PollMessage
+                                        message={message}
+                                        isUser={message.sender === 'user'}
+                                    />
+                                </>
                             )}
 
                             {/* Exibir reações */}
@@ -1919,6 +1979,18 @@ return (
                                         <path d="M7.266 3.04a.75.75 0 01.694.805l-.234 3.273h3.809l.234-3.273a.75.75 0 011.499.107l-.234 3.166H16a.75.75 0 010 1.5h-3.092l-.24 3.35H15a.75.75 0 010 1.5h-2.482l-.234 3.166a.75.75 0 01-1.499-.107l.234-3.059H7.21l-.234 3.166a.75.75 0 01-1.499-.107l.234-3.059H4a.75.75 0 010-1.5h1.571l.24-3.35H4a.75.75 0 010-1.5h1.928l.234-3.273a.75.75 0 01.805-.694zM8.48 8.118l-.24 3.35h3.808l.24-3.35H8.48z" />
                                       </svg>
                                     </button>
+
+                                {/* Interactive Buttons Button */}
+                                <button
+                                  className="p-3 rounded-full text-slate-400 hover:text-white hover:bg-slate-700/50 transition-all duration-200 hover:scale-105"
+                                  onClick={() => setButtonModalOpen(true)}
+                                  type="button"
+                                  title="Enviar botões interativos"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                                    <path fillRule="evenodd" d="M4 3a1 1 0 000 2h12a1 1 0 100-2H4zm0 4a1 1 0 000 2h12a1 1 0 100-2H4zm0 4a1 1 0 000 2h8a1 1 0 100-2H4z" clipRule="evenodd" />
+                                  </svg>
+                                </button>
                                     {qrOpen && (
                                       <div className="absolute bottom-12 right-0 w-80 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl p-3 z-50">
                                         <div className="flex items-center gap-2 mb-2">
@@ -2035,6 +2107,17 @@ return (
                 </div>
             </div>
         )}
+
+        {/* Button Modal */}
+        <ButtonModal
+          isOpen={buttonModalOpen}
+          onClose={() => setButtonModalOpen(false)}
+          ticketId={selectedTicket?.id}
+          onSendSuccess={(result) => {
+            console.log('✅ Botões enviados com sucesso:', result);
+            // Opcional: atualizar mensagens ou mostrar notificação
+          }}
+        />
     </div>
 );
 }

@@ -1,12 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, isAuthenticated } = useAuth();
+  const navigate = useNavigate();
   const [isRegister, setIsRegister] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Redirecionar se já estiver autenticado
+  useEffect(() => {
+    console.log('🔑 LoginPage: Verificando autenticação - isAuthenticated:', isAuthenticated);
+    if (isAuthenticated) {
+      console.log('🔑 LoginPage: Usuário já autenticado, redirecionando para dashboard');
+      navigate('/dashboard', { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleChange = e => setForm({ ...form, [e.target.name]: e.target.value });
 
@@ -14,9 +25,10 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
     setLoading(true);
-    
+
     try {
       if (isRegister) {
+        console.log('🔑 LoginPage: Iniciando registro para:', form.email);
         // Registro
         const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/auth/register`, {
           method: 'POST',
@@ -27,20 +39,27 @@ export default function LoginPage() {
         });
 
         const data = await response.json();
+        console.log('🔑 LoginPage: Resposta do registro:', response.status, data);
 
         if (response.ok) {
+          console.log('🔑 LoginPage: Registro bem-sucedido');
           setError('');
           setIsRegister(false);
           setForm({ name: '', email: form.email, password: '' });
           // Após registro, mostrar tela de login
         } else {
+          console.log('🔑 LoginPage: Erro no registro:', data.error);
           setError(data.error || 'Erro ao criar conta');
         }
       } else {
+        console.log('🔑 LoginPage: Iniciando login para:', form.email);
         // Login
         await login(form.email, form.password);
+        console.log('🔑 LoginPage: Login concluído com sucesso');
+        // O redirecionamento será feito pelo useEffect quando isAuthenticated mudar
       }
     } catch (err) {
+      console.error('🔑 LoginPage: Erro no processo:', err);
       setError(err.message || 'Erro de conexão com o servidor');
     } finally {
       setLoading(false);

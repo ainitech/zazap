@@ -1,6 +1,44 @@
 import { Server as SocketIOServer } from 'socket.io';
+import jwt from 'jsonwebtoken';
+import { User } from '../models/index.js';
 
 let io = null;
+
+// Middleware de autenticação para Socket.IO
+const authenticateSocket = async (socket, next) => {
+  try {
+    const token = socket.handshake.auth.token;
+
+    if (!token) {
+      console.log('❌ Socket connection rejected: No token provided');
+      return next(new Error('Authentication error: No token provided'));
+    }
+
+    const JWT_SECRET = process.env.JWT_SECRET || 'supersecret';
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    // Buscar o usuário no banco de dados
+    const user = await User.findByPk(decoded.userId);
+    if (!user) {
+      console.log('❌ Socket connection rejected: User not found');
+      return next(new Error('Authentication error: User not found'));
+    }
+
+    // Adicionar informações do usuário ao socket
+    socket.user = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role
+    };
+
+    console.log(`✅ Socket authenticated for user: ${user.name} (${user.role})`);
+    next();
+  } catch (error) {
+    console.log('❌ Socket authentication failed:', error.message);
+    next(new Error('Authentication error: ' + error.message));
+  }
+};
 
 export const initializeSocket = (server) => {
   io = new SocketIOServer(server, {
@@ -12,8 +50,11 @@ export const initializeSocket = (server) => {
     transports: ['websocket', 'polling']
   });
 
+  // Aplicar middleware de autenticação
+  io.use(authenticateSocket);
+
   io.on('connection', (socket) => {
-    console.log(`Cliente conectado: ${socket.id}`);
+    console.log(`Cliente conectado: ${socket.id} (User: ${socket.user.name})`);
 
     // Event listener para entrar em uma sessão específica
     socket.on('join-session', (sessionId) => {
@@ -70,8 +111,6 @@ export const emitToTicket = (ticketId, event, data) => {
     const room = io.sockets.adapter.rooms.get(`ticket-${ticketId}`);
     const clientCount = room ? room.size : 0;
     
-    console.log(`📡 Emitindo evento '${event}' para ticket ${ticketId} (${clientCount} clientes conectados)`);
-    console.log(`📨 Dados:`, data);
     
     io.to(`ticket-${ticketId}`).emit(event, data);
     console.log(`✅ Evento '${event}' emitido para sala ticket-${ticketId}`);
@@ -82,7 +121,6 @@ export const emitToTicket = (ticketId, event, data) => {
 
 export const emitToAll = (event, data) => {
   if (io) {
-    console.log(`📡 Emitindo evento '${event}' para todos os clientes:`, data);
     io.emit(event, data);
     console.log(`✅ Evento '${event}' emitido para todos os clientes`);
   } else {

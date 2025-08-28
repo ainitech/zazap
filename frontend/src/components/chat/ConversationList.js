@@ -6,7 +6,9 @@ import {
   ChatBubbleLeftRightIcon,
   CheckCircleIcon,
   EyeIcon,
-  TagIcon
+  TagIcon,
+  UserGroupIcon,
+  LinkIcon
 } from '@heroicons/react/24/outline';
 import { useSocket } from '../../context/SocketContext';
 
@@ -35,11 +37,37 @@ export default function ConversationList({
   onAcceptTicket
 }) {
   const { socket } = useSocket();
-  const [activeTab, setActiveTab] = useState('waiting'); // 'waiting', 'accepted', 'resolved'
+  const [activeTab, setActiveTab] = useState('waiting'); // 'waiting', 'accepted', 'resolved', 'groups'
   const [collapsed, setCollapsed] = useState(false); // mobile collapse
   const [previewTicket, setPreviewTicket] = useState(null); // ticket sendo visualizado
   const [previewMessages, setPreviewMessages] = useState([]); // mensagens do preview
   const [loadingPreview, setLoadingPreview] = useState(false); // carregando preview
+  const [groupsEnabled, setGroupsEnabled] = useState(false); // controla se grupos estão habilitados
+
+  // Carregar configuração de grupos do localStorage
+  useEffect(() => {
+    const savedSettings = localStorage.getItem('groupSettings');
+    if (savedSettings) {
+      const settings = JSON.parse(savedSettings);
+      setGroupsEnabled(settings.showGroups || false);
+    }
+  }, []);
+
+  // Escutar mudanças nas configurações de grupos
+  useEffect(() => {
+    const handleGroupSettingsChange = (event) => {
+      const { showGroups } = event.detail;
+      setGroupsEnabled(showGroups);
+      
+      // Se grupos foram desabilitados e estamos na aba de grupos, mudar para waiting
+      if (!showGroups && activeTab === 'groups') {
+        setActiveTab('waiting');
+      }
+    };
+
+    window.addEventListener('groupSettingsChanged', handleGroupSettingsChange);
+    return () => window.removeEventListener('groupSettingsChanged', handleGroupSettingsChange);
+  }, [activeTab]);
 
   // Atualização em tempo real quando um ticket é vinculado a uma fila
   useEffect(() => {
@@ -139,22 +167,40 @@ export default function ConversationList({
     return diffInMinutes < 5; // Considera ativo se houve atividade nos últimos 5 minutos
   };
 
-  const filteredTickets = tickets.filter(ticket => 
-    ticket.contact.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (ticket.Contact?.name && ticket.Contact.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (ticket.Contact?.pushname && ticket.Contact.pushname.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (ticket.lastMessage && ticket.lastMessage.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  // Filtrar tickets por termo de busca e por tipo (grupos/individuais)
+  const filteredTickets = tickets.filter(ticket => {
+    // Filtro de busca
+    const matchesSearch = ticket.contact.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (ticket.Contact?.name && ticket.Contact.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (ticket.Contact?.pushname && ticket.Contact.pushname.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (ticket.lastMessage && ticket.lastMessage.toLowerCase().includes(searchTerm.toLowerCase()));
+
+    // Se grupos estão desabilitados, filtrar apenas contatos individuais
+    if (!groupsEnabled) {
+      return matchesSearch && (!ticket.Contact?.isGroup);
+    }
+
+    return matchesSearch;
+  });
 
   // Dividir tickets por status
   const waitingTickets = filteredTickets.filter(ticket => 
-    ticket.chatStatus === 'waiting' || !ticket.chatStatus // Fallback para tickets sem chatStatus
+    (ticket.chatStatus === 'waiting' || !ticket.chatStatus) && (!ticket.Contact?.isGroup) // Excluir grupos dos status normais
   );
   const acceptedTickets = filteredTickets.filter(ticket => 
-    ticket.chatStatus === 'accepted' && ticket.assignedUserId // Apenas aceitos com usuário atribuído
+    ticket.chatStatus === 'accepted' && ticket.assignedUserId && (!ticket.Contact?.isGroup) // Apenas aceitos com usuário atribuído, excluir grupos
   );
-  const resolvedTickets = filteredTickets.filter(ticket => ticket.chatStatus === 'resolved');
-  const closedTickets = filteredTickets.filter(ticket => ticket.chatStatus === 'closed');
+  const resolvedTickets = filteredTickets.filter(ticket => 
+    ticket.chatStatus === 'resolved' && (!ticket.Contact?.isGroup) // Excluir grupos dos status normais
+  );
+  const closedTickets = filteredTickets.filter(ticket => 
+    ticket.chatStatus === 'closed' && (!ticket.Contact?.isGroup) // Excluir grupos dos status normais
+  );
+
+  // Tickets de grupos (apenas se grupos estiverem habilitados)
+  const groupTickets = groupsEnabled ? filteredTickets.filter(ticket => 
+    ticket.Contact?.isGroup
+  ) : [];
 
   // Função para buscar preview das mensagens
   const fetchPreviewMessages = async (ticketId) => {
@@ -200,16 +246,26 @@ export default function ConversationList({
     const displayName = ticket.Contact?.name || ticket.Contact?.pushname || ticket.contact;
     const avatarUrl = ticket.Contact?.profilePicUrl;
     
-    const handleAcceptClick = (e) => {
-      e.stopPropagation();
-      if (onAcceptTicket) {
-        onAcceptTicket(ticket.id);
-        // Mudar para a aba "Em Atendimento" após aceitar
-        setTimeout(() => setActiveTab('accepted'), 500);
-      }
-    };
-    
-    return (
+  const handleAcceptClick = (e) => {
+    e.stopPropagation();
+    if (onAcceptTicket) {
+      onAcceptTicket(ticket.id);
+      // Mudar para a aba "Em Atendimento" após aceitar
+      setTimeout(() => setActiveTab('accepted'), 500);
+    }
+  };
+
+  const handleCopyLink = async (e) => {
+    e.stopPropagation();
+    try {
+      const ticketUrl = `${window.location.origin}/tickets/${ticket.uid}`;
+      await navigator.clipboard.writeText(ticketUrl);
+      // Você pode adicionar um toast de sucesso aqui se quiser
+      console.log('Link copiado:', ticketUrl);
+    } catch (err) {
+      console.error('Erro ao copiar link:', err);
+    }
+  };    return (
       <div
         key={ticket.id}
         onClick={() => onTicketSelect(ticket)}
@@ -251,6 +307,13 @@ export default function ConversationList({
               </div>
             </div>
             
+            {/* Indicador de grupo */}
+            {ticket.Contact?.isGroup && (
+              <div className="absolute -bottom-1 -right-1 bg-purple-500 rounded-full p-1">
+                <UserGroupIcon className="w-3 h-3 text-white" />
+              </div>
+            )}
+            
             {/* Status indicators */}
             {isRecent && isRealTime && (
               <div className="absolute -top-1 -right-1 w-3 h-3 sm:w-4 sm:h-4 bg-green-500 rounded-full border-2 border-slate-800 animate-pulse"></div>
@@ -267,6 +330,9 @@ export default function ConversationList({
             <div className="flex items-center justify-between mb-1">
               <div className="flex items-center space-x-2 flex-1 min-w-0">
                 <h3 className="text-white font-medium truncate">{displayName}</h3>
+                {ticket.Contact?.isGroup && (
+                  <span className="bg-purple-500 text-white text-xs px-1.5 py-0.5 rounded-full flex-shrink-0">GRUPO</span>
+                )}
                 {showQueueInfo && (
                   <>
                     {ticket.priority && ticket.priority !== 'normal' && (
@@ -338,29 +404,63 @@ export default function ConversationList({
             
             <div className="relative group">
               <p className="text-slate-400 text-sm truncate pr-16">
-                {ticket.lastMessage || 'Nenhuma mensagem ainda'}
+                {/* Exibir informações da última mensagem */}
+                {ticket.LastMessage ? (
+                  <>
+                    {ticket.LastMessage.isFromGroup && ticket.LastMessage.participantName && (
+                      <span className="text-green-300 font-medium">
+                        {ticket.LastMessage.participantName}: 
+                      </span>
+                    )}
+                    <span className={ticket.LastMessage.isFromGroup ? "ml-1" : ""}>
+                      {ticket.LastMessage.content || ticket.lastMessage || 'Mensagem sem conteúdo'}
+                    </span>
+                  </>
+                ) : (
+                  ticket.lastMessage || 'Nenhuma mensagem ainda'
+                )}
               </p>
               
               {/* Tooltip com mensagem completa */}
-              {ticket.lastMessage && ticket.lastMessage.length > 50 && (
+              {((ticket.LastMessage?.content || ticket.lastMessage) && 
+                (ticket.LastMessage?.content || ticket.lastMessage).length > 50) && (
                 <div className="absolute bottom-full left-0 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20 max-w-xs break-words pointer-events-none">
-                  {ticket.lastMessage}
+                  {ticket.LastMessage?.isFromGroup && ticket.LastMessage?.participantName && (
+                    <div className="text-green-300 font-medium mb-1">
+                      👥 {ticket.LastMessage.participantName}
+                      {ticket.LastMessage.groupName && ` (${ticket.LastMessage.groupName})`}
+                    </div>
+                  )}
+                  {ticket.LastMessage?.content || ticket.lastMessage}
                   <div className="absolute top-full left-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-slate-900"></div>
                 </div>
               )}
               
-              {/* Botão espiar conversa - sempre visível */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handlePreviewClick(ticket);
-                }}
-                className="absolute right-0 top-0 bg-slate-600 hover:bg-slate-500 text-white text-xs px-2 py-1 rounded flex-shrink-0 flex items-center space-x-1 transition-colors"
-                title="Espiar conversa"
-              >
-                <EyeIcon className="w-3 h-3" />
-                <span className="hidden sm:inline">Espiar</span>
-              </button>
+              {/* Botões de ação */}
+              <div className="absolute right-0 top-0 flex space-x-1">
+                {/* Botão copiar link */}
+                <button
+                  onClick={handleCopyLink}
+                  className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-2 py-1 rounded flex-shrink-0 flex items-center space-x-1 transition-colors"
+                  title="Copiar link direto do ticket"
+                >
+                  <LinkIcon className="w-3 h-3" />
+                  <span className="hidden sm:inline">Link</span>
+                </button>
+                
+                {/* Botão espiar conversa */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handlePreviewClick(ticket);
+                  }}
+                  className="bg-slate-600 hover:bg-slate-500 text-white text-xs px-2 py-1 rounded flex-shrink-0 flex items-center space-x-1 transition-colors"
+                  title="Espiar conversa"
+                >
+                  <EyeIcon className="w-3 h-3" />
+                  <span className="hidden sm:inline">Espiar</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -454,6 +554,28 @@ export default function ConversationList({
             <span className="text-[10px] font-medium">Atend.</span>
           </button>
           
+          {/* Aba de Grupos - só aparece se habilitada */}
+          {groupsEnabled && (
+            <button
+              onClick={() => setActiveTab('groups')}
+              className={`flex-1 px-2 py-3 flex flex-col items-center justify-center space-y-1 transition-colors ${
+                activeTab === 'groups'
+                  ? 'text-purple-400 border-b-2 border-purple-400 bg-slate-700'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-700'
+              }`}
+            >
+              <div className="relative">
+                <UserGroupIcon className="w-5 h-5" />
+                {groupTickets.length > 0 && (
+                  <div className="absolute -top-1 -right-1 bg-purple-500 text-white text-[10px] font-bold px-1 rounded-full min-w-[16px] text-center">
+                    {groupTickets.length > 9 ? '9+' : groupTickets.length}
+                  </div>
+                )}
+              </div>
+              <span className="text-[10px] font-medium">Grupos</span>
+            </button>
+          )}
+          
           <button
             onClick={() => setActiveTab('resolved')}
             className={`flex-1 px-2 py-3 flex flex-col items-center justify-center space-y-1 transition-colors ${
@@ -509,6 +631,26 @@ export default function ConversationList({
               </div>
             )}
           </button>
+          
+          {/* Aba de Grupos - só aparece se habilitada */}
+          {groupsEnabled && (
+            <button
+              onClick={() => setActiveTab('groups')}
+              className={`flex-1 px-3 py-3 text-sm font-medium flex items-center justify-center space-x-2 transition-colors ${
+                activeTab === 'groups'
+                  ? 'text-purple-400 border-b-2 border-purple-400 bg-slate-700'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-700'
+              }`}
+            >
+              <UserGroupIcon className="w-4 h-4" />
+              <span>Grupos</span>
+              {groupTickets.length > 0 && (
+                <div className="bg-purple-500 text-white text-xs font-medium px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+                  {groupTickets.length}
+                </div>
+              )}
+            </button>
+          )}
           
           <button
             onClick={() => setActiveTab('resolved')}
@@ -587,6 +729,36 @@ export default function ConversationList({
           </div>
         )}
 
+        {/* Grupos Tab */}
+        {activeTab === 'groups' && (
+          <div className="flex-1 overflow-y-auto">
+            {groupTickets.length > 0 ? (
+              <>
+                <div className="px-4 py-3 bg-slate-750 border-b border-slate-700">
+                  <h3 className="text-purple-400 font-medium text-sm flex items-center">
+                    <div className="w-2 h-2 bg-purple-400 rounded-full mr-2"></div>
+                    Grupos WhatsApp
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Conversas em grupos onde você foi mencionado ou recebeu mensagens
+                  </p>
+                </div>
+                {groupTickets.map(ticket => renderTicket(ticket, true, false))}
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
+                <UserGroupIcon className="w-16 h-16 text-slate-600 mb-4" />
+                <p className="text-slate-400 text-sm">
+                  {searchTerm ? 'Nenhum grupo encontrado' : 'Nenhuma conversa de grupo ativa'}
+                </p>
+                <p className="text-slate-500 text-xs mt-2">
+                  Grupos aparecerão aqui quando houver novas mensagens
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Resolvidos Tab */}
         {activeTab === 'resolved' && (
           <div className="flex-1 overflow-y-auto">
@@ -659,17 +831,29 @@ export default function ConversationList({
               ) : previewMessages.length > 0 ? (
                 <div className="p-4 space-y-4">
                   {previewMessages.map((message, index) => (
-                    <div key={index} className={`flex ${message.fromMe ? 'justify-end' : 'justify-start'}`}>
+                    <div key={index} className={`flex ${message.fromMe ? 'justify-end' : message.sender === 'system' ? 'justify-end' : 'justify-start'}`}>
                       <div className={`max-w-[80%] px-4 py-3 rounded-lg text-sm ${
                         message.fromMe 
                           ? 'bg-green-600 text-white rounded-br-sm' 
+                          : message.sender === 'system'
+                          ? 'bg-gradient-to-r from-blue-50/10 to-indigo-50/10 text-blue-100 rounded-xl border border-blue-400/40'
                           : 'bg-slate-700 text-slate-100 rounded-bl-sm'
                       }`}>
                         <p className="break-words leading-relaxed">
+                          {message.sender === 'system' && (
+                            <span className="text-xs text-blue-400 font-medium mr-2 px-2 py-1 bg-blue-500/20 rounded-full">
+                              🤖 Sistema
+                            </span>
+                          )}
+                          {message.isFromGroup && message.participantName && (
+                            <span className="text-xs text-green-400 font-medium mr-2 px-2 py-1 bg-green-500/20 rounded-full">
+                              👥 {message.participantName}
+                            </span>
+                          )}
                           {message.body || message.content || 'Mensagem sem conteúdo'}
                         </p>
                         <div className="flex items-center justify-between mt-2 pt-1">
-                          <p className={`text-xs ${message.fromMe ? 'text-green-200' : 'text-slate-400'}`}>
+                          <p className={`text-xs ${message.fromMe ? 'text-green-200' : message.sender === 'system' ? 'text-blue-400' : 'text-slate-400'}`}>
                             {new Date(message.createdAt).toLocaleString('pt-BR', { 
                               day: '2-digit',
                               month: '2-digit',

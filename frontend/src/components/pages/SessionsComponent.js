@@ -9,10 +9,15 @@ import {
   QrCodeIcon,
   PlayIcon,
   StopIcon,
+  PauseIcon,
   ArrowPathIcon,
   ExclamationTriangleIcon,
   SignalIcon,
-  WifiIcon
+  WifiIcon,
+  SparklesIcon,
+  BoltIcon,
+  LinkIcon,
+  DevicePhoneMobileIcon
 } from '@heroicons/react/24/outline';
 import { useSocket } from '../../context/SocketContext';
 import { useToast } from '../../context/ToastContext';
@@ -43,6 +48,7 @@ export default function SessionsComponent() {
   const [actionLoading, setActionLoading] = useState({});
   const [realTimeStatus, setRealTimeStatus] = useState({});
   const [successMessage, setSuccessMessage] = useState('');
+  const [lastUpdate, setLastUpdate] = useState(null);
 
   useEffect(() => {
     // Buscar sessões iniciais apenas uma vez
@@ -54,13 +60,36 @@ export default function SessionsComponent() {
   // keep toast api ref updated
   toastApiRef.current = toastApi;
 
-    if (!socket || !isConnected) return;
+    if (!socket || !isConnected) {
+      console.log('🔌 Socket não disponível ou não conectado, pulando configuração de listeners', { socket: !!socket, isConnected });
+      return;
+    }
 
     console.log('🔗 Configurando listeners WebSocket para sessões...');
+    console.log('📊 Estado atual:', { showQRModal, selectedSession: selectedSession?.id });
     
     // Listener para atualizações de sessões
     const handleSessionsUpdate = (sessionsData) => {
       console.log('🔄 Atualização de sessões recebida via WebSocket:', sessionsData.length);
+      
+      // Atualizar timestamp da última atualização
+      setLastUpdate(new Date());
+      
+      // Verificar se alguma sessão foi removida
+      const currentSessionIds = sessions.map(s => s.id);
+      const newSessionIds = sessionsData.map(s => s.id);
+      const removedSessions = sessions.filter(s => !newSessionIds.includes(s.id));
+      
+      if (removedSessions.length > 0) {
+        console.log('🗑️ Sessões removidas detectadas:', removedSessions.map(s => s.whatsappId || s.name));
+        // Mostrar mensagem de remoção se não foi uma deleção manual
+        if (!actionLoading[removedSessions[0]?.id]) {
+          const sessionName = removedSessions[0]?.whatsappId || removedSessions[0]?.name || 'Sessão';
+          setSuccessMessage(`${sessionName} foi removida do sistema.`);
+          setTimeout(() => setSuccessMessage(''), 4000);
+        }
+      }
+      
       setSessions(sessionsData);
       
       // Atualizar status em tempo real
@@ -79,6 +108,16 @@ export default function SessionsComponent() {
         ...prev, 
         [sessionId]: status 
       }));
+
+      // Se for a sessão selecionada no modal e conectou, fechar modal
+      if (showQRModal && selectedSession?.id === sessionId && status === 'connected') {
+        console.log('🎉 Sessão conectada com sucesso - fechando modal QR');
+        setShowQRModal(false);
+        setQrCode('');
+        setQrStatus('');
+        setSuccessMessage(`Sessão ${selectedSession.whatsappId || selectedSession.name || sessionId} conectada com sucesso!`);
+        setTimeout(() => setSuccessMessage(''), 5000);
+      }
 
       // Mostrar toast quando sessão ficar desconectada
       if (status === 'disconnected') {
@@ -103,38 +142,39 @@ export default function SessionsComponent() {
 
     // Listener para QR Code updates
     const handleQRCodeUpdate = ({ sessionId, qrCode, status }) => {
-      console.log('🔄 QR Code atualizado via WebSocket:', { sessionId, status });
+      console.log('🔄 QR Code atualizado via WebSocket:', { sessionId, status, qrCode: qrCode ? 'presente' : 'ausente' });
       
       // Se for a sessão selecionada no modal, atualizar o QR
       if (showQRModal && selectedSession?.id === sessionId) {
         setQrCode(qrCode || '');
         setQrStatus(status || '');
         
-        // Se conectou, fechar modal
-        if (status === 'connected') {
-          setShowQRModal(false);
-          setQrCode('');
-          setQrStatus('');
-          setSuccessMessage(`Sessão ${selectedSession.whatsappId} conectada com sucesso!`);
-          setTimeout(() => setSuccessMessage(''), 5000);
-        }
+        // Não fechar modal aqui - aguardar o evento session-status-update com 'connected'
+        // para garantir que a sessão está realmente conectada
       }
       
-      // Atualizar status da sessão
-      setRealTimeStatus(prev => ({ 
-        ...prev, 
-        [sessionId]: status || 'disconnected' 
-      }));
+      // Atualizar status da sessão apenas se não for o modal atual
+      // (o modal será atualizado pelo session-status-update)
+      if (!showQRModal || selectedSession?.id !== sessionId) {
+        setRealTimeStatus(prev => ({ 
+          ...prev, 
+          [sessionId]: status || 'disconnected' 
+        }));
+      }
     };
 
     socket.on('sessions-update', handleSessionsUpdate);
     socket.on('session-status-update', handleSessionStatusUpdate);
     socket.on('session-qr-update', handleQRCodeUpdate);
 
+    console.log('✅ Listeners WebSocket configurados com sucesso');
+
     return () => {
+      console.log('🔌 Removendo listeners WebSocket...');
       socket.off('sessions-update', handleSessionsUpdate);
       socket.off('session-status-update', handleSessionStatusUpdate);
       socket.off('session-qr-update', handleQRCodeUpdate);
+      console.log('✅ Listeners WebSocket removidos');
     };
   }, [socket, isConnected, showQRModal, selectedSession]);
 
@@ -151,6 +191,9 @@ export default function SessionsComponent() {
       if (response.ok) {
         const data = await response.json();
         setSessions(data);
+        
+        // Atualizar timestamp da última atualização
+        setLastUpdate(new Date());
         
         // Atualizar status em tempo real
         const statusMap = {};
@@ -332,7 +375,13 @@ export default function SessionsComponent() {
   };
 
   const deleteSession = async (sessionId) => {
-    if (!window.confirm('Tem certeza que deseja excluir esta sessão? Esta ação não pode ser desfeita.')) return;
+    // Encontrar a sessão para mostrar informações específicas
+    const session = sessions.find(s => s.id === sessionId);
+    const sessionName = session ? (session.whatsappId || session.name || `Sessão ${sessionId}`) : `Sessão ${sessionId}`;
+    
+    const confirmMessage = `Tem certeza que deseja excluir a sessão "${sessionName}"?\n\nEsta ação irá:\n• Remover a sessão permanentemente do banco de dados\n• Limpar todos os arquivos de autenticação\n• Desconectar qualquer conexão ativa\n\nEsta ação não pode ser desfeita.`;
+    
+    if (!window.confirm(confirmMessage)) return;
 
     try {
       setActionLoading(prev => ({ ...prev, [sessionId]: 'deleting' }));
@@ -346,6 +395,20 @@ export default function SessionsComponent() {
 
       if (response.ok) {
         setError('');
+        // Mostrar mensagem de sucesso
+        const session = sessions.find(s => s.id === sessionId);
+        const sessionName = session ? (session.whatsappId || session.name || `Sessão ${sessionId}`) : `Sessão ${sessionId}`;
+        setSuccessMessage(`Sessão "${sessionName}" excluída com sucesso!`);
+        setTimeout(() => setSuccessMessage(''), 5000);
+        
+        // Mostrar toast de sucesso
+        if (toastApiRef.current && toastApiRef.current.addToast) {
+          toastApiRef.current.addToast(`Sessão "${sessionName}" foi excluída com sucesso!`, { 
+            type: 'success', 
+            duration: 4000 
+          });
+        }
+        
         // Não buscar sessões manualmente - WebSocket irá atualizar
       } else {
         const errorData = await response.json();
@@ -361,8 +424,8 @@ export default function SessionsComponent() {
 
   const getQRCode = async (sessionId, silent = false) => {
     try {
-      const response = await fetch(`${API_URL}/api/sessions/${sessionId}/qrcode`, {
-        method: 'POST',
+      const response = await fetch(`${API_URL}/api/sessions/${sessionId}/qr`, {
+        method: 'GET',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -422,17 +485,47 @@ export default function SessionsComponent() {
     setQrCode('');
     setQrStatus('loading');
     
-    // Buscar QR inicial
-    const qrData = await getQRCode(session.id);
-    if (qrData && qrData.qrCode) {
-      setQrCode(qrData.qrCode);
-      setQrStatus(qrData.status || 'qr_ready');
+    try {
+      // Primeiro verificar se a sessão está ativa
+      const qrData = await getQRCode(session.id, true); // silent = true
+      
+      if (qrData && qrData.qrCode && qrData.status !== 'disconnected') {
+        // QR code já existe, usar ele
+        setQrCode(qrData.qrCode);
+        setQrStatus(qrData.status || 'qr_ready');
+      } else {
+        // Sessão não está ativa ou não tem QR, iniciar ela
+        console.log('🔄 Sessão não ativa, iniciando...');
+        await startSession(session.id);
+        
+        // Aguardar um pouco para o QR ser gerado
+        setTimeout(async () => {
+          const newQrData = await getQRCode(session.id, true);
+          if (newQrData && newQrData.qrCode) {
+            setQrCode(newQrData.qrCode);
+            setQrStatus(newQrData.status || 'qr_ready');
+          } else {
+            setQrStatus('error');
+            setError('Erro ao gerar QR code. Tente novamente.');
+          }
+        }, 3000);
+      }
+    } catch (error) {
+      console.error('Erro ao mostrar QR code:', error);
+      setQrStatus('error');
+      setError('Erro ao preparar QR code');
     }
     
     // WebSocket irá manter o QR atualizado automaticamente
   };
 
   const closeQRModal = () => {
+    // Se a sessão ainda não conectou, mostrar confirmação
+    if (qrStatus !== 'connected' && qrStatus !== '') {
+      const confirmClose = window.confirm('Tem certeza que deseja fechar? A sessão ainda não foi conectada.');
+      if (!confirmClose) return;
+    }
+    
     setShowQRModal(false);
     setSelectedSession(null);
     setQrCode('');
@@ -490,78 +583,79 @@ export default function SessionsComponent() {
     const isLoading = actionLoading[session.id];
     
     return (
-      <div className="flex space-x-2">
-        {/* Botão Iniciar/Parar */}
+      <>
+        {/* Primary Action */}
         {currentStatus === 'disconnected' || currentStatus === 'error' ? (
           <button
             onClick={() => startSession(session.id)}
             disabled={isLoading}
-            className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors disabled:cursor-not-allowed flex items-center justify-center space-x-1"
           >
             {isLoading === 'starting' ? (
-              <ClockIcon className="h-4 w-4 animate-spin mr-1" />
+              <ClockIcon className="h-4 w-4 animate-spin" />
             ) : (
-              <PlayIcon className="h-4 w-4 mr-1" />
+              <PlayIcon className="h-4 w-4" />
             )}
-            {isLoading === 'starting' ? 'Iniciando...' : 'Iniciar'}
+            <span>{isLoading === 'starting' ? 'Iniciando...' : 'Iniciar'}</span>
           </button>
         ) : (
           <button
             onClick={() => stopSession(session.id)}
             disabled={isLoading}
-            className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors disabled:cursor-not-allowed flex items-center justify-center space-x-1"
           >
             {isLoading === 'stopping' ? (
-              <ClockIcon className="h-4 w-4 animate-spin mr-1" />
+              <ClockIcon className="h-4 w-4 animate-spin" />
             ) : (
-              <StopIcon className="h-4 w-4 mr-1" />
+              <PauseIcon className="h-4 w-4" />
             )}
-            {isLoading === 'stopping' ? 'Parando...' : 'Parar'}
+            <span>{isLoading === 'stopping' ? 'Parando...' : 'Parar'}</span>
           </button>
         )}
 
-        {/* Botão QR Code - Mostrar quando connecting, qr_ready, qr ou starting */}
+        {/* QR Code Button */}
         {(currentStatus === 'connecting' || 
           currentStatus === 'qr_ready' || 
           currentStatus === 'qr' || 
           currentStatus === 'starting') && (
           <button
             onClick={() => showQRCode(session)}
-            className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center space-x-1"
           >
-            <QrCodeIcon className="h-4 w-4 mr-1" />
-            QR Code
+            <QrCodeIcon className="h-4 w-4" />
+            <span>QR Code</span>
           </button>
         )}
 
-        {/* Botão Reiniciar */}
-        <button
-          onClick={() => restartSession(session.id)}
-          disabled={isLoading}
-          className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isLoading === 'restarting' ? (
-            <ClockIcon className="h-4 w-4 animate-spin mr-1" />
-          ) : (
-            <ArrowPathIcon className="h-4 w-4 mr-1" />
-          )}
-          {isLoading === 'restarting' ? 'Reiniciando...' : 'Reiniciar'}
-        </button>
+        {/* Secondary Actions */}
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={() => restartSession(session.id)}
+            disabled={isLoading}
+            className="bg-slate-600 hover:bg-slate-700 disabled:bg-gray-700 text-white px-2 py-2 rounded-lg text-xs font-medium transition-colors disabled:cursor-not-allowed flex items-center justify-center"
+            title="Reiniciar"
+          >
+            {isLoading === 'restarting' ? (
+              <ClockIcon className="h-3 w-3 animate-spin" />
+            ) : (
+              <ArrowPathIcon className="h-3 w-3" />
+            )}
+          </button>
 
-        {/* Botão Excluir */}
-        <button
-          onClick={() => deleteSession(session.id)}
-          disabled={isLoading}
-          className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isLoading === 'deleting' ? (
-            <ClockIcon className="h-4 w-4 animate-spin mr-1" />
-          ) : (
-            <TrashIcon className="h-4 w-4 mr-1" />
-          )}
-          {isLoading === 'deleting' ? 'Excluindo...' : 'Excluir'}
-        </button>
-      </div>
+          <button
+            onClick={() => deleteSession(session.id)}
+            disabled={isLoading}
+            className="bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-white px-2 py-2 rounded-lg text-xs font-medium transition-colors disabled:cursor-not-allowed flex items-center justify-center"
+            title="Remover"
+          >
+            {isLoading === 'deleting' ? (
+              <ClockIcon className="h-3 w-3 animate-spin" />
+            ) : (
+              <TrashIcon className="h-3 w-3" />
+            )}
+          </button>
+        </div>
+      </>
     );
   };
 
@@ -576,37 +670,53 @@ export default function SessionsComponent() {
   }
 
   return (
-    <div className="p-6 bg-slate-900 min-h-screen">
+    <div className="p-6 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 min-h-screen">
       {/* Header */}
-      <div className="mb-8">
-        <div className="flex justify-between items-center">
-          <div>
-            <div className="flex items-center space-x-3">
-              <h1 className="text-3xl font-bold text-white">Sessões WhatsApp</h1>
-              <div className="flex items-center space-x-2">
-                <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
-                <span className={`text-xs font-medium ${isConnected ? 'text-green-400' : 'text-red-400'}`}>
-                  {isConnected ? 'WebSocket conectado' : 'WebSocket desconectado'}
+      <div className="mb-6">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+          {/* Title and Status */}
+          <div className="flex items-center space-x-4">
+            <div className="p-2 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-xl">
+              <PhoneIcon className="h-6 w-6 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-yellow-400 to-orange-500 bg-clip-text text-transparent">
+                Sessões WhatsApp
+              </h1>
+              <div className="flex items-center space-x-2 mt-1">
+                <div className={`w-2 h-2 rounded-full ${
+                  isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
+                }`}></div>
+                <span className={`text-xs ${
+                  isConnected ? 'text-green-400' : 'text-red-400'
+                }`}>
+                  {isConnected ? 'Conectado' : 'Desconectado'}
+                </span>
+                <span className="text-xs text-gray-400">•</span>
+                <span className="text-xs text-gray-400">
+                  {sessions.length} sessão{sessions.length !== 1 ? 'ões' : ''}
                 </span>
               </div>
             </div>
-            <p className="text-gray-400">Gerencie suas conexões WhatsApp em tempo real</p>
           </div>
-          <div className="flex items-center space-x-3">
+          
+          {/* Action Buttons */}
+          <div className="flex items-center gap-2">
             <button
               onClick={() => fetchSessions()}
               disabled={!isConnected}
-              className="flex items-center space-x-2 px-4 py-2 bg-slate-700 text-gray-300 rounded-lg hover:bg-slate-600 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Atualizar sessões manualmente"
+              className="flex items-center space-x-1 px-3 py-2 bg-slate-700/50 text-gray-300 rounded-lg hover:bg-slate-600/50 transition-all duration-200 disabled:opacity-50 text-sm"
+              title="Atualizar sessões"
             >
               <ArrowPathIcon className="h-4 w-4" />
               <span className="hidden sm:inline">Atualizar</span>
             </button>
+            
             <button
               onClick={syncSessions}
               disabled={!isConnected || actionLoading.sync}
-              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Sincronizar e reconectar sessões automaticamente"
+              className="flex items-center space-x-1 px-3 py-2 bg-blue-600/80 text-white rounded-lg hover:bg-blue-600 transition-all duration-200 disabled:opacity-50 text-sm"
+              title="Sincronizar sessões"
             >
               {actionLoading.sync ? (
                 <ClockIcon className="h-4 w-4 animate-spin" />
@@ -614,89 +724,103 @@ export default function SessionsComponent() {
                 <WifiIcon className="h-4 w-4" />
               )}
               <span className="hidden sm:inline">
-                {actionLoading.sync ? 'Sincronizando...' : 'Sincronizar'}
+                {actionLoading.sync ? 'Sync...' : 'Sincronizar'}
               </span>
             </button>
+            
             <button
               onClick={() => setShowCreateModal(true)}
-              className="bg-gradient-to-r from-yellow-500 to-yellow-600 text-slate-900 px-6 py-3 rounded-xl flex items-center space-x-2 hover:from-yellow-600 hover:to-yellow-700 transition-all duration-300 shadow-lg hover:shadow-xl font-semibold"
+              className="flex items-center space-x-1 bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-4 py-2 rounded-lg hover:from-yellow-600 hover:to-orange-600 transition-all duration-200 font-medium text-sm"
             >
-              <PlusIcon className="h-5 w-5" />
+              <PlusIcon className="h-4 w-4" />
               <span>Nova Sessão</span>
             </button>
           </div>
         </div>
+        
+        {/* WebSocket Status Warning */}
+        {!isConnected && (
+          <div className="mt-4 bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 px-4 py-3 rounded-lg">
+            <div className="flex items-center space-x-2">
+              <ExclamationTriangleIcon className="h-4 w-4" />
+              <span className="text-sm">Conexão em tempo real indisponível</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Error Message */}
       {error && (
-        <div className="mb-6 bg-red-900/20 border border-red-500/30 text-red-400 px-4 py-3 rounded-xl backdrop-blur-sm">
-          {error}
+        <div className="mb-6 bg-gradient-to-r from-red-500/10 to-red-600/10 border border-red-500/30 text-red-400 px-6 py-4 rounded-2xl backdrop-blur-sm">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-red-500/20 rounded-xl">
+              <ExclamationTriangleIcon className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="font-semibold">Erro</p>
+              <p className="text-sm text-red-300">{error}</p>
+            </div>
+          </div>
         </div>
       )}
 
       {/* Success Message */}
       {successMessage && (
-        <div className="mb-6 bg-green-900/20 border border-green-500/30 text-green-400 px-4 py-3 rounded-xl backdrop-blur-sm">
-          {successMessage}
+        <div className="mb-6 bg-gradient-to-r from-green-500/10 to-green-600/10 border border-green-500/30 text-green-400 px-6 py-4 rounded-2xl backdrop-blur-sm">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-green-500/20 rounded-xl">
+              <CheckCircleIcon className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="font-semibold">Sucesso</p>
+              <p className="text-sm text-green-300">{successMessage}</p>
+            </div>
+          </div>
         </div>
       )}
 
       {/* Sessions Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {sessions.map((session) => (
-          <div key={session.id} className="bg-slate-800 rounded-xl shadow-xl p-6 border border-slate-700 hover:border-yellow-500/50 transition-all duration-300 hover:shadow-2xl">
-            <div className="flex justify-between items-start mb-4">
-              <div className="flex items-center space-x-3">
-                <div className="p-2 bg-yellow-500/20 rounded-lg">
-                  <PhoneIcon className="h-8 w-8 text-yellow-500" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-white">{session.whatsappId}</h3>
-                  <p className="text-sm text-gray-400">ID: {session.id}</p>
-                  <div className="flex items-center mt-1">
-                    <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-                      session.library === 'baileys' 
-                        ? 'bg-blue-500/20 text-blue-400' 
-                        : 'bg-green-500/20 text-green-400'
-                    }`}>
-                      {session.library === 'baileys' ? 'Baileys' : 'WhatsApp.js'}
-                    </span>
-                  </div>
-                </div>
+          <div key={session.id} className="bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-xl p-4 hover:border-blue-500/50 transition-all duration-200">
+            {/* Session Header */}
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center space-x-2">
+                <PhoneIcon className="h-4 w-4 text-yellow-400" />
+                <h3 className="font-medium text-slate-200 truncate">
+                  {session.whatsappId}
+                </h3>
               </div>
-              <div className="flex items-center space-x-2 bg-slate-700 px-3 py-1 rounded-full">
+              
+              <div className="flex items-center space-x-1">
                 {getStatusIcon(session.id, session.status)}
-                {getStatusText(session.id, session.status)}
+                <span className="text-xs">
+                  {getStatusText(session.id, session.status)}
+                </span>
               </div>
             </div>
 
-            <div className="space-y-3">
-              <div className="text-sm text-gray-400 bg-slate-700/50 p-3 rounded-lg space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-gray-300 font-medium">Biblioteca:</span>
-                  <span className={`font-medium ${
-                    session.library === 'baileys' ? 'text-blue-400' : 'text-green-400'
-                  }`}>
-                    {session.library === 'baileys' ? 'Baileys' : 'WhatsApp.js'}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-300 font-medium">Status Atual:</span>
-                  <span className="font-medium">{getStatusText(session.id, session.status)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-300 font-medium">Criado em:</span>
-                  <span>{new Date(session.createdAt).toLocaleDateString('pt-BR')}</span>
-                </div>
-                {session.updatedAt && session.updatedAt !== session.createdAt && (
-                  <div className="flex justify-between">
-                    <span className="text-gray-300 font-medium">Última atualização:</span>
-                    <span>{new Date(session.updatedAt).toLocaleString('pt-BR')}</span>
-                  </div>
-                )}
-              </div>
+            {/* Library Badge */}
+            <div className="mb-3">
+              <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-medium ${
+                session.library === 'baileys' 
+                  ? 'bg-blue-500/20 text-blue-400' 
+                  : 'bg-green-500/20 text-green-400'
+              }`}>
+                {session.library === 'baileys' ? 'Baileys' : 'WhatsApp.js'}
+              </span>
+            </div>
 
+            {/* Session Info */}
+            <div className="text-xs text-gray-400 mb-4">
+              <div className="flex justify-between">
+                <span>Criado:</span>
+                <span>{new Date(session.createdAt).toLocaleDateString('pt-BR')}</span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="space-y-2">
               {getActionButtons(session)}
             </div>
           </div>
@@ -706,86 +830,105 @@ export default function SessionsComponent() {
       {/* Empty State */}
       {sessions.length === 0 && !loading && (
         <div className="text-center py-12">
-          <div className="w-20 h-20 bg-yellow-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
-            <PhoneIcon className="h-10 w-10 text-yellow-500" />
+          <div className="w-16 h-16 bg-yellow-500/20 rounded-xl flex items-center justify-center mx-auto mb-4">
+            <PhoneIcon className="h-8 w-8 text-yellow-400" />
           </div>
-          <h3 className="mt-2 text-lg font-semibold text-white">Nenhuma sessão encontrada</h3>
-          <p className="mt-1 text-sm text-gray-400">Comece criando uma nova sessão WhatsApp.</p>
-          <div className="mt-6">
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="bg-gradient-to-r from-yellow-500 to-yellow-600 text-slate-900 px-6 py-3 rounded-xl hover:from-yellow-600 hover:to-yellow-700 transition-all duration-300 font-semibold shadow-lg"
-            >
-              Criar primeira sessão
-            </button>
-          </div>
+          <h3 className="text-lg font-semibold text-white mb-2">Nenhuma sessão encontrada</h3>
+          <p className="text-gray-400 mb-6">Comece criando uma nova sessão WhatsApp.</p>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-6 py-3 rounded-lg hover:from-yellow-600 hover:to-orange-600 transition-all duration-200 font-medium"
+          >
+            Criar primeira sessão
+          </button>
         </div>
       )}
 
       {/* Create Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-800 rounded-2xl max-w-md w-full p-6 border border-slate-700 shadow-2xl">
-            <h2 className="text-xl font-bold mb-6 text-white">Nova Sessão WhatsApp</h2>
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl max-w-md w-full p-8 border border-slate-700/50 shadow-2xl backdrop-blur-sm">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center space-x-3">
+                <div className="p-3 bg-gradient-to-r from-yellow-500/20 to-orange-500/20 rounded-xl border border-yellow-500/30">
+                  <PlusIcon className="h-6 w-6 text-yellow-400" />
+                </div>
+                <h2 className="text-2xl font-bold text-white">Nova Sessão</h2>
+              </div>
+              <button
+                onClick={() => setShowCreateModal(false)}
+                className="text-gray-400 hover:text-white transition-colors p-2 hover:bg-slate-700/50 rounded-lg"
+              >
+                <XCircleIcon className="h-6 w-6" />
+              </button>
+            </div>
             
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
+                <label className="block text-sm font-semibold text-gray-300 mb-3">
                   ID da Sessão *
                 </label>
                 <input
                   type="text"
                   value={newSession.whatsappId}
                   onChange={(e) => setNewSession({...newSession, whatsappId: e.target.value})}
-                  className="w-full px-4 py-3 bg-slate-700 border border-slate-600 text-white rounded-xl focus:ring-2 focus:ring-yellow-500 focus:border-transparent transition-all duration-300"
+                  className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600/50 text-white rounded-xl focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500/50 transition-all duration-300 backdrop-blur-sm"
                   placeholder="Ex: atendimento_01"
                 />
+                <p className="text-xs text-gray-400 mt-2">
+                  Use apenas letras, números e underline
+                </p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
+                <label className="block text-sm font-semibold text-gray-300 mb-3">
                   Biblioteca WhatsApp
                 </label>
                 <select
                   value={newSession.library}
                   onChange={(e) => setNewSession({...newSession, library: e.target.value})}
-                  className="w-full px-4 py-3 bg-slate-700 border border-slate-600 text-white rounded-xl focus:ring-2 focus:ring-yellow-500 focus:border-transparent transition-all duration-300"
+                  className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600/50 text-white rounded-xl focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500/50 transition-all duration-300 backdrop-blur-sm"
                 >
                   <option value="baileys">Baileys (Recomendado)</option>
                   <option value="whatsappjs">WhatsApp.js</option>
                 </select>
-                <p className="text-xs text-gray-400 mt-1">
-                  {newSession.library === 'baileys' 
-                    ? 'Baileys: Mais estável e com melhor suporte a recursos' 
-                    : 'WhatsApp.js: Baseado no navegador, mais simples'}
-                </p>
+                <div className="mt-3 p-3 bg-slate-700/30 rounded-lg border border-slate-600/30">
+                  <p className="text-xs text-gray-300">
+                    {newSession.library === 'baileys' 
+                      ? '✅ Baileys: Mais estável, melhor performance e suporte completo a recursos' 
+                      : '🌐 WhatsApp.js: Baseado no navegador, interface mais simples'}
+                  </p>
+                </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
+                <label className="block text-sm font-semibold text-gray-300 mb-3">
                   Nome da Sessão (opcional)
                 </label>
                 <input
                   type="text"
                   value={newSession.name}
                   onChange={(e) => setNewSession({...newSession, name: e.target.value})}
-                  className="w-full px-4 py-3 bg-slate-700 border border-slate-600 text-white rounded-xl focus:ring-2 focus:ring-yellow-500 focus:border-transparent transition-all duration-300"
+                  className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600/50 text-white rounded-xl focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500/50 transition-all duration-300 backdrop-blur-sm"
                   placeholder="Ex: Atendimento Principal"
                 />
+                <p className="text-xs text-gray-400 mt-2">
+                  Nome amigável para identificar a sessão
+                </p>
               </div>
             </div>
 
             <div className="flex space-x-3 mt-8">
               <button
                 onClick={() => setShowCreateModal(false)}
-                className="flex-1 px-4 py-3 border border-slate-600 text-gray-300 rounded-xl hover:bg-slate-700 transition-all duration-300"
+                className="flex-1 px-6 py-3 border border-slate-600/50 text-gray-300 rounded-xl hover:bg-slate-700/50 transition-all duration-300 font-medium backdrop-blur-sm"
               >
                 Cancelar
               </button>
               <button
                 onClick={createSession}
                 disabled={!newSession.whatsappId.trim() || actionLoading.create}
-                className="flex-1 px-4 py-3 bg-gradient-to-r from-yellow-500 to-yellow-600 text-slate-900 rounded-xl hover:from-yellow-600 hover:to-yellow-700 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
+                className="flex-1 px-6 py-3 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl hover:from-yellow-600 hover:to-orange-600 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed font-semibold shadow-lg hover:shadow-yellow-500/25"
               >
                 {actionLoading.create ? (
                   <div className="flex items-center justify-center">
@@ -793,7 +936,10 @@ export default function SessionsComponent() {
                     Criando...
                   </div>
                 ) : (
-                  'Criar Sessão'
+                  <div className="flex items-center justify-center">
+                    <PlusIcon className="h-4 w-4 mr-2" />
+                    Criar Sessão
+                  </div>
                 )}
               </button>
             </div>
@@ -804,20 +950,28 @@ export default function SessionsComponent() {
       {/* QR Code Modal */}
       {showQRModal && selectedSession && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-800 rounded-2xl max-w-md w-full p-6 text-center border border-slate-700 shadow-2xl">
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl max-w-md w-full p-8 border border-slate-700/50 shadow-2xl backdrop-blur-sm">
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold text-white">QR Code - {selectedSession.whatsappId}</h2>
+              <div className="flex items-center space-x-3">
+                <div className="p-3 bg-gradient-to-r from-blue-500/20 to-blue-600/20 rounded-xl border border-blue-500/30">
+                  <QrCodeIcon className="h-6 w-6 text-blue-400" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white">QR Code</h2>
+                  <p className="text-sm text-gray-400">{selectedSession.whatsappId}</p>
+                </div>
+              </div>
               <button
                 onClick={closeQRModal}
-                className="text-gray-400 hover:text-white transition-colors"
+                className="text-gray-400 hover:text-white transition-colors p-2 hover:bg-slate-700/50 rounded-lg"
               >
                 <XCircleIcon className="h-6 w-6" />
               </button>
             </div>
             
             {qrCode ? (
-              <div className="space-y-4">
-                <div className="flex justify-center bg-white p-4 rounded-xl">
+              <div className="space-y-6">
+                <div className="flex justify-center bg-white p-6 rounded-2xl shadow-inner">
                   <img 
                     src={qrCode.startsWith('data:') ? qrCode : `data:image/png;base64,${qrCode}`} 
                     alt="QR Code" 
@@ -828,49 +982,79 @@ export default function SessionsComponent() {
                     }}
                   />
                 </div>
-                <p className="text-sm text-gray-400">
-                  Escaneie este código QR com seu WhatsApp para conectar a sessão.
-                </p>
-                <div className="flex items-center justify-center space-x-2">
-                  {qrStatus === 'qr_ready' || qrStatus === 'qr' ? (
-                    <>
-                      <QrCodeIcon className="h-5 w-5 text-blue-400 animate-pulse" />
-                      <span className="text-sm font-medium text-blue-400">Aguardando leitura do QR...</span>
-                    </>
-                  ) : qrStatus === 'connecting' ? (
-                    <>
-                      <ClockIcon className="h-5 w-5 text-yellow-400 animate-spin" />
-                      <span className="text-sm font-medium text-yellow-400">Conectando...</span>
-                    </>
-                  ) : qrStatus === 'connected' ? (
-                    <>
-                      <CheckCircleIcon className="h-5 w-5 text-green-400" />
-                      <span className="text-sm font-medium text-green-400">Conectado com sucesso!</span>
-                    </>
-                  ) : (
-                    <>
-                      <QrCodeIcon className="h-5 w-5 text-gray-400" />
-                      <span className="text-sm font-medium text-gray-400">{qrStatus || 'Aguardando conexão...'}</span>
-                    </>
-                  )}
+                
+                <div className="text-center space-y-4">
+                  <div className="flex items-center justify-center space-x-3">
+                    {qrStatus === 'qr_ready' || qrStatus === 'qr' ? (
+                      <>
+                        <div className="p-2 bg-blue-500/20 rounded-lg">
+                          <QrCodeIcon className="h-5 w-5 text-blue-400 animate-pulse" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-blue-400">Aguardando leitura</p>
+                          <p className="text-xs text-blue-300">Escaneie o código com seu WhatsApp</p>
+                        </div>
+                      </>
+                    ) : qrStatus === 'connecting' ? (
+                      <>
+                        <div className="p-2 bg-yellow-500/20 rounded-lg">
+                          <ClockIcon className="h-5 w-5 text-yellow-400 animate-spin" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-yellow-400">Conectando...</p>
+                          <p className="text-xs text-yellow-300">Estabelecendo conexão</p>
+                        </div>
+                      </>
+                    ) : qrStatus === 'connected' ? (
+                      <>
+                        <div className="p-2 bg-green-500/20 rounded-lg">
+                          <CheckCircleIcon className="h-5 w-5 text-green-400" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-green-400">Conectado!</p>
+                          <p className="text-xs text-green-300">WhatsApp conectado com sucesso</p>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="p-2 bg-gray-500/20 rounded-lg">
+                          <QrCodeIcon className="h-5 w-5 text-gray-400" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-gray-400">Aguardando</p>
+                          <p className="text-xs text-gray-300">{qrStatus || 'Preparando conexão...'}</p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  
+                  <div className="bg-slate-700/30 rounded-xl p-4 border border-slate-600/30">
+                    <p className="text-sm text-gray-300 leading-relaxed">
+                      1. Abra o WhatsApp no seu celular<br/>
+                      2. Toque em <strong>Mais opções</strong> → <strong>Aparelhos conectados</strong><br/>
+                      3. Toque em <strong>Conectar um aparelho</strong><br/>
+                      4. Aponte a câmera para este código
+                    </p>
+                  </div>
                 </div>
                 
-                {/* Botão para atualizar QR manualmente */}
                 <button
                   onClick={() => getQRCode(selectedSession.id)}
-                  className="w-full px-4 py-2 bg-slate-700 text-gray-300 rounded-lg hover:bg-slate-600 transition-all duration-300 text-sm"
+                  className="w-full px-4 py-3 bg-slate-700/50 text-gray-300 rounded-xl hover:bg-slate-600/50 transition-all duration-300 text-sm font-medium border border-slate-600/30 backdrop-blur-sm"
                 >
                   <ArrowPathIcon className="h-4 w-4 inline mr-2" />
                   Atualizar QR Code
                 </button>
               </div>
             ) : (
-              <div className="space-y-4">
-                <div className="flex justify-center items-center bg-slate-700 p-8 rounded-xl h-64">
+              <div className="space-y-6">
+                <div className="flex justify-center items-center bg-slate-700/30 p-12 rounded-2xl border border-slate-600/30">
                   <div className="text-center">
-                    <ClockIcon className="h-12 w-12 text-yellow-500 animate-spin mx-auto mb-4" />
-                    <p className="text-gray-400">Gerando QR Code...</p>
-                    <p className="text-xs text-gray-500 mt-2">Isso pode levar alguns segundos</p>
+                    <div className="p-4 bg-yellow-500/20 rounded-full inline-block mb-4">
+                      <ClockIcon className="h-12 w-12 text-yellow-400 animate-spin" />
+                    </div>
+                    <p className="text-gray-300 font-medium">Gerando QR Code...</p>
+                    <p className="text-xs text-gray-400 mt-2">Isso pode levar alguns segundos</p>
                   </div>
                 </div>
               </div>
@@ -878,7 +1062,7 @@ export default function SessionsComponent() {
             
             <button
               onClick={closeQRModal}
-              className="w-full mt-6 px-4 py-3 bg-gradient-to-r from-yellow-500 to-yellow-600 text-slate-900 rounded-xl hover:from-yellow-600 hover:to-yellow-700 transition-all duration-300 font-semibold"
+              className="w-full mt-6 px-6 py-3 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl hover:from-yellow-600 hover:to-orange-600 transition-all duration-300 font-semibold shadow-lg hover:shadow-yellow-500/25"
             >
               Fechar
             </button>

@@ -1,6 +1,8 @@
 
 import { Queue, User, UserQueue, Ticket, Contact } from '../models/index.js';
 import { emitToAll } from '../services/socket.js';
+import { Sequelize } from 'sequelize';
+import sequelize from '../services/sequelize.js';
 
 // Criar nova fila
 export const createQueue = async (req, res) => {
@@ -14,7 +16,8 @@ export const createQueue = async (req, res) => {
       rotation, 
       integration, 
       fileList, 
-      greetingMessage, 
+      greetingMessage,
+      autoReceiveMessages,
       options 
     } = req.body;
 
@@ -44,6 +47,7 @@ export const createQueue = async (req, res) => {
       integration: integration || null,
       fileList: fileList || null,
       greetingMessage: greetingMessage || null,
+      autoReceiveMessages: autoReceiveMessages || false,
       options: options || null
     });
     
@@ -115,6 +119,44 @@ export const assignUserToQueue = async (req, res) => {
     res.json({ message: 'Usuário vinculado à fila com sucesso' });
   } catch (error) {
     console.error('❌ Erro ao vincular usuário à fila:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Remover usuário da fila
+export const removeUserFromQueue = async (req, res) => {
+  try {
+    const { queueId, userId } = req.body;
+    
+    const queue = await Queue.findByPk(queueId);
+    if (!queue) {
+      return res.status(404).json({ error: 'Fila não encontrada' });
+    }
+    
+    const user = await User.findByPk(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+    
+    // Verificar se a associação existe
+    const existingAssociation = await UserQueue.findOne({
+      where: { userId, queueId }
+    });
+    
+    if (!existingAssociation) {
+      return res.status(400).json({ error: 'Usuário não está vinculado a esta fila' });
+    }
+    
+    await UserQueue.destroy({ where: { userId, queueId } });
+    
+    console.log(`🔗 Usuário ${user.name} removido da fila "${queue.name}"`);
+    
+    // Emitir atualização via WebSocket
+    emitToAll('user-queue-removed', { userId, queueId, userName: user.name, queueName: queue.name });
+    
+    res.json({ message: 'Usuário removido da fila com sucesso' });
+  } catch (error) {
+    console.error('❌ Erro ao remover usuário da fila:', error);
     res.status(500).json({ error: error.message });
   }
 };
@@ -328,7 +370,8 @@ export const updateQueue = async (req, res) => {
       rotation, 
       integration, 
       fileList, 
-      greetingMessage, 
+      greetingMessage,
+      autoReceiveMessages,
       options 
     } = req.body;
 
@@ -356,6 +399,7 @@ export const updateQueue = async (req, res) => {
     if (integration !== undefined) updatedData.integration = integration;
     if (fileList !== undefined) updatedData.fileList = fileList;
     if (greetingMessage !== undefined) updatedData.greetingMessage = greetingMessage;
+    if (autoReceiveMessages !== undefined) updatedData.autoReceiveMessages = autoReceiveMessages;
     if (options !== undefined) updatedData.options = options;
 
     await queue.update(updatedData);

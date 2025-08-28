@@ -4,11 +4,14 @@ import { sendText, sendMedia } from '../services/whatsappjsService.js';
 
 export const listSchedules = async (req, res) => {
   try {
+    console.log('📅 Backend ScheduleController: Requisição recebida, user:', req.user);
+    
     const { status, q } = req.query;
     const where = { userId: req.user.id };
     if (status) where.status = status;
     if (q) where.to = { [Op.iLike]: `%${q}%` };
 
+    console.log('📅 Backend ScheduleController: Buscando com where:', where);
     const items = await Schedule.findAll({
       where,
       order: [['sendAt', 'ASC']],
@@ -17,9 +20,11 @@ export const listSchedules = async (req, res) => {
         { model: Contact, attributes: ['id', 'name', 'whatsappId'] }
       ]
     });
+
+    console.log('📅 Backend ScheduleController: Encontrados', items.length, 'agendamentos');
     res.json(items);
   } catch (err) {
-    console.error('Erro ao listar agendamentos:', err);
+    console.error('📅 Backend ScheduleController: Erro ao listar agendamentos:', err);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 };

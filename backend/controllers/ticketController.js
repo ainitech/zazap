@@ -1,3 +1,4 @@
+
 import { Ticket, Queue, Contact, User, TicketMessage, TicketComment, MessageReaction, Tag, TicketTag } from '../models/index.js';
 import { Op } from 'sequelize';
 import { emitToAll } from '../services/socket.js';
@@ -31,6 +32,17 @@ const emitTicketsUpdate = async () => {
       ],
       order: [['updatedAt', 'DESC']]
     });
+
+    // Buscar última mensagem para cada ticket
+    for (const ticket of tickets) {
+      const lastMessage = await TicketMessage.findOne({
+        where: { ticketId: ticket.id },
+        order: [['createdAt', 'DESC']],
+        attributes: ['id', 'content', 'sender', 'isFromGroup', 'participantName', 'groupName', 'createdAt']
+      });
+      ticket.dataValues.LastMessage = lastMessage;
+    }
+
     console.log(`🔄 Emitindo atualização de tickets via WebSocket: ${tickets.length} tickets`);
     emitToAll('tickets-update', tickets);
   } catch (error) {
@@ -41,8 +53,9 @@ const emitTicketsUpdate = async () => {
 // Listar tickets com filtros e busca avançada
 export const listTickets = async (req, res) => {
   try {
-    const { contact, status, queueId, sessionId, fromDate, toDate, search, ticketId } = req.query;
+    const { contact, status, queueId, sessionId, fromDate, toDate, search, ticketId, isGroup } = req.query;
     const where = {};
+    const contactWhere = {}; // Filtros para o modelo Contact
     
     // Se ticketId for especificado, buscar apenas esse ticket
     if (ticketId) {
@@ -53,6 +66,12 @@ export const listTickets = async (req, res) => {
       if (status) where.status = status;
       if (queueId) where.queueId = queueId;
       if (sessionId) where.sessionId = sessionId;
+      
+      // Filtro para grupos/contatos individuais
+      if (isGroup !== undefined) {
+        contactWhere.isGroup = isGroup === 'true';
+      }
+      
       if (fromDate || toDate) {
         where.createdAt = {};
         if (fromDate) where.createdAt[Op.gte] = new Date(fromDate);
@@ -73,7 +92,8 @@ export const listTickets = async (req, res) => {
       include: [
         {
           model: Contact,
-          required: false // LEFT JOIN para incluir tickets sem contato vinculado
+          required: false, // LEFT JOIN para incluir tickets sem contato vinculado
+          where: Object.keys(contactWhere).length > 0 ? contactWhere : undefined // Aplicar filtro de grupo se especificado
         },
         {
           model: Queue,
@@ -93,12 +113,80 @@ export const listTickets = async (req, res) => {
       ],
       order: [['updatedAt', 'DESC']], // Ordenar por updatedAt para mostrar mais recentes primeiro
     });
+
+    // Buscar última mensagem para cada ticket
+    for (const ticket of tickets) {
+      const lastMessage = await TicketMessage.findOne({
+        where: { ticketId: ticket.id },
+        order: [['createdAt', 'DESC']],
+        attributes: ['id', 'content', 'sender', 'isFromGroup', 'participantName', 'groupName', 'createdAt']
+      });
+      ticket.dataValues.LastMessage = lastMessage;
+    }
     
-    console.log(`📊 Listando tickets: ${tickets.length} encontrados${ticketId ? ` (busca específica ID: ${ticketId})` : ''}`);
+    console.log(`📊 Listando tickets: ${tickets.length} encontrados${ticketId ? ` (busca específica ID: ${ticketId})` : ''}${isGroup !== undefined ? ` (${isGroup === 'true' ? 'GRUPOS' : 'INDIVIDUAIS'})` : ''}`);
+    
+    // Log para debug dos dados de contato
+    tickets.forEach(ticket => {
+      console.log(`🎫 Ticket ${ticket.id}:`);
+      console.log(`  - contact: ${ticket.contact}`);
+      console.log(`  - contactId: ${ticket.contactId}`);
+      console.log(`  - Contact object:`, ticket.Contact ? {
+        id: ticket.Contact.id,
+        name: ticket.Contact.name,
+        profilePicUrl: ticket.Contact.profilePicUrl,
+        formattedNumber: ticket.Contact.formattedNumber,
+        isGroup: ticket.Contact.isGroup
+      } : 'NULL');
+    });
     
     res.json(tickets);
   } catch (err) {
     console.error('❌ Erro ao listar tickets:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Buscar ticket por UID
+export const getTicketByUid = async (req, res) => {
+  try {
+    const { uid } = req.params;
+
+    console.log(`🔍 Buscando ticket por UID: ${uid}`);
+
+    const ticket = await Ticket.findOne({
+      where: { uid },
+      include: [
+        {
+          model: Contact,
+          required: false
+        },
+        {
+          model: Queue,
+          required: false
+        },
+        {
+          model: User,
+          as: 'AssignedUser',
+          required: false
+        },
+        {
+          model: Tag,
+          as: 'tags',
+          through: { attributes: ['addedAt'] },
+          required: false
+        }
+      ]
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ error: 'Ticket não encontrado.' });
+    }
+
+    console.log(`✅ Ticket encontrado: ID ${ticket.id}, UID ${ticket.uid}`);
+    res.json(ticket);
+  } catch (err) {
+    console.error('❌ Erro ao buscar ticket por UID:', err);
     res.status(500).json({ error: err.message });
   }
 };

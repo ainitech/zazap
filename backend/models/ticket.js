@@ -7,6 +7,13 @@ const Ticket = sequelize.define('Ticket', {
     autoIncrement: true,
     primaryKey: true,
   },
+  uid: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    allowNull: false,
+    unique: true,
+    comment: 'UID único para acesso direto ao ticket via link'
+  },
   sessionId: {
     type: DataTypes.INTEGER,
     allowNull: true,

@@ -31,7 +31,8 @@ export const authenticateToken = async (req, res, next) => {
     req.user = {
       id: user.id,
       name: user.name,
-      email: user.email
+      email: user.email,
+      role: user.role
     };
     
     next();
@@ -55,7 +56,8 @@ export const optionalAuth = async (req, res, next) => {
         req.user = {
           id: user.id,
           name: user.name,
-          email: user.email
+          email: user.email,
+          role: user.role
         };
       }
     } catch (error) {

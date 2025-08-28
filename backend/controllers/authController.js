@@ -37,8 +37,11 @@ export const login = async (req, res) => {
 export const me = async (req, res) => {
   try {
     // O middleware authenticateToken já validou o token e adicionou req.user
+    console.log('👤 AuthController.me: Usuário autenticado:', req.user);
+    console.log('👤 AuthController.me: Headers:', req.headers.authorization);
     res.json(req.user);
   } catch (err) {
+    console.error('👤 AuthController.me: Erro:', err);
     res.status(500).json({ error: err.message });
   }
 };

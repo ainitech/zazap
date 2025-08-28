@@ -41,13 +41,15 @@ const predefinedTags = [
 ];
 
 export default function TagsComponent() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [tags, setTags] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
   const [showCreateModal, setShowCreateModal] = useState(false);
+
+  console.log('🏷️ TagsComponent: Inicializando, user:', user, 'token:', !!token);
   const [editingTag, setEditingTag] = useState(null);
   const [showPredefinedModal, setShowPredefinedModal] = useState(false);
   
@@ -66,16 +68,19 @@ export default function TagsComponent() {
   const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
   const fetchTags = async () => {
+    console.log('🏷️ TagsComponent: Carregando tags...');
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/tags`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token') || token}` },
       });
+      console.log('🏷️ TagsComponent: Resposta da API:', res.status, res.statusText);
       if (!res.ok) throw new Error('Erro ao carregar tags');
       const data = await res.json();
+      console.log('🏷️ TagsComponent: Dados carregados:', data?.length || 0, 'tags');
       setTags(Array.isArray(data) ? data : (data.tags || []));
     } catch (e) {
-      console.error('Erro ao carregar tags:', e);
+      console.error('🏷️ TagsComponent: Erro ao carregar tags:', e);
       setError('Erro ao carregar tags');
     } finally {
       setLoading(false);

@@ -34,19 +34,24 @@ export default function SchedulesComponent() {
   const [calendarDate, setCalendarDate] = useState(new Date());
   const token = localStorage.getItem('token');
 
+  console.log('📅 SchedulesComponent: Inicializando, token:', !!token);
+
   const load = async () => {
+    console.log('📅 SchedulesComponent: Carregando agendamentos...');
     setLoading(true);
     try {
       const [listRes, countsRes] = await Promise.all([
         apiFetch(`/api/schedules?status=${statusFilter}&q=${encodeURIComponent(q)}`),
         apiFetch('/api/schedules/counts')
       ]);
+      console.log('📅 SchedulesComponent: Respostas da API:', listRes.status, countsRes.status);
       const listData = await safeJson(listRes);
       const countsData = await safeJson(countsRes);
+      console.log('📅 SchedulesComponent: Dados carregados:', listData?.length || 0, 'itens');
       setItems(listData || []);
       setCounts(countsData || {});
     } catch (e) {
-      console.error('Falha ao carregar agendamentos', e);
+      console.error('📅 SchedulesComponent: Falha ao carregar agendamentos', e);
     } finally {
       setLoading(false);
     }

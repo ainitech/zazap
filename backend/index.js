@@ -24,6 +24,7 @@ import quickReplyRoutes from './routes/quickReplyRoutes.js';
 import scheduleRoutes from './routes/scheduleRoutes.js';
 import tagRoutes from './routes/tagRoutes.js';
 import campaignRoutes from './routes/campaignRoutes.js';
+import buttonRoutes from './routes/buttonRoutes.js';
 import path from 'path';
 
 dotenv.config();
@@ -35,12 +36,53 @@ const server = createServer(app);
 const io = initializeSocket(server);
 
 // Middlewares
-app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3001'],
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Permitir requests sem origin (como mobile apps, Postman, etc)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:3001',
+      // Adicionar IPs locais comuns
+      'http://192.168.0.1:3000',
+      'http://192.168.0.1:3001',
+      'http://10.0.0.1:3000',
+      'http://10.0.0.1:3001',
+      // Permitir qualquer IP local na rede
+      /^http:\/\/192\.168\.\d+\.\d+:3000$/,
+      /^http:\/\/192\.168\.\d+\.\d+:3001$/,
+      /^http:\/\/10\.\d+\.\d+\.\d+:3000$/,
+      /^http:\/\/10\.\d+\.\d+\.\d+:3001$/,
+      /^http:\/\/172\.\d+\.\d+\.\d+:3000$/,
+      /^http:\/\/172\.\d+\.\d+\.\d+:3001$/,
+    ];
+    
+    // Verificar se a origem está na lista de permitidas
+    const isAllowed = allowedOrigins.some(allowedOrigin => {
+      if (typeof allowedOrigin === 'string') {
+        return allowedOrigin === origin;
+      } else if (allowedOrigin instanceof RegExp) {
+        return allowedOrigin.test(origin);
+      }
+      return false;
+    });
+    
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.log(`🚫 CORS bloqueado para origem: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
-}));
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With']
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -85,6 +127,7 @@ app.use('/api/quick-replies', quickReplyRoutes);
 app.use('/api/schedules', scheduleRoutes);
 app.use('/api/tags', tagRoutes);
 app.use('/api/campaigns', campaignRoutes);
+app.use('/api/buttons', buttonRoutes);
 app.use('/api/integrations', integrationRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/sessions', sessionRoutes);
@@ -96,8 +139,14 @@ app.get('/', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, async () => {
-  console.log(`Backend running on port ${PORT}`);
+const HOST = process.env.HOST || '0.0.0.0';
+
+server.listen(PORT, HOST, async () => {
+  console.log(`🚀 Backend running on ${HOST}:${PORT}`);
+  console.log(`🌐 Accessible at:`);
+  console.log(`   - Local: http://localhost:${PORT}`);
+  console.log(`   - Network: http://192.168.1.100:${PORT} (replace with your IP)`);
+  console.log(`   - All interfaces: http://${HOST}:${PORT}`);
   console.log(`Socket.IO server initialized`);
   
   // Aguardar um pouco para o servidor estabilizar

@@ -16,49 +16,101 @@ import TrashPage from './pages/TrashPage';
 import QuickRepliesPage from './pages/QuickRepliesPage';
 import SchedulesPage from './pages/SchedulesPage';
 import TagsPage from './pages/TagsPage';
-import CampaignsPage from './pages/CampaignsPage';
+import AgentsPage from './pages/AgentsPage';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SocketProvider } from './context/SocketContext';
+import { ProtectedRoute } from './components/PageLayout';
 
-function ProtectedRoute({ children }) {
-  const { token } = useAuth();
-  
-  if (!token) {
-    return <LoginPage />;
+function AppRoutes() {
+  const { isAuthenticated } = useAuth();
+
+  console.log('🚦 AppRoutes: Renderizando, isAuthenticated:', isAuthenticated);
+
+  if (!isAuthenticated) {
+    console.log('🚦 AppRoutes: Usuário não autenticado, mostrando login');
+    return (
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    );
   }
 
-  return children;
+  console.log('🚦 AppRoutes: Usuário autenticado, mostrando aplicação principal');
+  return (
+    <Routes>
+      {/* Debug: Log da rota atual */}
+      {console.log('🔍 AppRoutes: Rota atual:', window.location.pathname)}
+      
+      {/* ROTAS MAIS ESPECÍFICAS PRIMEIRO - ORDEM CRÍTICA */}
+      
+      {/* Chat com UID específico - MAIS ESPECÍFICA */}
+      <Route path="/tickets/:uid" element={
+        <ProtectedRoute requiredPermissions={['admin', 'supervisor', 'attendant']}>
+          <ChatPage />
+        </ProtectedRoute>
+      } />
+      
+      {/* Chat com ID específico */}
+      <Route path="/chat/:ticketId" element={
+        <ProtectedRoute requiredPermissions={['admin', 'supervisor', 'attendant']}>
+          <ChatPage />
+        </ProtectedRoute>
+      } />
+      
+      {/* Chat geral */}
+      <Route path="/chat" element={
+        <ProtectedRoute requiredPermissions={['admin', 'supervisor', 'attendant']}>
+          <ChatPage />
+        </ProtectedRoute>
+      } />
+      
+      {/* Dashboard */}
+      <Route path="/dashboard" element={
+        <ProtectedRoute requiredPermissions={['admin', 'supervisor', 'attendant']}>
+          <DashboardPage />
+        </ProtectedRoute>
+      } />
+      
+      {/* Página inicial redireciona para dashboard */}
+      <Route path="/" element={
+        <ProtectedRoute requiredPermissions={['admin', 'supervisor', 'attendant']}>
+          <DashboardPage />
+        </ProtectedRoute>
+      } />
+      
+      {/* Outras páginas */}
+      <Route path="/contacts" element={<ProtectedRoute requiredPermissions={['admin', 'supervisor', 'attendant']}><ContactsPage /></ProtectedRoute>} />
+      <Route path="/recent" element={<ProtectedRoute requiredPermissions={['admin', 'supervisor', 'attendant']}><RecentPage /></ProtectedRoute>} />
+      <Route path="/favorites" element={<ProtectedRoute requiredPermissions={['admin', 'supervisor', 'attendant']}><FavoritesPage /></ProtectedRoute>} />
+      <Route path="/archived" element={<ProtectedRoute requiredPermissions={['admin', 'supervisor', 'attendant']}><ArchivedPage /></ProtectedRoute>} />
+      <Route path="/trash" element={<ProtectedRoute requiredPermissions={['admin', 'supervisor', 'attendant']}><TrashPage /></ProtectedRoute>} />
+      <Route path="/quick-replies" element={<ProtectedRoute requiredPermissions={['admin', 'supervisor', 'attendant']}><QuickRepliesPage /></ProtectedRoute>} />
+      <Route path="/schedules" element={<ProtectedRoute requiredPermissions={['admin', 'supervisor', 'attendant']}><SchedulesPage /></ProtectedRoute>} />
+      <Route path="/tags" element={<ProtectedRoute requiredPermissions={['admin', 'supervisor', 'attendant']}><TagsPage /></ProtectedRoute>} />
+      
+      {/* Páginas de administração - Admin e Supervisor */}
+      <Route path="/queues" element={<ProtectedRoute requiredPermissions={['admin', 'supervisor']}><QueuesPage /></ProtectedRoute>} />
+      <Route path="/sessions" element={<ProtectedRoute requiredPermissions={['admin', 'supervisor']}><SessionsPage /></ProtectedRoute>} />
+      
+      {/* Páginas de administração - Apenas Admin */}
+      <Route path="/agents" element={<ProtectedRoute requiredPermissions={['admin']}><AgentsPage /></ProtectedRoute>} />
+      <Route path="/integrations" element={<ProtectedRoute requiredPermissions={['admin']}><IntegrationsPage /></ProtectedRoute>} />
+      <Route path="/settings" element={<ProtectedRoute requiredPermissions={['admin']}><SettingsPage /></ProtectedRoute>} />
+      
+      {/* Rota de login */}
+      <Route path="/login" element={<LoginPage />} />
+      
+      {/* ROTA CATCH-ALL - DEVE SER A ÚLTIMA */}
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+    </Routes>
+  );
 }
 
 function MainApp() {
   return (
     <BrowserRouter>
-      <Routes>
-        {/* Páginas principais */}
-        <Route path="/" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-        <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-        <Route path="/chat" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
-        <Route path="/chat/:ticketId" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
-        <Route path="/contacts" element={<ProtectedRoute><ContactsPage /></ProtectedRoute>} />
-        <Route path="/queues" element={<ProtectedRoute><QueuesPage /></ProtectedRoute>} />
-        <Route path="/tags" element={<ProtectedRoute><TagsPage /></ProtectedRoute>} />
-        <Route path="/campaigns" element={<ProtectedRoute><CampaignsPage /></ProtectedRoute>} />
-  <Route path="/schedules" element={<ProtectedRoute><SchedulesPage /></ProtectedRoute>} />
-        <Route path="/sessions" element={<ProtectedRoute><SessionsPage /></ProtectedRoute>} />
-        <Route path="/integrations" element={<ProtectedRoute><IntegrationsPage /></ProtectedRoute>} />
-        <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
-  <Route path="/quick-replies" element={<ProtectedRoute><QuickRepliesPage /></ProtectedRoute>} />
-        <Route path="/recent" element={<ProtectedRoute><RecentPage /></ProtectedRoute>} />
-        <Route path="/favorites" element={<ProtectedRoute><FavoritesPage /></ProtectedRoute>} />
-        <Route path="/archived" element={<ProtectedRoute><ArchivedPage /></ProtectedRoute>} />
-        <Route path="/trash" element={<ProtectedRoute><TrashPage /></ProtectedRoute>} />
-        
-        {/* Rota de login */}
-        <Route path="/login" element={<LoginPage />} />
-        
-        {/* Redirect para dashboard por padrão */}
-        <Route path="*" element={<Navigate to="/dashboard" />} />
-      </Routes>
+      <AppRoutes />
     </BrowserRouter>
   );
 }

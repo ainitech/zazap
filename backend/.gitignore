@@ -1,5 +1,6 @@
 .wwebjs_cache
 .wwebjs_auth
+baileys_auth_*
 node_modules
 dist
 uploads

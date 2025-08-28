@@ -1,6 +1,6 @@
 import { createBaileysSession, sendText, sendMedia } from '../services/baileysService.js';
 import { Ticket, Session, TicketMessage } from '../models/index.js';
-import { createBaileysMessageCallback } from '../services/messageCallbacks.js';
+const { handleBaileysMessage } = await import('../services/messageCallbacks.js');
 
 // Inicializar sessão (gera QRCode)
 export const initSession = async (req, res) => {
@@ -21,7 +21,9 @@ export const initSession = async (req, res) => {
     let qrCodeSent = false;
     
     // Criar callback para processamento de mensagens
-    const onMessage = createBaileysMessageCallback(session);
+    const onMessage = async (message) => {
+      await handleBaileysMessage(message, session.id);
+    };
     
     await createBaileysSession(sessionId, 
       async (qrCodeDataURL) => {

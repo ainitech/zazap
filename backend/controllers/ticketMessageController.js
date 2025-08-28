@@ -182,12 +182,29 @@ export const sendMessage = async (req, res) => {
         // Tentar WhatsApp.js primeiro (se disponível)
         if (!messageSent) {
           try {
-            const activeSession = getWhatsappJsSession(session.whatsappId);
-            if (activeSession && activeSession.info && activeSession.info.wid) {
-              console.log(`� Tentando envio via WhatsApp-Web.js para ${ticket.contact}`);
-              await sendTextWhatsappJs(session.whatsappId, ticket.contact, content);
-              console.log(`✅ Mensagem enviada com sucesso via WhatsApp-Web.js`);
-              messageSent = true;
+            const activeSession = await getWhatsappJsSession(session.whatsappId);
+            if (activeSession) {
+              try {
+                const state = await activeSession.getState();
+                if (state === 'CONNECTED') {
+                  console.log(`🌐 Tentando envio via WhatsApp-Web.js para ${ticket.contact}`);
+                  await sendTextWhatsappJs(session.whatsappId, ticket.contact, content);
+                  console.log(`✅ Mensagem enviada com sucesso via WhatsApp-Web.js`);
+                  messageSent = true;
+                } else {
+                  console.log(`⚠️ WhatsApp-Web.js não conectado para sessão ${session.whatsappId} (estado: ${state})`);
+                }
+              } catch (stateError) {
+                console.log(`⚠️ Não foi possível verificar estado da sessão ${session.whatsappId}, tentando enviar mesmo assim`);
+                try {
+                  console.log(`🌐 Tentando envio via WhatsApp-Web.js para ${ticket.contact}`);
+                  await sendTextWhatsappJs(session.whatsappId, ticket.contact, content);
+                  console.log(`✅ Mensagem enviada com sucesso via WhatsApp-Web.js`);
+                  messageSent = true;
+                } catch (sendError) {
+                  console.log(`⚠️ WhatsApp-Web.js não disponível ou não conectado para sessão ${session.whatsappId}`);
+                }
+              }
             } else {
               console.log(`⚠️ WhatsApp-Web.js não disponível ou não conectado para sessão ${session.whatsappId}`);
             }
@@ -323,8 +340,7 @@ export const sendMediaMessage = async (req, res) => {
       isQuickReply: sender === 'quick-reply'
     });
 
-    console.log(`📡 Emitindo evento 'message-update' para todos os clientes:`, { ticketId, message });
-
+   
     // Emitir via socket
     emitToTicket(ticketId, 'new-message', message);
     emitToAll('message-update', { ticketId, message });
@@ -353,13 +369,31 @@ export const sendMediaMessage = async (req, res) => {
     // Tentar WhatsApp.js primeiro (se disponível)
         if (!fileSent) {
           try {
-      const activeSessionJs = getWhatsappJsSession(session.whatsappId);
-            if (activeSessionJs && activeSessionJs.info && activeSessionJs.info.wid) {
-              console.log(`📤 Tentando envio via WhatsApp-Web.js para ${ticket.contact}`);
-              const base64Data = fileBuffer.toString('base64');
-              await sendMediaWhatsappJs(session.whatsappId, ticket.contact, base64Data, file.originalname, file.mimetype);
-              console.log(`✅ Arquivo enviado com sucesso via WhatsApp-Web.js`);
-              fileSent = true;
+            const activeSessionJs = await getWhatsappJsSession(session.whatsappId);
+            if (activeSessionJs) {
+              try {
+                const state = await activeSessionJs.getState();
+                if (state === 'CONNECTED') {
+                  console.log(`📤 Tentando envio via WhatsApp-Web.js para ${ticket.contact}`);
+                  const base64Data = fileBuffer.toString('base64');
+                  await sendMediaWhatsappJs(session.whatsappId, ticket.contact, base64Data, file.originalname, file.mimetype);
+                  console.log(`✅ Arquivo enviado com sucesso via WhatsApp-Web.js`);
+                  fileSent = true;
+                } else {
+                  console.log(`⚠️ WhatsApp-Web.js não conectado para sessão ${session.whatsappId} (estado: ${state})`);
+                }
+              } catch (stateError) {
+                console.log(`⚠️ Não foi possível verificar estado da sessão ${session.whatsappId}, tentando enviar mesmo assim`);
+                try {
+                  console.log(`📤 Tentando envio via WhatsApp-Web.js para ${ticket.contact}`);
+                  const base64Data = fileBuffer.toString('base64');
+                  await sendMediaWhatsappJs(session.whatsappId, ticket.contact, base64Data, file.originalname, file.mimetype);
+                  console.log(`✅ Arquivo enviado com sucesso via WhatsApp-Web.js`);
+                  fileSent = true;
+                } catch (sendError) {
+                  console.log(`⚠️ WhatsApp-Web.js não disponível ou não conectado para sessão ${session.whatsappId}`);
+                }
+              }
             } else {
               console.log(`⚠️ WhatsApp-Web.js não disponível ou não conectado para sessão ${session.whatsappId}`);
             }

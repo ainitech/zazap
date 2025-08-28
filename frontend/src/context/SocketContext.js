@@ -151,6 +151,19 @@ export const SocketProvider = ({ children }) => {
         console.log(`📡 Evento WebSocket recebido: ${event}`, args);
       });
 
+      // Listeners específicos para sessões
+      newSocket.on('session-status-update', (data) => {
+        console.log('🔄 SocketContext: session-status-update recebido', data);
+      });
+
+      newSocket.on('session-qr-update', (data) => {
+        console.log('🔄 SocketContext: session-qr-update recebido', data);
+      });
+
+      newSocket.on('sessions-update', (data) => {
+        console.log('🔄 SocketContext: sessions-update recebido', data.length, 'sessões');
+      });
+
       // Listeners específicos para mensagens (garantir que chegam ao ChatComponent)
       newSocket.on('new-message', (message) => {
         console.log('🔔 SocketContext: new-message recebido', message);

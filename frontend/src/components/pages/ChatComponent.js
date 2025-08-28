@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import ConversationList from '../chat/ConversationList';
 import ChatArea from '../chat/ChatArea';
 import ContactInfo from '../chat/ContactInfo';
@@ -9,7 +9,8 @@ import { useSocket } from '../../context/SocketContext';
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
 export default function ChatComponent() {
-  const { ticketId } = useParams();
+  const { ticketId, uid } = useParams();
+  const navigate = useNavigate();
   const { socket, isConnected, joinTicket, leaveTicket } = useSocket();
   const [tickets, setTickets] = useState([]);
   const [selectedTicket, setSelectedTicket] = useState(null);
@@ -22,9 +23,63 @@ export default function ChatComponent() {
   // Refs para controlar o ticket atual
   const currentTicketIdRef = useRef(null);
 
+  // Função para limpar o estado salvo do ticket
+  const clearSavedTicket = () => {
+    localStorage.removeItem('selectedTicket');
+    console.log('🧹 Estado do ticket limpo do localStorage');
+  };
+
   useEffect(() => {
-    // Buscar tickets iniciais apenas uma vez
-    fetchTickets();
+    const initializeComponent = async () => {
+      // Buscar tickets iniciais apenas uma vez
+      await fetchTickets();
+      
+      // Se há um ticketId/UID na URL, buscar esse ticket específico
+      const ticketIdentifier = uid || ticketId;
+      if (ticketIdentifier) {
+        if (uid) {
+          console.log(`🚀 [INIT] Inicializando com UID: ${uid}`);
+          await fetchTicketByUid(ticketIdentifier);
+        } else {
+          console.log(`🚀 [INIT] Inicializando com ticketId: ${ticketId}`);
+          await fetchTicketById(ticketIdentifier);
+        }
+      } else {
+        // Se não há parâmetros na URL, tentar restaurar do localStorage
+        const savedTicket = localStorage.getItem('selectedTicket');
+        
+        if (savedTicket) {
+          try {
+            const ticketData = JSON.parse(savedTicket);
+            
+            // Verificar se o ticket salvo não é muito antigo (menos de 24 horas)
+            const isRecent = Date.now() - ticketData.timestamp < 24 * 60 * 60 * 1000;
+            
+            if (isRecent) {
+              console.log('🔄 Restaurando ticket selecionado do localStorage:', ticketData);
+              
+              // Se temos um UID, buscar por UID, senão buscar por ID
+              if (ticketData.uid) {
+                await fetchTicketByUid(ticketData.uid);
+              } else if (ticketData.id) {
+                await fetchTicketById(ticketData.id);
+              }
+            } else {
+              // Limpar dados antigos
+              localStorage.removeItem('selectedTicket');
+              console.log('🧹 Limpando dados antigos do localStorage');
+            }
+          } catch (error) {
+            console.error('❌ Erro ao restaurar ticket do localStorage:', error);
+            localStorage.removeItem('selectedTicket');
+          }
+        } else {
+          console.log(`🚀 [INIT] Nenhum parâmetro encontrado, nenhum ticket salvo`);
+        }
+      }
+    };
+
+    initializeComponent();
     
     // Cleanup ao desmontar
     return () => {
@@ -32,7 +87,7 @@ export default function ChatComponent() {
         leaveTicket(currentTicketIdRef.current);
       }
     };
-  }, []);
+  }, [ticketId, uid]); // Dependências ajustadas para evitar loops desnecessários
 // Atualiza tickets em tempo real ao receber evento global
 useEffect(() => {
   const handleRefresh = () => {
@@ -264,6 +319,61 @@ useEffect(() => {
     }
   };
 
+  const fetchTicketByUid = async (uid) => {
+    try {
+      console.log(`🔍 [FETCH BY UID] Buscando ticket por UID: ${uid}`);
+      
+      const response = await fetch(`${API_URL}/api/tickets/uid/${uid}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      
+      if (response.ok) {
+        const ticket = await response.json();
+        console.log(`✅ [FETCH BY UID] Ticket encontrado:`, ticket.id);
+        
+        // Selecionar o ticket encontrado
+        handleTicketSelect(ticket);
+      } else if (response.status === 404) {
+        console.error('❌ [FETCH BY UID] Ticket não encontrado');
+      } else {
+        console.error('❌ [FETCH BY UID] Erro ao buscar ticket por UID');
+      }
+    } catch (error) {
+      console.error('❌ [FETCH BY UID] Erro ao buscar ticket por UID:', error);
+    }
+  };
+
+  const fetchTicketById = async (id) => {
+    try {
+      console.log(`🔍 [FETCH BY ID] Buscando ticket por ID: ${id}`);
+      
+      const response = await fetch(`${API_URL}/api/tickets?ticketId=${id}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      
+      if (response.ok) {
+        const tickets = await response.json();
+        if (tickets.length > 0) {
+          const ticket = tickets[0];
+          console.log(`✅ [FETCH BY ID] Ticket encontrado:`, ticket.id);
+          
+          // Selecionar o ticket encontrado
+          handleTicketSelect(ticket);
+        } else {
+          console.error('❌ [FETCH BY ID] Ticket não encontrado');
+        }
+      } else {
+        console.error('❌ [FETCH BY ID] Erro ao buscar ticket por ID');
+      }
+    } catch (error) {
+      console.error('❌ [FETCH BY ID] Erro ao buscar ticket por ID:', error);
+    }
+  };
+
   const fetchMessagesOnce = async (ticketId) => {
     try {
       console.log(`🔄 [FETCH ONCE] Buscando mensagens iniciais para ticket ${ticketId}...`);
@@ -288,7 +398,7 @@ useEffect(() => {
   };
 
   const handleTicketSelect = (ticket) => {
-    console.log('🎯 ChatComponent: Selecionando ticket:', ticket.id);
+    console.log('🎯 ChatComponent: Selecionando ticket:', ticket.id, 'UID:', ticket.uid);
     
     // Sair do ticket anterior se houver
     if (currentTicketIdRef.current) {
@@ -300,11 +410,29 @@ useEffect(() => {
     setMessages([]); // Limpar mensagens anteriores
     currentTicketIdRef.current = ticket.id;
     
+    // Persistir o ticket selecionado no localStorage
+    localStorage.setItem('selectedTicket', JSON.stringify({
+      id: ticket.id,
+      uid: ticket.uid,
+      timestamp: Date.now()
+    }));
+    
     console.log('📋 Estado atualizado:', {
       selectedTicketId: ticket.id,
       messagesCleared: true,
       currentTicketIdRef: currentTicketIdRef.current
     });
+    
+    // Sempre navegar para a URL do ticket com UID se disponível
+    const targetUrl = ticket.uid ? `/tickets/${ticket.uid}` : `/chat/${ticket.id}`;
+    const currentPath = window.location.pathname;
+    
+    if (currentPath !== targetUrl) {
+      console.log('🔗 Navegando para URL do ticket:', targetUrl);
+      navigate(targetUrl, { replace: true });
+    } else {
+      console.log('✅ Já estamos na URL correta:', currentPath);
+    }
     
     // Buscar mensagens iniciais apenas uma vez via API
     fetchMessagesOnce(ticket.id);

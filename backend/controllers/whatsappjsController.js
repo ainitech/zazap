@@ -1,6 +1,6 @@
 import { createWhatsappJsSession, sendText, sendMedia } from '../services/whatsappjsService.js';
 import { Ticket, Session, TicketMessage } from '../models/index.js';
-import { createWhatsappJsMessageCallback } from '../services/messageCallbacks.js';
+const { handleWhatsappJsMessage } = await import('../services/messageCallbacks.js');
 
 // Inicializar sessão (gera QRCode)
 export const initSession = async (req, res) => {
@@ -21,7 +21,9 @@ export const initSession = async (req, res) => {
     let qrCodeSent = false;
     
     // Criar callback para processamento de mensagens
-    const onMessage = createWhatsappJsMessageCallback(session);
+    const onMessage = async (message) => {
+      await handleWhatsappJsMessage(message, session.id);
+    };
     
     createWhatsappJsSession(sessionId, 
       async (client) => {

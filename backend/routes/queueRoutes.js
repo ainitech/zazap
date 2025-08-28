@@ -4,6 +4,7 @@ import {
   createQueue,
   listQueues,
   assignUserToQueue,
+  removeUserFromQueue,
   getUserQueues,
   getQueueTickets,
   updateQueue,
@@ -35,6 +36,7 @@ router.get('/:queueId/performance', authenticateToken, getQueuePerformance);
 
 // Rotas de gestão de usuários
 router.post('/assign', authenticateToken, assignUserToQueue);
+router.post('/remove-user', authenticateToken, removeUserFromQueue);
 router.get('/user', authenticateToken, getUserQueues);
 
 // Rotas de tickets

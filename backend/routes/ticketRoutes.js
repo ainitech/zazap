@@ -1,12 +1,15 @@
 import express from 'express';
 import { authenticateToken } from '../middleware/auth.js';
-import { moveTicket, listTickets, acceptTicket, resolveTicket, closeTicket, updateTicket, deleteTicket, restoreTicket, permanentDeleteTicket } from '../controllers/ticketController.js';
+import { moveTicket, listTickets, acceptTicket, resolveTicket, closeTicket, updateTicket, deleteTicket, restoreTicket, permanentDeleteTicket, getTicketByUid } from '../controllers/ticketController.js';
 import { transferTicket } from '../controllers/queueController.js';
 import { updateTicketPriority } from '../controllers/ticketController.js';
 const router = express.Router();
 
 // Listar tickets com filtros e busca avançada
 router.get('/', authenticateToken, listTickets);
+
+// Buscar ticket por UID (para links diretos)
+router.get('/uid/:uid', authenticateToken, getTicketByUid);
 
 // Criar ticket
 router.post('/', authenticateToken, async (req, res, next) => {

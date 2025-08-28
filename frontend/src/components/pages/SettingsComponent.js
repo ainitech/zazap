@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Cog6ToothIcon,
   UserIcon,
@@ -6,6 +6,7 @@ import {
   ShieldCheckIcon,
   PaintBrushIcon,
   ServerIcon,
+  UserGroupIcon,
   CheckIcon,
   ExclamationTriangleIcon
 } from '@heroicons/react/24/outline';
@@ -18,8 +19,42 @@ export default function SettingsComponent() {
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('');
 
+  // Configurações de grupos
+  const [groupSettings, setGroupSettings] = useState({
+    showGroups: false, // Desativado por padrão
+    showIndividuals: true,
+    groupNotifications: true,
+    autoJoinGroups: false,
+    groupAdminOnly: false
+  });
+
+  // Carregar configurações salvas do localStorage
+  useEffect(() => {
+    const savedSettings = localStorage.getItem('groupSettings');
+    if (savedSettings) {
+      setGroupSettings(JSON.parse(savedSettings));
+    }
+  }, []);
+
+  // Salvar configurações no localStorage
+  const saveGroupSettings = (newSettings) => {
+    const oldShowGroups = groupSettings.showGroups;
+    setGroupSettings(newSettings);
+    localStorage.setItem('groupSettings', JSON.stringify(newSettings));
+    
+    // Emitir evento quando a configuração de mostrar grupos mudar
+    if (oldShowGroups !== newSettings.showGroups) {
+      window.dispatchEvent(new CustomEvent('groupSettingsChanged', { 
+        detail: { showGroups: newSettings.showGroups } 
+      }));
+    }
+    
+    showMessage('Configurações de grupos salvas com sucesso!');
+  };
+
   const tabs = [
     { id: 'profile', label: 'Perfil', icon: UserIcon },
+    { id: 'groups', label: 'Grupos', icon: UserGroupIcon },
     { id: 'notifications', label: 'Notificações', icon: BellIcon },
     { id: 'security', label: 'Segurança', icon: ShieldCheckIcon },
     { id: 'appearance', label: 'Aparência', icon: PaintBrushIcon },
@@ -104,6 +139,125 @@ export default function SettingsComponent() {
                     Ativar Push
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'groups':
+        return (
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Configurações de Grupos</h3>
+              <div className="space-y-6">
+                
+                {/* Visibilidade */}
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <h4 className="text-md font-medium text-gray-900 mb-3">Visibilidade</h4>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-sm font-medium text-gray-700">Mostrar grupos</span>
+                        <p className="text-xs text-gray-500">Exibir conversas de grupos na lista de contatos</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={groupSettings.showGroups}
+                          onChange={(e) => saveGroupSettings({...groupSettings, showGroups: e.target.checked})}
+                          className="sr-only peer" 
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                      </label>
+                    </div>
+                    
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-sm font-medium text-gray-700">Mostrar contatos individuais</span>
+                        <p className="text-xs text-gray-500">Exibir conversas individuais na lista de contatos</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={groupSettings.showIndividuals}
+                          onChange={(e) => saveGroupSettings({...groupSettings, showIndividuals: e.target.checked})}
+                          className="sr-only peer" 
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Notificações */}
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <h4 className="text-md font-medium text-gray-900 mb-3">Notificações</h4>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-sm font-medium text-gray-700">Notificações de grupos</span>
+                        <p className="text-xs text-gray-500">Receber notificações de mensagens em grupos</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={groupSettings.groupNotifications}
+                          onChange={(e) => saveGroupSettings({...groupSettings, groupNotifications: e.target.checked})}
+                          className="sr-only peer" 
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Comportamento */}
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <h4 className="text-md font-medium text-gray-900 mb-3">Comportamento</h4>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-sm font-medium text-gray-700">Aceitar convites automaticamente</span>
+                        <p className="text-xs text-gray-500">Entrar automaticamente em grupos quando adicionado</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={groupSettings.autoJoinGroups}
+                          onChange={(e) => saveGroupSettings({...groupSettings, autoJoinGroups: e.target.checked})}
+                          className="sr-only peer" 
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                      </label>
+                    </div>
+                    
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-sm font-medium text-gray-700">Somente administradores</span>
+                        <p className="text-xs text-gray-500">Responder apenas a mensagens de administradores em grupos</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={groupSettings.groupAdminOnly}
+                          onChange={(e) => saveGroupSettings({...groupSettings, groupAdminOnly: e.target.checked})}
+                          className="sr-only peer" 
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Filtros */}
+                <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                  <h4 className="text-md font-medium text-blue-900 mb-3">Informação</h4>
+                  <p className="text-sm text-blue-700">
+                    Quando os grupos estão habilitados, uma nova aba "Grupos" aparecerá na lista de conversas. 
+                    Quando desabilitados, todos os grupos desaparecerão da interface.
+                  </p>
+                </div>
+
               </div>
             </div>
           </div>
