@@ -1,6 +1,5 @@
 import { TicketMessage, Ticket, Session, Contact, MessageReaction, User, Queue } from '../models/index.js';
-import { sendText as sendTextWhatsappJs, getWhatsappJsSession } from '../services/whatsappjsService.js';
-import { sendText as sendTextBaileys, getBaileysSession } from '../services/baileysService.js';
+import { sendText as sendTextBaileys, getBaileysSession, sendMedia as sendMediaBaileys } from '../services/baileysService.js';
 import { emitToTicket, emitToAll } from '../services/socket.js';
 import path from 'path';
 import fs from 'fs';
@@ -32,22 +31,7 @@ const updateContactOnSend = async (ticket, sessionId) => {
     let profilePicUrl = null;
     let contactInfo = null;
 
-    if (session.library === 'whatsapp-web.js' || session.library === 'whatsappjs') {
-      try {
-        const wbot = getWhatsappJsSession(session.whatsappId);
-        if (wbot && wbot.info) {
-          contactInfo = await wbot.getContactById(ticket.contact);
-          
-          try {
-            profilePicUrl = await contactInfo.getProfilePicUrl();
-          } catch (picError) {
-            console.log(`⚠️ Não foi possível obter foto do perfil: ${picError.message}`);
-          }
-        }
-      } catch (error) {
-        console.log(`⚠️ Erro ao obter informações do contato WhatsApp.js: ${error.message}`);
-      }
-    } else if (session.library === 'baileys') {
+  if (session.library === 'baileys') {
       try {
         const sock = getBaileysSession(session.whatsappId);
         if (sock && sock.user) {
@@ -179,41 +163,7 @@ export const sendMessage = async (req, res) => {
         
         let messageSent = false;
         
-        // Tentar WhatsApp.js primeiro (se disponível)
-        if (!messageSent) {
-          try {
-            const activeSession = await getWhatsappJsSession(session.whatsappId);
-            if (activeSession) {
-              try {
-                const state = await activeSession.getState();
-                if (state === 'CONNECTED') {
-                  console.log(`🌐 Tentando envio via WhatsApp-Web.js para ${ticket.contact}`);
-                  await sendTextWhatsappJs(session.whatsappId, ticket.contact, content);
-                  console.log(`✅ Mensagem enviada com sucesso via WhatsApp-Web.js`);
-                  messageSent = true;
-                } else {
-                  console.log(`⚠️ WhatsApp-Web.js não conectado para sessão ${session.whatsappId} (estado: ${state})`);
-                }
-              } catch (stateError) {
-                console.log(`⚠️ Não foi possível verificar estado da sessão ${session.whatsappId}, tentando enviar mesmo assim`);
-                try {
-                  console.log(`🌐 Tentando envio via WhatsApp-Web.js para ${ticket.contact}`);
-                  await sendTextWhatsappJs(session.whatsappId, ticket.contact, content);
-                  console.log(`✅ Mensagem enviada com sucesso via WhatsApp-Web.js`);
-                  messageSent = true;
-                } catch (sendError) {
-                  console.log(`⚠️ WhatsApp-Web.js não disponível ou não conectado para sessão ${session.whatsappId}`);
-                }
-              }
-            } else {
-              console.log(`⚠️ WhatsApp-Web.js não disponível ou não conectado para sessão ${session.whatsappId}`);
-            }
-          } catch (whatsappJsError) {
-            console.error(`❌ Erro no WhatsApp-Web.js:`, whatsappJsError.message);
-          }
-        }
-        
-        // Tentar Baileys se WhatsApp.js falhou
+  // Enviar via Baileys
         if (!messageSent) {
           try {
             const activeSession = getBaileysSession(session.whatsappId);
@@ -347,125 +297,33 @@ export const sendMediaMessage = async (req, res) => {
     
     console.log(`✅ Evento 'message-update' emitido para todos os clientes`);
 
-  // Enviar arquivo via WhatsApp se for enviado pelo usuário ou via resposta rápida
-  if (sender === 'user' || sender === 'quick-reply') {
-      console.log(`📱 Enviando arquivo via WhatsApp para ${ticket.contact}`);
-      
-      // Importar funções de envio de mídia
-      const { sendMedia: sendMediaWhatsappJs, getWhatsappJsSession } = await import('../services/whatsappjsService.js');
-      const { sendMedia: sendMediaBaileys, getBaileysSession } = await import('../services/baileysService.js');
-      
-      // Buscar informações da sessão para saber qual biblioteca usar
-      const session = await Session.findByPk(ticket.sessionId);
-      if (!session) {
-        console.error(`❌ Sessão ${ticket.sessionId} não encontrada no banco de dados`);
-      } else {
-        console.log(`🔍 Tentando enviar arquivo para ${ticket.contact} - Sessão: ${session.whatsappId}`);
-        
-        let fileSent = false;
-        const filePath = path.join(process.cwd(), file.path);
-        const fileBuffer = fs.readFileSync(filePath);
-        
-    // Tentar WhatsApp.js primeiro (se disponível)
-        if (!fileSent) {
-          try {
-            const activeSessionJs = await getWhatsappJsSession(session.whatsappId);
-            if (activeSessionJs) {
-              try {
-                const state = await activeSessionJs.getState();
-                if (state === 'CONNECTED') {
-                  console.log(`📤 Tentando envio via WhatsApp-Web.js para ${ticket.contact}`);
-                  const base64Data = fileBuffer.toString('base64');
-                  await sendMediaWhatsappJs(session.whatsappId, ticket.contact, base64Data, file.originalname, file.mimetype);
-                  console.log(`✅ Arquivo enviado com sucesso via WhatsApp-Web.js`);
-                  fileSent = true;
-                } else {
-                  console.log(`⚠️ WhatsApp-Web.js não conectado para sessão ${session.whatsappId} (estado: ${state})`);
-                }
-              } catch (stateError) {
-                console.log(`⚠️ Não foi possível verificar estado da sessão ${session.whatsappId}, tentando enviar mesmo assim`);
-                try {
-                  console.log(`📤 Tentando envio via WhatsApp-Web.js para ${ticket.contact}`);
-                  const base64Data = fileBuffer.toString('base64');
-                  await sendMediaWhatsappJs(session.whatsappId, ticket.contact, base64Data, file.originalname, file.mimetype);
-                  console.log(`✅ Arquivo enviado com sucesso via WhatsApp-Web.js`);
-                  fileSent = true;
-                } catch (sendError) {
-                  console.log(`⚠️ WhatsApp-Web.js não disponível ou não conectado para sessão ${session.whatsappId}`);
-                }
-              }
-            } else {
-              console.log(`⚠️ WhatsApp-Web.js não disponível ou não conectado para sessão ${session.whatsappId}`);
-            }
-          } catch (whatsappJsError) {
-            console.error(`❌ Erro no WhatsApp-Web.js:`, whatsappJsError.message);
+    // Enviar via WhatsApp (Baileys apenas) quando enviado pelo usuário ou resposta rápida
+    if (sender === 'user' || sender === 'quick-reply') {
+      try {
+        const session = await Session.findByPk(ticket.sessionId);
+        if (!session) {
+          console.error(`❌ Sessão ${ticket.sessionId} não encontrada no banco de dados`);
+        } else {
+          console.log(`🔍 Tentando enviar arquivo para ${ticket.contact} - Sessão: ${session.whatsappId}`);
+          const sock = getBaileysSession(session.whatsappId);
+          if (sock && sock.user) {
+            const filePath = path.isAbsolute(file.path) ? file.path : path.join(process.cwd(), file.path);
+            const fileBuffer = fs.readFileSync(filePath);
+            await sendMediaBaileys(session.whatsappId, ticket.contact, fileBuffer, file.mimetype);
+            console.log(`✅ Arquivo enviado com sucesso via Baileys`);
+          } else {
+            console.log(`⚠️ Baileys não disponível ou não conectado para sessão ${session.whatsappId}`);
           }
         }
-        
-        // Tentar Baileys se WhatsApp.js falhou
-    if (!fileSent) {
-          try {
-            const activeSessionBaileys = getBaileysSession(session.whatsappId);
-            if (activeSessionBaileys && activeSessionBaileys.user) {
-              console.log(`📤 Tentando envio via Baileys para ${ticket.contact}`);
-      await sendMediaBaileys(session.whatsappId, ticket.contact, fileBuffer, file.mimetype);
-              console.log(`✅ Arquivo enviado com sucesso via Baileys`);
-              fileSent = true;
-            } else {
-              console.log(`⚠️ Baileys não disponível ou não conectado para sessão ${session.whatsappId}`);
-            }
-          } catch (baileysError) {
-            console.error(`❌ Erro no Baileys:`, baileysError.message);
-          }
-        }
-        
-        // Se nenhuma biblioteca funcionou
-        if (!fileSent) {
-          console.error(`❌ Falha ao enviar arquivo via qualquer biblioteca disponível`);
-          console.error(`❌ Verifique se a sessão ${session.whatsappId} está realmente conectada`);
-          
-          // Atualizar status no banco se necessário
-          if (session.status === 'connected') {
-            await session.update({ status: 'disconnected' });
-            console.log(`🔄 Status da sessão ${session.whatsappId} atualizado para 'disconnected'`);
-            
-            // Emitir atualização via WebSocket
-            try {
-              emitToAll('session-status-update', { 
-                sessionId: session.id, 
-                status: 'disconnected' 
-              });
-            } catch (socketError) {
-              console.error('❌ Erro ao emitir status via WebSocket:', socketError);
-            }
-          }
-        }
+      } catch (sendErr) {
+        console.error(`❌ Erro ao enviar mídia via Baileys:`, sendErr);
       }
     }
 
-    res.json(message);
+    return res.json(message);
   } catch (err) {
     console.error('Erro ao enviar mídia:', err);
-    res.status(500).json({ error: err.message });
-  }
-};
-
-// Listar mídias/anexos de um ticket
-export const listTicketMedia = async (req, res) => {
-  const { ticketId } = req.params;
-  try {
-    // Busca todas as mensagens do ticket que possuem arquivo (mídia ou documento)
-    const mediaMessages = await TicketMessage.findAll({
-      where: {
-        ticketId,
-        fileUrl: { [TicketMessage.sequelize.Op.ne]: null },
-      },
-      order: [['timestamp', 'ASC']],
-    });
-    res.json(mediaMessages);
-  } catch (err) {
-    console.error(`❌ Erro ao listar mídias do ticket ${ticketId}:`, err);
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 };
 

@@ -102,7 +102,7 @@ zazap/
 │   ├── models/       # Modelos Sequelize  
 │   ├── routes/       # Endpoints API
 │   ├── services/     # Serviços WhatsApp
-│   │   ├── whatsappjsService.js # 🔧 Integração WhatsApp
+│   │   ├── (removido) whatsappjsService.js # 🔧 Removido; uso exclusivo do Baileys
 │   │   └── ...
 │   └── ...
 ├── frontend/         # React App

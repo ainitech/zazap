@@ -1,4 +1,4 @@
-import { sendButtons, sendList } from '../services/whatsappjsService.js';
+// whatsapp-web.js removido: fallback para texto simples usando Baileys
 import { Ticket, Contact, Session } from '../models/index.js';
 
 export const sendButtonMessage = async (req, res) => {
@@ -58,30 +58,11 @@ export const sendButtonMessage = async (req, res) => {
       buttonsCount: buttons.length
     });
 
-    // Enviar os botões
-    const result = await sendButtons(
-      session.id,
-      ticket.contact,
-      text,
-      buttons,
-      title,
-      footer
-    );
-
-    res.json({
-      success: true,
-      message: 'Botões enviados com sucesso',
-      messageId: result.messageId,
-      whatsappResponse: result.data,
-      data: {
-        ticketId,
-        to: ticket.contact,
-        text,
-        buttons,
-        title,
-        footer
-      }
-    });
+  // Fallback: enviar texto com botões renderizados
+  const { sendText } = await import('../services/baileysService.js');
+  const rendered = `${text}\n\n` + (buttons || []).map((b, i) => `${i + 1}. ${b.text || b.displayText || ''}`).join('\n');
+  const result = await sendText(session.whatsappId, ticket.contact, rendered.trim());
+  res.json({ success: true, fallback: 'text', messageId: result?.key?.id || null });
 
   } catch (error) {
     console.error('❌ Erro ao enviar botões:', error);
@@ -168,31 +149,23 @@ export const sendListMessage = async (req, res) => {
       sectionsCount: sections.length
     });
 
-    // Enviar a lista
-    const message = await sendList(
-      session.id,
-      ticket.contact,
-      text,
-      buttonText,
-      sections,
-      title,
-      footer
-    );
-
-    res.json({
-      success: true,
-      message: 'Lista enviada com sucesso',
-      messageId: message.messageId,
-      data: {
-        ticketId,
-        to: ticket.contact,
-        text,
-        buttonText,
-        sections,
-        title,
-        footer
-      }
+    // Fallback: renderizar lista como texto e enviar
+    const { sendText } = await import('../services/baileysService.js');
+    const lines = [];
+    lines.push(text);
+    lines.push('');
+    lines.push(`Opções (${buttonText}):`);
+    (sections || []).forEach((s, si) => {
+      lines.push('');
+      lines.push(`${s.title || `Seção ${si + 1}`}`);
+      (s.rows || []).forEach((r, ri) => {
+        const title = r.title || `Item ${ri + 1}`;
+        const desc = r.description ? ` - ${r.description}` : '';
+        lines.push(`- ${title}${desc}`);
+      });
     });
+    const sent = await sendText(session.whatsappId, ticket.contact, lines.join('\n'));
+    res.json({ success: true, fallback: 'text', messageId: sent?.key?.id || null });
 
   } catch (error) {
     console.error('❌ Erro ao enviar lista:', error);

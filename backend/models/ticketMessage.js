@@ -87,6 +87,22 @@ const TicketMessage = sequelize.define('TicketMessage', {
     allowNull: true,
     comment: 'ID da mensagem de enquete original (para respostas)',
   },
+  // LID support (Baileys v6.7.19+)
+  senderLid: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'LID do remetente (quando disponível na mensagem.key.senderLid)'
+  },
+  participantLid: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'LID do participante (em grupos) quando disponível na mensagem.key.participantLid'
+  },
+  senderPn: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Phone number do remetente enviado no key (mensagens LID)'
+  },
 }, {
   tableName: 'ticket_messages',
   timestamps: true, // Habilita createdAt e updatedAt

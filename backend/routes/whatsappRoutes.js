@@ -1,10 +1,5 @@
+// Removed: library selection routes no longer needed. Baileys-only now.
 import express from 'express';
-import whatsappController from '../controllers/whatsappController.js';
-import { authenticateToken } from '../middleware/auth.js';
-
 const router = express.Router();
-
-router.post('/select-library', authenticateToken, whatsappController.selectLibrary);
-router.get('/selected-library', authenticateToken, whatsappController.getSelectedLibrary);
-
+router.all('*', (req, res) => res.status(410).json({ error: 'Seleção de biblioteca descontinuada. Use Baileys.' }));
 export default router;

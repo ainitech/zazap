@@ -1,17 +1,11 @@
 import { Session } from '../models/index.js';
 import { 
-  createWhatsappJsSession, 
-  getWhatsappJsSession,
-  listSessions as listWhatsappJsSessions 
-} from './whatsappjsService.js';
-import { 
   createBaileysSession, 
   getBaileysSession,
   listBaileysSessions 
 } from './baileysService.js';
 import { emitToAll } from './socket.js';
 const { 
-  handleWhatsappJsMessage,
   handleBaileysMessage 
 } = await import('./messageCallbacks.js');
 
@@ -20,17 +14,7 @@ const isSessionActuallyActive = async (whatsappId, library) => {
   try {
     console.log(`🔍 Verificando se sessão ${whatsappId} (${library}) está realmente ativa...`);
 
-    if (library === 'whatsappjs') {
-      const session = await getWhatsappJsSession(whatsappId);
-      const isActive = session && session.info && session.info.wid;
-
-      console.log(`📱 WhatsApp.js - Sessão encontrada: ${!!session}`);
-      console.log(`📱 WhatsApp.js - Tem info: ${!!(session && session.info)}`);
-      console.log(`📱 WhatsApp.js - Tem wid: ${!!(session && session.info && session.info.wid)}`);
-      console.log(`📱 WhatsApp.js - Status final: ${isActive ? 'ATIVA' : 'INATIVA'}`);
-
-      return isActive;
-    } else if (library === 'baileys') {
+  if (library === 'baileys') {
       const session = getBaileysSession(whatsappId);
       const isActive = session && session.user;
 
@@ -61,27 +45,7 @@ const reactivateSession = async (session) => {
       return true;
     }
 
-    if (session.library === 'whatsappjs') {
-      // Criar callback para processamento de mensagens
-      const onMessage = async (message) => {
-        await handleWhatsappJsMessage(message, session.id);
-      };
-
-      // Verificar se já existe uma sessão sendo inicializada
-      try {
-        const existingSession = getWhatsappJsSession(session.whatsappId);
-        if (existingSession) {
-          console.log(`⏳ Sessão ${session.whatsappId} já existe na lista, aguardando inicialização`);
-          return true;
-        }
-      } catch (error) {
-        // Sessão não existe, pode prosseguir
-        console.log(`📝 Sessão ${session.whatsappId} não encontrada na lista, prosseguindo com reativação`);
-      }
-
-      // WhatsApp.js: (sessionId, onReady, onMessage)
-      await createWhatsappJsSession(session.whatsappId, null, onMessage);
-    } else if (session.library === 'baileys') {
+  if (session.library === 'baileys') {
       // Criar callback para processamento de mensagens
       const onMessage = async (message) => {
         await handleBaileysMessage(message, session.id);
@@ -119,32 +83,7 @@ export const syncAllSessions = async () => {
       if (session.status === 'connected' && !isActive) {
         console.log(`⚠️ Sessão ${session.whatsappId} está marcada como conectada mas não está ativa`);
 
-        // Ser mais conservador: só tentar reativar se for whatsappjs e se não houver sessão na lista
-        if (session.library === 'whatsappjs') {
-          try {
-            // Verificar se existe alguma sessão com esse whatsappId na lista
-            const hasAnySession = sessions.some(s => s.sessionId === session.whatsappId || s.id === session.id);
-            console.log(`📊 Existe alguma sessão na lista para ${session.whatsappId}: ${hasAnySession}`);
-
-            if (!hasAnySession) {
-              console.log(`🔄 Tentando reativar sessão ${session.whatsappId} (nenhuma sessão encontrada na lista)`);
-              const reactivated = await reactivateSession(session);
-
-              if (reactivated) {
-                reconnectedCount++;
-              } else {
-                disconnectedCount++;
-              }
-            } else {
-              console.log(`⏳ Mantendo sessão ${session.whatsappId} (há sessão na lista, pode estar inicializando)`);
-            }
-          } catch (error) {
-            console.error(`❌ Erro ao verificar sessão ${session.whatsappId}:`, error.message);
-            disconnectedCount++;
-          }
-        } else {
-          console.log(`⏳ Mantendo sessão Baileys ${session.whatsappId} (não reativar automaticamente)`);
-        }
+  console.log(`⏳ Mantendo sessão Baileys ${session.whatsappId} (não reativar automaticamente)`);
       } else if (session.status === 'connected' && isActive) {
         console.log(`✅ Sessão ${session.whatsappId} está ativa e conectada`);
       } else if (session.status === 'disconnected') {

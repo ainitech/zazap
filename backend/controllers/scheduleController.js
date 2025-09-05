@@ -1,6 +1,6 @@
 import { Schedule, Session, Contact } from '../models/index.js';
 import { Op } from 'sequelize';
-import { sendText, sendMedia } from '../services/whatsappjsService.js';
+import { sendText as sendTextBaileys, sendMedia as sendMediaBaileys } from '../services/baileysService.js';
 
 export const listSchedules = async (req, res) => {
   try {
@@ -141,10 +141,10 @@ export const processScheduleItem = async (item, session) => {
       const path = await import('path');
       const abs = path.resolve(process.cwd(), item.filePath);
       const data = fs.readFileSync(abs);
-      const base64 = data.toString('base64');
-      await sendMedia(session.whatsappId, item.to, base64, item.fileName || 'file', item.fileType || 'application/octet-stream');
+  const base64 = data.toString('base64');
+  await sendMediaBaileys(session.whatsappId, item.to, base64, item.fileName || 'file', item.fileType || 'application/octet-stream');
     } else {
-      await sendText(session.whatsappId, item.to, item.text || '');
+  await sendTextBaileys(session.whatsappId, item.to, item.text || '');
     }
 
     await item.update({ status: 'sent', attempts: item.attempts + 1, lastError: null });

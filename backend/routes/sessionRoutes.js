@@ -4,16 +4,6 @@ import { Session } from '../models/index.js';
 import { emitToAll } from '../services/socket.js';
 import { syncAllSessions } from '../services/sessionManager.js';
 import { 
-  createWhatsappJsSession, 
-  getWhatsappJsSession, 
-  cleanupSessionFiles,
-  removeWhatsappJsSession,
-  shutdownWhatsappJsSession,
-  restartWhatsappJsSession,
-  listSessions as listWhatsappJsSessions,
-  initWbot
-} from '../services/whatsappjsService.js';
-import { 
   createBaileysSession, 
   getBaileysSession, 
   cleanupBaileysSession,
@@ -139,27 +129,7 @@ router.post('/:id/start', authenticateToken, async (req, res) => {
       status: 'connecting'
     });
 
-    if (session.library === 'whatsappjs') {
-      try {
-        // Usar initWbot que emite eventos via WebSocket
-        const client = await initWbot(session);
-
-        // Emitir atualização de status via WebSocket
-        emitToAll('session-status-update', { 
-          sessionId: session.id, 
-          status: 'connecting' 
-        });
-
-        console.log(`✅ Sessão WhatsApp.js ${session.whatsappId} iniciada com sucesso`);
-
-      } catch (error) {
-        console.error(`Erro ao iniciar sessão WhatsApp.js ${session.whatsappId}:`, error);
-        sessionStatus.set(session.whatsappId, 'error');
-        await session.update({ status: 'error' });
-        return res.status(500).json({ error: 'Erro ao iniciar sessão WhatsApp.js' });
-      }
-
-    } else if (session.library === 'baileys') {
+  {
       try {
         const sock = await createBaileysSession(
           session.whatsappId,
@@ -196,8 +166,6 @@ router.post('/:id/start', authenticateToken, async (req, res) => {
         await session.update({ status: 'error' });
         return res.status(500).json({ error: 'Erro ao iniciar sessão Baileys' });
       }
-    } else {
-      return res.status(400).json({ error: 'Biblioteca não suportada' });
     }
 
     res.json({ 
@@ -253,11 +221,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
     // Parar e limpar a sessão se estiver ativa
     try {
-      if (session.library === 'whatsappjs') {
-        await shutdownWhatsappJsSession(session.whatsappId);
-      } else if (session.library === 'baileys') {
-        await shutdownBaileysSession(session.whatsappId);
-      }
+      await shutdownBaileysSession(session.whatsappId);
     } catch (error) {
       console.error(`Erro ao desligar sessão ${session.whatsappId}:`, error);
       // Continuar com a deleção mesmo se houver erro ao desligar
@@ -310,64 +274,15 @@ router.post('/:id/restart', authenticateToken, async (req, res) => {
     });
 
     try {
-      // Primeiro parar completamente a sessão
-      if (session.library === 'whatsappjs') {
-        await shutdownWhatsappJsSession(session.whatsappId);
-        await removeWhatsappJsSession(session.whatsappId);
-      } else if (session.library === 'baileys') {
-        await shutdownBaileysSession(session.whatsappId);
-        await removeBaileysSession(session.whatsappId);
-      }
+      // Primeiro parar completamente a sessão (Baileys)
+      await shutdownBaileysSession(session.whatsappId);
+      await removeBaileysSession(session.whatsappId);
 
       // Aguardar um momento para garantir limpeza
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       // Agora criar uma nova sessão
-      if (session.library === 'whatsappjs') {
-        const client = await createWhatsappJsSession(
-          session.whatsappId,
-          (client) => {
-            sessionStatus.set(session.whatsappId, 'connected');
-            sessionQRs.delete(session.whatsappId);
-            session.update({ status: 'connected' });
-            console.log(`✅ Sessão WhatsApp.js ${session.whatsappId} reiniciada e conectada`);
-            
-            // Emitir atualização de conexão
-            emitToAll('session-status-update', { 
-              sessionId: session.id, 
-              status: 'connected' 
-            });
-            emitSessionsUpdate();
-          },
-          (message, client) => {
-            console.log('📨 Mensagem recebida WhatsApp.js:', message.body);
-          }
-        );
-
-        // Capturar QR code
-        client.on('qr', async (qr) => {
-          try {
-            const QRCode = await import('qrcode');
-            const qrDataURL = await QRCode.toDataURL(qr);
-            sessionQRs.set(session.whatsappId, qrDataURL);
-            sessionStatus.set(session.whatsappId, 'qr_ready');
-            console.log(`📱 QR Code gerado para sessão ${session.whatsappId}`);
-            
-            // Emitir QR code via WebSocket
-            emitToAll('session-qr-update', { 
-              sessionId: session.id, 
-              qrCode: qrDataURL,
-              status: 'qr_ready'
-            });
-            emitSessionsUpdate();
-          } catch (error) {
-            console.error('❌ Erro ao gerar QR Code:', error);
-            sessionQRs.set(session.whatsappId, qr);
-            sessionStatus.set(session.whatsappId, 'qr_ready');
-          }
-        });
-
-      } else if (session.library === 'baileys') {
+  {
         const sock = await createBaileysSession(
           session.whatsappId,
           async (qr) => {
@@ -453,13 +368,8 @@ router.post('/:id/shutdown', authenticateToken, async (req, res) => {
 
     try {
       // Desligar a sessão
-      if (session.library === 'whatsappjs') {
-        await shutdownWhatsappJsSession(session.whatsappId);
-        await removeWhatsappJsSession(session.whatsappId); // Remove completamente
-      } else if (session.library === 'baileys') {
-        await shutdownBaileysSession(session.whatsappId);
-        await removeBaileysSession(session.whatsappId); // Remove completamente
-      }
+  await shutdownBaileysSession(session.whatsappId);
+  await removeBaileysSession(session.whatsappId); // Remove completamente
 
       // Limpar completamente dados em memória
       sessionQRs.delete(session.whatsappId);
@@ -523,64 +433,15 @@ router.post('/:id/qrcode', authenticateToken, async (req, res) => {
     });
 
     try {
-      // Parar sessão atual se estiver ativa
-      if (session.library === 'whatsappjs') {
-        await shutdownWhatsappJsSession(session.whatsappId);
-        await removeWhatsappJsSession(session.whatsappId);
-      } else if (session.library === 'baileys') {
-        await shutdownBaileysSession(session.whatsappId);
-        await removeBaileysSession(session.whatsappId);
-      }
+      // Parar sessão atual se estiver ativa (Baileys)
+      await shutdownBaileysSession(session.whatsappId);
+      await removeBaileysSession(session.whatsappId);
 
       // Aguardar um momento para garantir limpeza
       await new Promise(resolve => setTimeout(resolve, 1000));
 
-      // Criar nova sessão apenas para gerar QR code
-      if (session.library === 'whatsappjs') {
-        const client = await createWhatsappJsSession(
-          session.whatsappId,
-          (client) => {
-            sessionStatus.set(session.whatsappId, 'connected');
-            sessionQRs.delete(session.whatsappId);
-            session.update({ status: 'connected' });
-            console.log(`✅ Sessão WhatsApp.js ${session.whatsappId} conectada via QR Code`);
-            
-            // Emitir atualização de conexão
-            emitToAll('session-status-update', { 
-              sessionId: session.id, 
-              status: 'connected' 
-            });
-            emitSessionsUpdate();
-          },
-          (message, client) => {
-            console.log('📨 Mensagem recebida WhatsApp.js:', message.body);
-          }
-        );
-
-        // Capturar QR code
-        client.on('qr', async (qr) => {
-          try {
-            const QRCode = await import('qrcode');
-            const qrDataURL = await QRCode.toDataURL(qr);
-            sessionQRs.set(session.whatsappId, qrDataURL);
-            sessionStatus.set(session.whatsappId, 'qr_ready');
-            console.log(`📱 Novo QR Code gerado para sessão ${session.whatsappId}`);
-            
-            // Emitir QR code via WebSocket
-            emitToAll('session-qr-update', { 
-              sessionId: session.id, 
-              qrCode: qrDataURL,
-              status: 'qr_ready'
-            });
-            emitSessionsUpdate();
-          } catch (error) {
-            console.error('❌ Erro ao gerar QR Code:', error);
-            sessionQRs.set(session.whatsappId, qr);
-            sessionStatus.set(session.whatsappId, 'qr_ready');
-          }
-        });
-
-      } else if (session.library === 'baileys') {
+  // Criar nova sessão apenas para gerar QR code (Baileys)
+  {
         const sock = await createBaileysSession(
           session.whatsappId,
           async (qrDataURL) => {
@@ -640,18 +501,15 @@ router.post('/:id/qrcode', authenticateToken, async (req, res) => {
 // GET /api/sessions/active - Listar sessões ativas
 router.get('/active', authenticateToken, async (req, res) => {
   try {
-    const whatsappJsSessions = listWhatsappJsSessions();
     const baileysSessions = listBaileysSessions();
 
     const activeSessions = [
-      ...whatsappJsSessions.map(sessionId => ({ sessionId, library: 'whatsappjs' })),
       ...baileysSessions.map(sessionId => ({ sessionId, library: 'baileys' }))
     ];
 
     res.json({
       total: activeSessions.length,
       sessions: activeSessions,
-      whatsappjs: whatsappJsSessions.length,
       baileys: baileysSessions.length
     });
 
@@ -662,18 +520,7 @@ router.get('/active', authenticateToken, async (req, res) => {
 });
 
 // GET /api/sessions - Listar todas as sessões
-router.get('/', authenticateToken, async (req, res) => {
-  try {
-    const sessions = await Session.findAll({
-      attributes: ['id', 'whatsappId', 'status', 'library'],
-      order: [['createdAt', 'DESC']]
-    });
-    res.json({ sessions });
-  } catch (error) {
-    console.error('Erro ao buscar sessões:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-});
+// Removed duplicate GET '/' route for sessions list
 
 // GET /api/sessions/status - Verificar status de todas as sessões
 router.get('/status', authenticateToken, getSessionsStatus);

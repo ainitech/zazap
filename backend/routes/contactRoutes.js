@@ -2,7 +2,6 @@ import express from 'express';
 import { Op } from 'sequelize';
 import { authenticateToken } from '../middleware/auth.js';
 import { Session, Ticket, TicketMessage, Contact } from '../models/index.js';
-import { getContactInfo, getChatMedia } from '../services/whatsappjsService.js';
 import { getContactInfoBaileys, getChatMediaBaileys } from '../services/baileysService.js';
 import { emitToAll } from '../services/socket.js';
 
@@ -81,15 +80,7 @@ router.get('/:ticketId/info', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Sessão não encontrada' });
     }
 
-    let contactInfo;
-    
-    if (session.library === 'whatsappjs') {
-      contactInfo = await getContactInfo(session.whatsappId, ticket.contact);
-    } else if (session.library === 'baileys') {
-      contactInfo = await getContactInfoBaileys(session.whatsappId, ticket.contact);
-    } else {
-      return res.status(400).json({ error: 'Biblioteca não suportada' });
-    }
+  const contactInfo = await getContactInfoBaileys(session.whatsappId, ticket.contact);
 
     res.json(contactInfo);
   } catch (error) {
@@ -114,15 +105,7 @@ router.get('/:ticketId/media', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Sessão não encontrada' });
     }
 
-    let mediaInfo = [];
-    
-    if (session.library === 'whatsappjs') {
-      mediaInfo = await getChatMedia(session.whatsappId, ticket.contact, parseInt(limit));
-    } else if (session.library === 'baileys') {
-      mediaInfo = await getChatMediaBaileys(session.whatsappId, ticket.contact, parseInt(limit));
-    } else {
-      return res.status(400).json({ error: 'Biblioteca não suportada' });
-    }
+  const mediaInfo = await getChatMediaBaileys(session.whatsappId, ticket.contact, parseInt(limit));
 
     res.json(mediaInfo);
   } catch (error) {

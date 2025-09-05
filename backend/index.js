@@ -4,8 +4,7 @@ import cors from 'cors';
 import { createServer } from 'http';
 import { initializeSocket } from './services/socket.js';
 import { autoReconnectSessions, startSessionHealthCheck } from './services/sessionManager.js';
-import whatsappRoutes from './routes/whatsappRoutes.js';
-import whatsappjsRoutes from './routes/whatsappjsRoutes.js';
+// Removed whatsappjs and selection routes; using only Baileys
 import baileysRoutes from './routes/baileysRoutes.js';
 import authRoutes from './routes/authRoutes.js';
 import queueRoutes from './routes/queueRoutes.js';
@@ -112,8 +111,6 @@ app.get('/test-file/:folder/:filename', (req, res) => {
 });
 
 // Rotas principais
-app.use('/api', whatsappRoutes);
-app.use('/api/whatsappjs', whatsappjsRoutes);
 app.use('/api/baileys', baileysRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/queues', queueRoutes);

@@ -1,4 +1,4 @@
-import { sendPoll } from '../services/whatsappjsService.js';
+import { sendPoll } from '../services/baileysService.js';
 import { Ticket, Session, Contact, TicketMessage } from '../models/index.js';
 import { emitToTicket, emitToAll } from '../services/socket.js';
 
@@ -66,7 +66,7 @@ export const sendPollMessage = async (req, res) => {
 
     // Enviar a enquete
     const result = await sendPoll(
-      session.id,
+      session.whatsappId,
       ticket.contact,
       question,
       options,

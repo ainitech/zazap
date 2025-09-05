@@ -1,5 +1,4 @@
 import { TicketMessage, Ticket, Session } from '../models/index.js';
-import { sendMedia as sendMediaWhatsappJs } from '../services/whatsappjsService.js';
 import { sendMedia as sendMediaBaileys } from '../services/baileysService.js';
 import path from 'path';
 import fs from 'fs';
@@ -54,19 +53,7 @@ export const sendFileMessage = async (req, res) => {
           let fileSent = false;
           const filePath = path.join(uploadDir, req.file.filename);
           
-          if (session.library === 'whatsapp-web.js' || session.library === 'whatsappjs') {
-            try {
-              console.log(`📤 Enviando arquivo via WhatsApp-Web.js para ${ticket.contact}`);
-              const fileBuffer = fs.readFileSync(filePath);
-              const base64Data = fileBuffer.toString('base64');
-              // Usar session.whatsappId em vez de ticket.sessionId
-              await sendMediaWhatsappJs(session.whatsappId, ticket.contact, base64Data, req.file.originalname, req.file.mimetype);
-              console.log(`✅ Arquivo enviado via WhatsApp-Web.js`);
-              fileSent = true;
-            } catch (whatsappJsError) {
-              console.error(`❌ Erro no WhatsApp-Web.js:`, whatsappJsError.message);
-            }
-          } else if (session.library === 'baileys') {
+          if (session.library === 'baileys') {
             try {
               console.log(`📤 Enviando arquivo via Baileys para ${ticket.contact}`);
               const fileBuffer = fs.readFileSync(filePath);

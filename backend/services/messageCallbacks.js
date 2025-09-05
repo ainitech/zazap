@@ -1,8 +1,6 @@
 import { Op } from 'sequelize';
 import { emitToAll } from './socket.js';
-import { sendText as sendTextWhatsappJs } from './whatsappjsService.js';
 import { sendText as sendTextBaileys } from './baileysService.js';
-import { getWhatsappJsSession } from './whatsappjsService.js';
 import { getBaileysSession } from './baileysService.js';
 import { Session, Ticket, Queue, User, TicketMessage, Contact } from '../models/index.js';
 
@@ -353,31 +351,7 @@ const processAutoReply = async (ticket, queue, sessionId) => {
       messageText = messageText.replace('{nome}', ticket.contact.split('@')[0]);
     }
 
-    if (session.library === 'whatsappjs' || session.library === 'whatsapp-web.js') {
-      const wbot = getWhatsappJsSession(session.whatsappId);
-      if (wbot) {
-        await sendTextWhatsappJs(session.whatsappId, ticket.contact, messageText);
-
-        // Salvar mensagem no sistema
-        await TicketMessage.create({
-          ticketId: ticket.id,
-          sender: 'system',
-          content: messageText,
-          timestamp: new Date(),
-          isFromGroup: false,
-          messageType: 'text'
-        });
-
-        console.log(`✅ Resposta automática enviada para ticket #${ticket.id}`);
-
-        // Emitir evento
-        emitToAll('auto-reply-sent', {
-          ticketId: ticket.id,
-          message: messageText,
-          queueId: queue.id
-        });
-      }
-    } else if (session.library === 'baileys') {
+  if (session.library === 'baileys') {
       const baileys = getBaileysSession(session.whatsappId);
       if (baileys) {
         await sendTextBaileys(session.whatsappId, ticket.contact, messageText);
@@ -439,39 +413,8 @@ const processGreetingMessage = async (ticket, queue, sessionId) => {
 
     console.log(`📨 Tentando enviar mensagem: "${messageText}" para contato: ${ticket.contact}`);
 
-    if (session.library === 'whatsappjs' || session.library === 'whatsapp-web.js') {
-      console.log(`🔍 Buscando sessão WhatsApp.js para WhatsAppId: ${session.whatsappId}`);
-      const wbot = getWhatsappJsSession(session.whatsappId);
-      console.log(`📊 Sessão WhatsApp.js encontrada: ${wbot ? 'SIM' : 'NÃO'}`);
-
-      if (wbot) {
-        console.log(`📤 Enviando mensagem via WhatsApp.js...`);
-        await sendTextWhatsappJs(session.whatsappId, ticket.contact, messageText);
-
-        // Salvar mensagem no sistema
-        await TicketMessage.create({
-          ticketId: ticket.id,
-          sender: 'system',
-          content: messageText,
-          timestamp: new Date(),
-          isFromGroup: false,
-          messageType: 'text'
-        });
-
-        console.log(`✅ Mensagem de saudação enviada para ticket #${ticket.id}`);
-
-        // Emitir evento
-        emitToAll('greeting-sent', {
-          ticketId: ticket.id,
-          message: messageText,
-          queueId: queue.id
-        });
-      }
-    } else if (session.library === 'baileys') {
-      console.log(`🔍 Buscando sessão Baileys para WhatsAppId: ${session.whatsappId}`);
+    if (session.library === 'baileys') {
       const baileys = getBaileysSession(session.whatsappId);
-      console.log(`📊 Sessão Baileys encontrada: ${baileys ? 'SIM' : 'NÃO'}`);
-
       if (baileys) {
         console.log(`📤 Enviando mensagem via Baileys...`);
         await sendTextBaileys(session.whatsappId, ticket.contact, messageText);
@@ -553,31 +496,7 @@ const processFeedbackCollection = async (ticket, queue, sessionId) => {
       messageText = messageText.replace('{nome}', ticket.contact.split('@')[0]);
     }
 
-    if (session.library === 'whatsappjs' || session.library === 'whatsapp-web.js') {
-      const wbot = getWhatsappJsSession(session.whatsappId);
-      if (wbot) {
-        await sendTextWhatsappJs(session.whatsappId, ticket.contact, messageText);
-
-        // Salvar mensagem no sistema
-        await TicketMessage.create({
-          ticketId: ticket.id,
-          sender: 'system',
-          content: messageText,
-          timestamp: new Date(),
-          isFromGroup: false,
-          messageType: 'text'
-        });
-
-        console.log(`✅ Solicitação de feedback enviada para ticket #${ticket.id}`);
-
-        // Emitir evento
-        emitToAll('feedback-request-sent', {
-          ticketId: ticket.id,
-          message: messageText,
-          queueId: queue.id
-        });
-      }
-    } else if (session.library === 'baileys') {
+  if (session.library === 'baileys') {
       const baileys = getBaileysSession(session.whatsappId);
       if (baileys) {
         await sendTextBaileys(session.whatsappId, ticket.contact, messageText);
@@ -634,115 +553,7 @@ const normalizeContactId = (remoteJid) => {
   return remoteJid;
 };
 
-// Função para processar mensagens do WhatsApp.js
-const handleWhatsappJsMessage = async (message, sessionId) => {
-  try {
-    console.log(`📨 Processando mensagem WhatsApp.js:`, message);
-
-    const contactId = normalizeContactId(message.from);
-    if (!contactId) {
-      console.log(`❌ ContactId inválido:`, message.from);
-      return;
-    }
-
-    console.log(`📞 Contact ID normalizado: ${contactId}`);
-
-    // Buscar ou criar contato
-    let contact = await Contact.findOne({ where: { whatsappId: contactId } });
-    if (!contact) {
-      const contactName = message.notifyName || contactId.split('@')[0];
-      contact = await Contact.create({
-        whatsappId: contactId,
-        sessionId: sessionId,
-        name: contactName,
-        isGroup: message.from.includes('@g.us')
-      });
-      console.log(`👤 Novo contato criado: ${contactName} (${contactId})`);
-    }
-
-    // Buscar ticket existente ou criar novo
-    let ticket = await Ticket.findOne({
-      where: {
-        contact: contactId,
-        status: ['open', 'pending']
-      },
-      order: [['createdAt', 'DESC']]
-    });
-
-    let isNewTicket = false;
-    if (!ticket) {
-      // Criar novo ticket
-      ticket = await Ticket.create({
-        contact: contactId,
-        contactId: contact.id,
-        status: 'pending',
-        unreadCount: 1,
-        sessionId: sessionId
-      });
-      isNewTicket = true;
-      console.log(`🎫 Novo ticket criado: #${ticket.id}`);
-
-      // Tentar auto-atribuir à fila
-      await autoAssignTicketToQueue(ticket, sessionId);
-    } else {
-      // Atualizar ticket existente
-      await ticket.update({
-        unreadCount: ticket.unreadCount + 1,
-        lastMessage: message.body,
-        updatedAt: new Date()
-      });
-      console.log(`🎫 Ticket existente atualizado: #${ticket.id}`);
-    }
-
-    // Verificar se é resposta de enquete
-    const pollResponse = await detectPollResponse(message.body, ticket.id);
-    
-    let messageData = {
-      ticketId: ticket.id,
-      sender: 'customer',
-      content: message.body,
-      messageId: message.id,
-      timestamp: new Date(message.timestamp * 1000),
-      isFromGroup: message.from.includes('@g.us'),
-      messageType: message.type || 'text'
-    };
-
-    // Se for resposta de enquete, adicionar campos específicos
-    if (pollResponse) {
-      messageData.messageType = 'poll_response';
-      messageData.pollResponse = pollResponse.selectedOption;
-      messageData.pollMessageId = pollResponse.pollMessageId;
-      console.log(`📊 Resposta de enquete detectada: Opção ${pollResponse.selectedOption + 1} da enquete ${pollResponse.pollMessageId}`);
-    }
-
-    // Salvar mensagem
-    const savedMessage = await TicketMessage.create(messageData);
-
-    console.log(`💾 Mensagem salva para ticket #${ticket.id}`);
-
-    // Processar regras da fila se não for novo (novo já foi processado no autoAssignTicketToQueue)
-    if (!isNewTicket && ticket.queueId) {
-      await processQueueRules(ticket, sessionId, false);
-    }
-
-    // Emitir evento
-    emitToAll('new-message', {
-      ticketId: ticket.id,
-      message: {
-        id: savedMessage.id,
-        sender: 'customer',
-        content: message.body,
-        timestamp: new Date(),
-        messageType: savedMessage.messageType,
-        pollResponse: savedMessage.pollResponse,
-        pollMessageId: savedMessage.pollMessageId
-      }
-    });
-
-  } catch (error) {
-    console.error(`❌ Erro ao processar mensagem WhatsApp.js:`, error);
-  }
-};
+// WhatsApp.js handler removido; Baileys é a única biblioteca suportada
 
 // Função para processar mensagens do Baileys
 const handleBaileysMessage = async (message, sessionId) => {
@@ -817,6 +628,10 @@ const handleBaileysMessage = async (message, sessionId) => {
     // Verificar se é resposta de enquete
     const pollResponse = await detectPollResponse(messageContent, ticket.id);
     
+    // Extrair participant (para mensagens de grupo)
+    const rawParticipant = message.key?.participant;
+    const participantIdNorm = rawParticipant ? normalizeContactId(rawParticipant) : null;
+
     let messageData = {
       ticketId: ticket.id,
       sender: 'customer',
@@ -824,7 +639,12 @@ const handleBaileysMessage = async (message, sessionId) => {
       messageId: message.key.id,
       timestamp: new Date(),
       isFromGroup: contactId.includes('@g.us'),
-      messageType: Object.keys(message.message || {})[0] || 'text'
+      messageType: Object.keys(message.message || {})[0] || 'text',
+      // LID support if provided by Baileys (v6.7.19+)
+      senderLid: message.key?.senderLid,
+      participantLid: message.key?.participantLid,
+      senderPn: message.key?.senderPn,
+      participantId: participantIdNorm || null
     };
 
     // Se for resposta de enquete, adicionar campos específicos
@@ -846,7 +666,7 @@ const handleBaileysMessage = async (message, sessionId) => {
     }
 
     // Emitir evento
-    emitToAll('new-message', {
+  emitToAll('new-message', {
       ticketId: ticket.id,
       message: {
         id: savedMessage.id,
@@ -855,7 +675,10 @@ const handleBaileysMessage = async (message, sessionId) => {
         timestamp: new Date(),
         messageType: savedMessage.messageType,
         pollResponse: savedMessage.pollResponse,
-        pollMessageId: savedMessage.pollMessageId
+    pollMessageId: savedMessage.pollMessageId,
+    senderLid: savedMessage.senderLid,
+    participantLid: savedMessage.participantLid,
+    senderPn: savedMessage.senderPn
       }
     });
 
@@ -872,7 +695,6 @@ export {
   processGreetingMessage,
   processAutoClose,
   processFeedbackCollection,
-  handleWhatsappJsMessage,
   handleBaileysMessage,
   normalizeContactId
 };

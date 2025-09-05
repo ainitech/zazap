@@ -401,6 +401,26 @@ export const sendMedia = async (sessionId, to, buffer, mimetype, caption) => {
 };
 
 /**
+ * Enviar enquete (poll)
+ */
+export const sendPoll = async (sessionId, to, question, options, opts = {}) => {
+  const sock = getBaileysSession(sessionId);
+  if (!sock) throw new Error('Sessão Baileys não encontrada');
+
+  const allowMultipleAnswers = !!opts.allowMultipleAnswers;
+  const selectableCount = allowMultipleAnswers ? Math.min(Math.max(2, options.length), 12) : 1;
+
+  const poll = {
+    name: question,
+    values: options,
+    selectableCount
+  };
+
+  const sent = await sock.sendMessage(to, { poll });
+  return { messageId: sent?.key?.id || null };
+};
+
+/**
  * Limpar uma sessão Baileys
  */
 export const cleanupBaileysSession = async (sessionId) => {

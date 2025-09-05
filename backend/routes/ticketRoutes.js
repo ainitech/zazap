@@ -74,28 +74,6 @@ router.post('/:id/recording-status', authenticateToken, async (req, res) => {
     const sessionId = ticket.sessionId;
     
     try {
-      // Tentar WhatsApp.js primeiro
-      const whatsappService = await import('../services/whatsappjsService.js');
-      const whatsappClient = whatsappService.getWhatsappJsSession(sessionId);
-      
-      if (whatsappClient && whatsappClient.info && whatsappClient.info.wid) {
-        if (isRecording) {
-          // Enviar status "gravando áudio"
-          await whatsappClient.sendPresenceUpdate('recording', phoneNumber);
-          console.log(`✅ Status "gravando áudio" enviado via WhatsApp.js para ${phoneNumber}`);
-        } else {
-          // Parar status de gravação
-          await whatsappClient.sendPresenceUpdate('available', phoneNumber);
-          console.log(`✅ Status "disponível" enviado via WhatsApp.js para ${phoneNumber}`);
-        }
-        
-        return res.json({ success: true, library: 'whatsappjs' });
-      }
-    } catch (whatsappError) {
-      console.log('WhatsApp.js não disponível, tentando Baileys:', whatsappError.message);
-    }
-    
-    try {
       // Tentar Baileys como fallback
       const baileysService = await import('../services/baileysService.js');
       const baileysClient = baileysService.getBaileysSession(sessionId);
@@ -111,7 +89,7 @@ router.post('/:id/recording-status', authenticateToken, async (req, res) => {
           console.log(`✅ Status "disponível" enviado via Baileys para ${phoneNumber}`);
         }
         
-        return res.json({ success: true, library: 'baileys' });
+  return res.json({ success: true, library: 'baileys' });
       }
     } catch (baileysError) {
       console.log('Baileys não disponível:', baileysError.message);
@@ -121,8 +99,8 @@ router.post('/:id/recording-status', authenticateToken, async (req, res) => {
     console.warn('⚠️ Nenhuma biblioteca WhatsApp disponível para enviar status de gravação');
     return res.json({ 
       success: false,
-      error: 'Nenhuma biblioteca WhatsApp disponível',
-      warning: 'Status de gravação não foi enviado ao WhatsApp'
+  error: 'Sessão indisponível',
+  warning: 'Status de gravação não foi enviado ao WhatsApp'
     });
     
   } catch (error) {
