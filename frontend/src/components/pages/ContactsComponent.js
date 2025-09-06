@@ -9,9 +9,11 @@ import {
   EllipsisVerticalIcon,
   PlusIcon,
   XMarkIcon,
-  TrashIcon
+  TrashIcon,
+  Squares2X2Icon,
+  ListBulletIcon
 } from '@heroicons/react/24/outline';
-import { apiFetch, safeJson, API_BASE_URL } from '../../utils/apiClient';
+import { apiFetch, safeJson, API_BASE_URL, apiUrl } from '../../utils/apiClient';
 
 export default function ContactsComponent() {
   const navigate = useNavigate();
@@ -25,6 +27,24 @@ export default function ContactsComponent() {
   const [sessions, setSessions] = useState([]);
   const [selectedSessionId, setSelectedSessionId] = useState('');
   const [contactFilter, setContactFilter] = useState('all'); // 'all', 'groups', 'individuals'
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingContact, setEditingContact] = useState(null);
+  const [editForm, setEditForm] = useState({ name: '', pushname: '', formattedNumber: '', profilePicUrl: '' });
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [noteTarget, setNoteTarget] = useState(null);
+  const [noteText, setNoteText] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
+  const [viewMode, setViewMode] = useState(() => {
+    // Recuperar modo de visualização do localStorage
+    return localStorage.getItem('contactsViewMode') || 'cards';
+  });
+
+  // Salvar modo de visualização no localStorage quando mudar
+  useEffect(() => {
+    localStorage.setItem('contactsViewMode', viewMode);
+  }, [viewMode]);
+
+  const [sortBy, setSortBy] = useState('lastContact'); // 'name', 'lastContact', 'status'
 
   // Listener para eventos de filtro das configurações
   useEffect(() => {
@@ -66,11 +86,8 @@ export default function ContactsComponent() {
         updateContactInList(updatedContact);
       });
 
-      // Escutar atualizações de tickets
-      socketRef.current.on('tickets-update', (tickets) => {
-        console.log('🎫 Tickets atualizados via socket, recarregando contatos...');
-        fetchContacts(); // Recarregar toda a lista para manter sincronizado
-      });
+  // Recarregar lista quando tickets mudarem (pode trazer novos contatos)
+  socketRef.current.on('tickets-update', () => fetchContacts());
 
       // Escutar exclusão de contatos
       socketRef.current.on('contact-deleted', (data) => {
@@ -147,66 +164,86 @@ export default function ContactsComponent() {
     });
   };
 
+  const openEdit = (contact) => {
+    setEditingContact(contact);
+    setEditForm({
+      name: contact.name || '',
+      pushname: contact.pushname || '',
+      formattedNumber: contact.number || '',
+      profilePicUrl: contact.profilePicUrl || ''
+    });
+    setShowEditModal(true);
+  };
+
+  const saveEdit = async () => {
+    if (!editingContact) return;
+    try {
+      setSavingEdit(true);
+      const res = await apiFetch(`/api/contacts/contact/${editingContact.contactId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editForm)
+      });
+      const data = await safeJson(res);
+      if (data?.contact) {
+        updateContactInList(data.contact);
+        setShowEditModal(false);
+        setEditingContact(null);
+      }
+    } catch (e) {
+      console.error('Erro ao salvar contato:', e);
+      alert('Não foi possível salvar o contato.');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const openNote = (contact) => {
+    setNoteTarget(contact);
+    setNoteText('');
+  };
+
+  const saveNote = async () => {
+    if (!noteTarget || !noteText.trim()) return;
+    try {
+      setSavingNote(true);
+      const res = await apiFetch(`/api/contacts/contact/${noteTarget.contactId}/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: noteText })
+      });
+      await safeJson(res);
+      setNoteTarget(null);
+      setNoteText('');
+    } catch (e) {
+      console.error('Erro ao salvar nota:', e);
+      alert('Não foi possível salvar a nota.');
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
   const fetchContacts = async () => {
     try {
-      // Construir URL com filtro de grupos se aplicável
-      let url = '/api/tickets';
+      // Buscar contatos diretamente da API de contatos
       const params = new URLSearchParams();
-      
-      if (contactFilter === 'groups') {
-        params.append('isGroup', 'true');
-      } else if (contactFilter === 'individuals') {
-        params.append('isGroup', 'false');
-      }
-      
-      if (params.toString()) {
-        url += '?' + params.toString();
-      }
-      
-      // Buscar tickets com dados dos contatos incluídos
-      console.log(`[FETCH TICKETS] Buscando com filtro: ${contactFilter} - URL: ${url}`);
-      const res = await apiFetch(url);
-      const tickets = await safeJson(res);
-
-      // Extrair contatos únicos dos tickets com dados mais completos
-      const uniqueContacts = tickets.reduce((acc, ticket) => {
-        const contactNumber = ticket.Contact?.formattedNumber || ticket.contact;
-        const contactName = ticket.Contact?.name || ticket.Contact?.pushname || contactNumber;
-        const contactId = ticket.Contact?.id || ticket.contactId;
-        const profilePicUrl = ticket.Contact?.profilePicUrl;
-
-        const existingContact = acc.find(c => c.number === contactNumber);
-        if (!existingContact) {
-          acc.push({
-            id: ticket.id,
-            contactId: contactId,
-            name: contactName,
-            number: contactNumber,
-            profilePicUrl: profilePicUrl,
-            lastMessage: ticket.lastMessage,
-            lastContact: ticket.updatedAt,
-            ticketCount: 1,
-            status: ticket.status
-          });
-        } else {
-          existingContact.ticketCount++;
-          if (new Date(ticket.updatedAt) > new Date(existingContact.lastContact)) {
-            existingContact.lastMessage = ticket.lastMessage;
-            existingContact.lastContact = ticket.updatedAt;
-            // Atualizar dados do contato se disponíveis
-            if (contactId && !existingContact.contactId) {
-              existingContact.contactId = contactId;
-              existingContact.name = contactName;
-              existingContact.profilePicUrl = profilePicUrl;
-            }
-          }
-        }
-        return acc;
-      }, []);
-
-      // Ordenar por último contato
-      uniqueContacts.sort((a, b) => new Date(b.lastContact) - new Date(a.lastContact));
-      setContacts(uniqueContacts);
+      if (contactFilter === 'groups') params.append('includeGroups', 'true');
+      if (contactFilter === 'individuals') params.append('includeGroups', 'false');
+      const res = await apiFetch(`/api/contacts?${params.toString()}`);
+      const list = await safeJson(res);
+      // Mapear para estrutura usada no componente
+      const mapped = list.map(c => ({
+        id: c.id,
+        contactId: c.id,
+        name: c.name || c.pushname || c.formattedNumber || c.whatsappId?.split('@')[0],
+        number: c.formattedNumber || c.whatsappId?.split('@')[0],
+        profilePicUrl: c.profilePicUrl || null,
+        lastMessage: null,
+        lastContact: c.updatedAt,
+        ticketCount: undefined,
+        status: undefined
+      })).sort((a, b) => new Date(b.lastContact || 0) - new Date(a.lastContact || 0));
+      setContacts(mapped);
     } catch (error) {
       console.error('Erro ao buscar contatos:', error);
     } finally {
@@ -217,7 +254,19 @@ export default function ContactsComponent() {
   const filteredContacts = contacts.filter(contact => 
     contact.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     contact.number?.includes(searchTerm)
-  );
+  ).sort((a, b) => {
+    switch (sortBy) {
+      case 'name':
+        return (a.name || '').localeCompare(b.name || '');
+      case 'lastContact':
+        return new Date(b.lastContact || 0) - new Date(a.lastContact || 0);
+      case 'status':
+        const statusOrder = { 'open': 0, 'pending': 1, 'closed': 2, undefined: 3 };
+        return (statusOrder[a.status] || 3) - (statusOrder[b.status] || 3);
+      default:
+        return new Date(b.lastContact || 0) - new Date(a.lastContact || 0);
+    }
+  });
 
   const formatLastContact = (date) => {
     const now = new Date();
@@ -264,14 +313,15 @@ export default function ContactsComponent() {
     }
 
     try {
-      const res = await apiFetch('/api/tickets', {
+      // Criar contato diretamente
+      const res = await apiFetch('/api/contacts/contact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contact_name: newContact.name,
-          contact_number: newContact.number,
+          name: newContact.name,
+          number: newContact.number,
           sessionId: Number(selectedSessionId),
-          status: 'open'
+          isGroup: false
         })
       });
       if (res.ok) {
@@ -292,7 +342,7 @@ export default function ContactsComponent() {
     if (!window.confirm(`Tem certeza que deseja deletar o contato "${contact.name}" e todos os dados relacionados? Esta ação não pode ser desfeita!`)) return;
     setDeletingContact(contact.contactId);
     try {
-      const response = await fetch(`${API_URL}/api/contacts/contact/${contact.contactId}`, {
+      const response = await fetch(apiUrl(`/api/contacts/contact/${contact.contactId}`), {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -308,6 +358,24 @@ export default function ContactsComponent() {
       alert('Erro ao deletar contato');
     } finally {
       setDeletingContact(null);
+    }
+  };
+
+  const handleSaveContactName = async (contact, newName) => {
+    const trimmed = (newName || '').trim();
+    if (!trimmed) return;
+    try {
+      const res = await apiFetch(`/api/contacts/contact/${contact.contactId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { contact: updated } = await safeJson(res);
+      updateContactInList(updated);
+    } catch (e) {
+      console.error('Erro ao salvar nome do contato:', e);
+      alert('Não foi possível salvar o nome.');
     }
   };
 
@@ -337,11 +405,19 @@ export default function ContactsComponent() {
                 {contactFilter === 'groups' ? '👥 Grupos' : '👤 Individuais'}
               </span>
             )}
+            <span className="px-2 py-1 rounded-full text-xs font-medium bg-slate-700 text-slate-300">
+              {viewMode === 'cards' ? '🔳 Cards' : '📋 Lista'}
+            </span>
           </div>
           <p className="text-slate-400">
             Gerencie seus contatos do WhatsApp
             {contactFilter === 'groups' && ' - Exibindo apenas grupos'}
             {contactFilter === 'individuals' && ' - Exibindo apenas contatos individuais'}
+            {filteredContacts.length > 0 && (
+              <span className="ml-2 font-medium">
+                ({filteredContacts.length} contato{filteredContacts.length !== 1 ? 's' : ''})
+              </span>
+            )}
           </p>
         </div>
         <div className="flex items-center space-x-3">
@@ -354,6 +430,44 @@ export default function ContactsComponent() {
               <span>Limpar Filtro</span>
             </button>
           )}
+          
+          {/* Botões de visualização */}
+          <div className="flex bg-slate-800 rounded-lg p-1">
+            <button
+              onClick={() => setViewMode('cards')}
+              className={`p-2 rounded-md transition-colors ${
+                viewMode === 'cards' 
+                  ? 'bg-slate-600 text-white' 
+                  : 'text-slate-400 hover:text-white hover:bg-slate-700'
+              }`}
+              title="Visualização em Cards"
+            >
+              <Squares2X2Icon className="h-5 w-5" />
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`p-2 rounded-md transition-colors ${
+                viewMode === 'list' 
+                  ? 'bg-slate-600 text-white' 
+                  : 'text-slate-400 hover:text-white hover:bg-slate-700'
+              }`}
+              title="Visualização em Lista"
+            >
+              <ListBulletIcon className="h-5 w-5" />
+            </button>
+          </div>
+
+          {/* Dropdown de ordenação */}
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            className="bg-slate-800 text-white border border-slate-600 rounded-lg px-3 py-2 text-sm hover:bg-slate-700 transition-colors focus:outline-none focus:ring-2 focus:ring-yellow-500"
+          >
+            <option value="lastContact">📅 Último contato</option>
+            <option value="name">🔤 Nome (A-Z)</option>
+            <option value="status">🎯 Status</option>
+          </select>
+          
           <button 
             onClick={() => setShowNewContactModal(true)}
             className="bg-gradient-to-r from-yellow-500 to-yellow-600 text-slate-900 px-4 py-2 rounded-lg flex items-center space-x-2 hover:from-yellow-600 hover:to-yellow-700 transition-all duration-200 font-semibold shadow-lg"
@@ -378,10 +492,12 @@ export default function ContactsComponent() {
         </div>
       </div>
 
-      {/* Contacts Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredContacts.map((contact) => (
-          <div key={contact.id} className="bg-slate-800 border border-slate-700 rounded-lg shadow-lg p-6 hover:bg-slate-750 hover:border-yellow-500/50 transition-all duration-200">
+      {/* Contacts */}
+      {viewMode === 'cards' ? (
+        /* Visualização em Cards */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredContacts.map((contact) => (
+            <div key={contact.id} className="bg-slate-800 border border-slate-700 rounded-lg shadow-lg p-6 hover:bg-slate-750 hover:border-yellow-500/50 transition-all duration-200">
             <div className="flex items-start justify-between mb-4">
               <div className="flex items-center space-x-3">
                 <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg overflow-hidden">
@@ -413,71 +529,379 @@ export default function ContactsComponent() {
                     </span>
                   </div>
                 </div>
-                <div>
-                  <h3 className="font-semibold text-white truncate">
+                <div className="flex-1">
+                  <h3 className="font-semibold text-white truncate mb-1">
                     {contact.name}
                   </h3>
                   <p className="text-sm text-slate-400">{contact.number}</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Último contato: {formatLastContact(contact.lastContact)}
+                  </p>
                 </div>
               </div>
-              <div className="flex items-center">
-                <button className="text-slate-400 hover:text-yellow-500 transition-colors">
-                  <EllipsisVerticalIcon className="h-5 w-5" />
+              
+              <div className="flex items-center justify-end gap-1 mb-3">
+                <button
+                  onClick={() => openNote(contact)}
+                  className="p-2 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition-all duration-200 shadow-sm"
+                  title="Adicionar/Editar Nota"
+                >
+                  📝
                 </button>
                 <button
-                  className={`ml-2 text-red-500 hover:text-red-700 transition-colors ${deletingContact === contact.contactId ? 'opacity-50 pointer-events-none' : ''}`}
-                  title="Deletar contato"
+                  onClick={() => openEdit(contact)}
+                  className="p-2 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition-all duration-200 shadow-sm"
+                  title="Editar Contato"
+                >
+                  ✏️
+                </button>
+                <button
                   onClick={() => handleDeleteContact(contact)}
                   disabled={deletingContact === contact.contactId}
+                  className="p-2 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-all duration-200 shadow-sm"
+                  title="Excluir Contato"
                 >
-                  <TrashIcon className="h-5 w-5" />
+                  {deletingContact === contact.contactId ? '⏳' : '🗑️'}
                 </button>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(contact.status)}`}>
-                  {contact.status === 'open' ? 'Ativo' : 
-                   contact.status === 'pending' ? 'Pendente' : 'Fechado'}
-                </span>
-                <span className="text-xs text-slate-400">
-                  {contact.ticketCount} ticket{contact.ticketCount !== 1 ? 's' : ''}
-                </span>
               </div>
 
               {contact.lastMessage && (
-                <div className="bg-slate-700 border border-slate-600 p-3 rounded-lg">
-                  <p className="text-sm text-slate-300 line-clamp-2">
-                    {contact.lastMessage}
+                <div className="bg-slate-700/50 border border-slate-600 p-3 rounded-lg mb-3">
+                  <p className="text-sm text-slate-300 leading-relaxed">
+                    <span className="text-slate-400">"</span>{contact.lastMessage}<span className="text-slate-400">"</span>
                   </p>
+                  <p className="text-xs text-slate-500 mt-1">Última mensagem</p>
                 </div>
               )}
 
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>Último contato: {formatLastContact(contact.lastContact)}</span>
-              </div>
+              {contact.status && (
+                <div className="mb-3">
+                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(contact.status)}`}>
+                    {contact.status === 'open' ? '✅ Ativo' : 
+                     contact.status === 'pending' ? '⏳ Pendente' : '❌ Fechado'}
+                  </span>
+                  {contact.ticketCount && (
+                    <span className="ml-2 text-xs text-slate-400">
+                      {contact.ticketCount} ticket{contact.ticketCount !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
-            <div className="flex space-x-2 mt-4 pt-4 border-t border-slate-700">
+            <div className="flex space-x-2 pt-3 border-t border-slate-700">
               <button 
                 onClick={() => handleChatClick(contact)}
-                className="flex-1 bg-gradient-to-r from-green-600 to-green-700 text-white py-2 px-3 rounded-lg text-sm hover:from-green-700 hover:to-green-800 transition-all duration-200 flex items-center justify-center space-x-1 shadow-md"
+                className="flex-1 bg-gradient-to-r from-green-600 to-green-700 text-white py-2.5 px-3 rounded-lg text-sm hover:from-green-700 hover:to-green-800 transition-all duration-200 flex items-center justify-center space-x-2 shadow-md font-medium"
               >
                 <ChatBubbleBottomCenterTextIcon className="h-4 w-4" />
-                <span>Chat</span>
+                <span>Conversar</span>
               </button>
               <button 
                 onClick={() => handleCallClick(contact)}
-                className="flex-1 bg-gradient-to-r from-yellow-500 to-yellow-600 text-slate-900 py-2 px-3 rounded-lg text-sm hover:from-yellow-600 hover:to-yellow-700 transition-all duration-200 flex items-center justify-center space-x-1 shadow-md font-semibold"
+                className="bg-slate-700 text-white py-2.5 px-3 rounded-lg text-sm hover:bg-slate-600 transition-all duration-200 flex items-center justify-center shadow-md"
               >
                 <PhoneIcon className="h-4 w-4" />
-                <span>Chamar</span>
               </button>
             </div>
           </div>
         ))}
-      </div>
+        </div>
+      ) : (
+        /* Visualização em Lista */
+        <div className="bg-slate-800 border border-slate-700 rounded-lg shadow-lg overflow-hidden">
+          {/* Desktop Table View */}
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-slate-700 border-b border-slate-600">
+                <tr>
+                  <th className="text-left py-4 px-6 text-slate-300 font-semibold">Contato</th>
+                  <th className="text-left py-4 px-6 text-slate-300 font-semibold">Número</th>
+                  <th className="text-left py-4 px-6 text-slate-300 font-semibold hidden lg:table-cell">Última Mensagem</th>
+                  <th className="text-left py-4 px-6 text-slate-300 font-semibold hidden lg:table-cell">Status</th>
+                  <th className="text-center py-4 px-6 text-slate-300 font-semibold">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-700">
+                {filteredContacts.map((contact) => (
+                  <tr key={contact.id} className="hover:bg-slate-750 transition-colors">
+                    <td className="py-4 px-6">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-10 h-10 rounded-full flex items-center justify-center shadow-lg overflow-hidden flex-shrink-0">
+                          {contact.profilePicUrl ? (
+                            <img 
+                              src={contact.profilePicUrl} 
+                              alt={contact.name}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                try {
+                                  if (e && e.target) {
+                                    if (e.target.style) e.target.style.display = 'none';
+                                    if (e.target.nextSibling && e.target.nextSibling.style) {
+                                      e.target.nextSibling.style.display = 'flex';
+                                    }
+                                  }
+                                } catch (err) {
+                                  console.warn('onError image handler failed', err);
+                                }
+                              }}
+                            />
+                          ) : null}
+                          <div 
+                            className={`w-full h-full bg-gradient-to-r from-yellow-500 to-yellow-600 flex items-center justify-center ${contact.profilePicUrl ? 'hidden' : 'flex'}`}
+                          >
+                            <span className="text-slate-900 font-bold text-sm">
+                              {getInitials(contact.name)}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-semibold text-white truncate">
+                            {contact.name}
+                          </h3>
+                          <p className="text-xs text-slate-500">
+                            Último contato: {formatLastContact(contact.lastContact)}
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-4 px-6">
+                      <span className="text-slate-300">{contact.number}</span>
+                    </td>
+                    <td className="py-4 px-6 hidden lg:table-cell">
+                      {contact.lastMessage ? (
+                        <div className="max-w-xs">
+                          <p className="text-sm text-slate-300 truncate">
+                            <span className="text-slate-400">"</span>{contact.lastMessage}<span className="text-slate-400">"</span>
+                          </p>
+                        </div>
+                      ) : (
+                        <span className="text-slate-500 text-sm">Nenhuma mensagem</span>
+                      )}
+                    </td>
+                    <td className="py-4 px-6 hidden lg:table-cell">
+                      {contact.status ? (
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(contact.status)}`}>
+                          {contact.status === 'open' ? '✅ Ativo' : 
+                           contact.status === 'pending' ? '⏳ Pendente' : '❌ Fechado'}
+                        </span>
+                      ) : (
+                        <span className="text-slate-500 text-sm">-</span>
+                      )}
+                    </td>
+                    <td className="py-4 px-6">
+                      <div className="flex items-center justify-center space-x-1">
+                        <button
+                          onClick={() => openNote(contact)}
+                          className="p-2 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition-all duration-200 shadow-sm"
+                          title="Adicionar/Editar Nota"
+                        >
+                          📝
+                        </button>
+                        <button
+                          onClick={() => openEdit(contact)}
+                          className="p-2 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition-all duration-200 shadow-sm"
+                          title="Editar Contato"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          onClick={() => handleChatClick(contact)}
+                          className="p-2 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-all duration-200 shadow-sm"
+                          title="Conversar"
+                        >
+                          <ChatBubbleBottomCenterTextIcon className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteContact(contact)}
+                          disabled={deletingContact === contact.contactId}
+                          className="p-2 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-all duration-200 shadow-sm"
+                          title="Excluir Contato"
+                        >
+                          {deletingContact === contact.contactId ? '⏳' : '🗑️'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile List View */}
+          <div className="md:hidden divide-y divide-slate-700">
+            {filteredContacts.map((contact) => (
+              <div key={contact.id} className="p-4 hover:bg-slate-750 transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3 flex-1 min-w-0">
+                    <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg overflow-hidden flex-shrink-0">
+                      {contact.profilePicUrl ? (
+                        <img 
+                          src={contact.profilePicUrl} 
+                          alt={contact.name}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            try {
+                              if (e && e.target) {
+                                if (e.target.style) e.target.style.display = 'none';
+                                if (e.target.nextSibling && e.target.nextSibling.style) {
+                                  e.target.nextSibling.style.display = 'flex';
+                                }
+                              }
+                            } catch (err) {
+                              console.warn('onError image handler failed', err);
+                            }
+                          }}
+                        />
+                      ) : null}
+                      <div 
+                        className={`w-full h-full bg-gradient-to-r from-yellow-500 to-yellow-600 flex items-center justify-center ${contact.profilePicUrl ? 'hidden' : 'flex'}`}
+                      >
+                        <span className="text-slate-900 font-bold text-sm">
+                          {getInitials(contact.name)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-white truncate">
+                        {contact.name}
+                      </h3>
+                      <p className="text-sm text-slate-400 truncate">{contact.number}</p>
+                      <p className="text-xs text-slate-500">
+                        {formatLastContact(contact.lastContact)}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex space-x-1 flex-shrink-0">
+                    <button
+                      onClick={() => openNote(contact)}
+                      className="p-2 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition-all duration-200"
+                      title="Nota"
+                    >
+                      📝
+                    </button>
+                    <button
+                      onClick={() => handleChatClick(contact)}
+                      className="p-2 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-all duration-200"
+                      title="Conversar"
+                    >
+                      <ChatBubbleBottomCenterTextIcon className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+                
+                {contact.lastMessage && (
+                  <div className="mt-3 bg-slate-700/50 border border-slate-600 p-2 rounded-lg">
+                    <p className="text-sm text-slate-300 truncate">
+                      <span className="text-slate-400">"</span>{contact.lastMessage}<span className="text-slate-400">"</span>
+                    </p>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Nota rápida */}
+      {noteTarget && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-slate-800 border border-slate-700 rounded-lg w-full max-w-md p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-white font-semibold">Adicionar nota</h3>
+              <button onClick={() => { setNoteTarget(null); setNoteText(''); }}>
+                <XMarkIcon className="h-5 w-5 text-slate-400" />
+              </button>
+            </div>
+            <textarea
+              rows={4}
+              className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+              placeholder="Escreva uma nota para este contato..."
+              value={noteText}
+              onChange={(e) => setNoteText(e.target.value)}
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <button 
+                onClick={() => { setNoteTarget(null); setNoteText(''); }} 
+                className="px-3 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button 
+                disabled={savingNote || !noteText.trim()} 
+                onClick={saveNote} 
+                className="px-3 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+              >
+                {savingNote ? 'Salvando...' : 'Salvar nota'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de edição de contato */}
+      {showEditModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-slate-800 border border-slate-700 rounded-lg w-full max-w-lg p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-white font-semibold">Editar contato</h3>
+              <button onClick={() => setShowEditModal(false)}>
+                <XMarkIcon className="h-5 w-5 text-slate-400" />
+              </button>
+            </div>
+            <div className="grid grid-cols-1 gap-3">
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Nome</label>
+                <input
+                  className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+                  value={editForm.name}
+                  onChange={(e) => setEditForm(f => ({ ...f, name: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Pushname</label>
+                <input
+                  className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+                  value={editForm.pushname}
+                  onChange={(e) => setEditForm(f => ({ ...f, pushname: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Número (exibição)</label>
+                <input
+                  className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+                  value={editForm.formattedNumber}
+                  onChange={(e) => setEditForm(f => ({ ...f, formattedNumber: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Foto (URL)</label>
+                <input
+                  className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+                  value={editForm.profilePicUrl}
+                  onChange={(e) => setEditForm(f => ({ ...f, profilePicUrl: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button 
+                onClick={() => setShowEditModal(false)} 
+                className="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button 
+                disabled={savingEdit} 
+                onClick={saveEdit} 
+                className="px-4 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+              >
+                {savingEdit ? 'Salvando...' : 'Salvar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Empty State */}
       {filteredContacts.length === 0 && !loading && (

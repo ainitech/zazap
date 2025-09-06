@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+import { apiUrl, API_BASE_URL } from '../../utils/apiClient';
 
 export default function QuickRepliesComponent() {
   const { token, user } = useAuth();
@@ -28,7 +28,7 @@ export default function QuickRepliesComponent() {
     console.log('🔧 QuickRepliesComponent: Buscando respostas rápidas...');
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/quick-replies`, {
+  const res = await fetch(apiUrl('/api/quick-replies'), {
         headers: { Authorization: `Bearer ${localStorage.getItem('token') || token}` },
       });
       console.log('🔧 QuickRepliesComponent: Resposta da API:', res.status, res.statusText);
@@ -107,13 +107,13 @@ export default function QuickRepliesComponent() {
               {item.mediaUrl ? (
                 <div className="mb-2">
                   {item.mediaType?.startsWith('image') ? (
-                    <img src={`${API_URL}${item.mediaUrl}`} alt={item.fileName} className="max-h-40 rounded" />
+                    <img src={`${API_BASE_URL}${item.mediaUrl}`} alt={item.fileName} className="max-h-40 rounded" />
                   ) : item.mediaType?.startsWith('audio') ? (
-                    <audio controls src={`${API_URL}${item.mediaUrl}`} className="w-full" />
+                    <audio controls src={`${API_BASE_URL}${item.mediaUrl}`} className="w-full" />
                   ) : item.mediaType?.startsWith('video') ? (
-                    <video controls src={`${API_URL}${item.mediaUrl}`} className="w-full rounded" />
+                    <video controls src={`${API_BASE_URL}${item.mediaUrl}`} className="w-full rounded" />
                   ) : (
-                    <a href={`${API_URL}${item.mediaUrl}`} className="text-yellow-400 underline hover:text-yellow-300" target="_blank" rel="noreferrer">
+                    <a href={`${API_BASE_URL}${item.mediaUrl}`} className="text-yellow-400 underline hover:text-yellow-300" target="_blank" rel="noreferrer">
                       {item.fileName || 'Baixar arquivo'}
                     </a>
                   )}
@@ -226,7 +226,7 @@ export default function QuickRepliesComponent() {
                       fd.append('mediaType', 'text');
                       if (variables) fd.append('variables', JSON.stringify(variables));
                       fd.append('media', file);
-                      const res = await fetch(`${API_URL}/api/quick-replies`, {
+                      const res = await fetch(apiUrl('/api/quick-replies'), {
                         method: 'POST',
                         headers: { Authorization: `Bearer ${localStorage.getItem('token') || token}` },
                         body: fd
@@ -236,7 +236,7 @@ export default function QuickRepliesComponent() {
                         throw new Error(e.error || 'Erro ao criar');
                       }
                     } else {
-                      const res = await fetch(`${API_URL}/api/quick-replies`, {
+                      const res = await fetch(apiUrl('/api/quick-replies'), {
                         method: 'POST',
                         headers: { 
                           Authorization: `Bearer ${localStorage.getItem('token') || token}`,

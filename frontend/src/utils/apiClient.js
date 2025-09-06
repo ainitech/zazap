@@ -2,26 +2,25 @@
 
 const getEnvBase = () => {
   try {
-    // Prefer window overrides, then CRA env vars (support both BACKEND_URL and legacy API_URL)
-    const w = typeof window !== 'undefined'
-      ? (window.__REACT_APP_BACKEND_URL || window.__REACT_APP_API_URL)
-      : undefined;
-    const e = typeof process !== 'undefined'
-      ? (process.env?.REACT_APP_BACKEND_URL || process.env?.REACT_APP_API_URL)
-      : undefined;
-    const base = (w || e || 'http://localhost:3001').trim(); // Force backend URL as fallback
-    if (!base) return 'http://localhost:3001';
+    // CRA inlines these at build time; prefer BACKEND_URL, fallback to legacy API_URL
+    const base = (process.env.REACT_APP_BACKEND_URL || process.env.REACT_APP_API_URL || '').trim();
+    if (!base) return '';
     return base.endsWith('/') ? base.slice(0, -1) : base;
   } catch {
-    return 'http://localhost:3001';
+    return '';
   }
 };
 
 export const API_BASE_URL = getEnvBase();
 
+// Derive WS base (auto-convert http/https to ws/wss when explicit base provided). If empty, socket.io will connect same-origin.
+export const WS_BASE_URL = API_BASE_URL
+  ? API_BASE_URL.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:')
+  : '';
+
 export const apiUrl = (path) => {
   const p = path.startsWith('/') ? path : `/${path}`;
-  return API_BASE_URL ? `${API_BASE_URL}${p}` : p; // fallback to relative (proxy)
+  return API_BASE_URL ? `${API_BASE_URL}${p}` : p; // fallback to relative (proxy or same-origin)
 };
 
 export const apiFetch = (path, options = {}) => {

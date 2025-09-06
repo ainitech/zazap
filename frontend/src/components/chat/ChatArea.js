@@ -3,6 +3,7 @@ import AudioPlayer from 'react-h5-audio-player';
 import 'react-h5-audio-player/lib/styles.css';
 import { useAuth } from '../../context/AuthContext';
 import io from 'socket.io-client';
+import { apiUrl, API_BASE_URL } from '../../utils/apiClient';
 import TransferModal from './TransferModal';
 import { FileText } from 'lucide-react';
 import PriorityModal from './PriorityModal';
@@ -27,7 +28,7 @@ import {
 import { BoltIcon } from '@heroicons/react/24/solid';
 import { UserPlusIcon } from '@heroicons/react/24/outline';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+// API base is resolved via apiUrl helper
 
 // Adicionando estilos CSS customizados
 const styles = `
@@ -205,7 +206,7 @@ export default function ChatArea({
   // Conectar ao WebSocket
   useEffect(() => {
     if (!socketRef.current) {
-      socketRef.current = io(API_URL, {
+  socketRef.current = io(apiUrl('/').replace(/\/$/, ''), {
         auth: {
           token: localStorage.getItem('token')
         }
@@ -276,7 +277,7 @@ export default function ChatArea({
     if (!selectedTicket?.id) return;
     
     try {
-      const response = await fetch(`${API_URL}/api/tags/ticket/${selectedTicket.id}`, {
+  const response = await fetch(apiUrl(`/api/tags/ticket/${selectedTicket.id}`), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -304,7 +305,7 @@ export default function ChatArea({
       if (!contactInfo) {
         setLoadingContact(true);
       }
-      const response = await fetch(`${API_URL}/api/contacts/${selectedTicket.contactId}`, {
+  const response = await fetch(apiUrl(`/api/contacts/${selectedTicket.contactId}`), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -347,7 +348,7 @@ export default function ChatArea({
     if (!selectedTicket) return;
     
     try {
-      const response = await fetch(`${API_URL}/api/tickets/${selectedTicket.id}/resolve`, {
+  const response = await fetch(apiUrl(`/api/tickets/${selectedTicket.id}/resolve`), {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -372,7 +373,7 @@ export default function ChatArea({
     if (!window.confirm('Tem certeza que deseja fechar este ticket?')) return;
     
     try {
-      const response = await fetch(`${API_URL}/api/tickets/${selectedTicket.id}/close`, {
+  const response = await fetch(apiUrl(`/api/tickets/${selectedTicket.id}/close`), {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -415,7 +416,7 @@ export default function ChatArea({
     )) return;
     
     try {
-      const response = await fetch(`${API_URL}/api/tickets/${selectedTicket.id}/permanent`, {
+      const response = await fetch(apiUrl(`/api/tickets/${selectedTicket.id}/permanent`), {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -475,7 +476,7 @@ export default function ChatArea({
     setQrOpen(true);
     setQrLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/quick-replies` , {
+      const res = await fetch(apiUrl('/api/quick-replies'), {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
       const data = await res.json();
@@ -507,7 +508,7 @@ export default function ChatArea({
     // If we have a shortcut, ask the API for the latest processed content
     if (item.shortcut) {
       try {
-        const res = await fetch(`${API_URL}/api/quick-replies/shortcut/${encodeURIComponent(item.shortcut)}`, {
+        const res = await fetch(apiUrl(`/api/quick-replies/shortcut/${encodeURIComponent(item.shortcut)}`), {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
         });
         if (res.ok) {
@@ -592,7 +593,7 @@ export default function ChatArea({
 
     try {
       setUploadingFile(true);
-      const resp = await fetch(`${API_URL}/api/ticket-messages/${selectedTicket.id}/media`, {
+      const resp = await fetch(apiUrl(`/api/ticket-messages/${selectedTicket.id}/media`), {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -619,7 +620,7 @@ export default function ChatArea({
         const formData = new FormData();
         formData.append('file', file);
         formData.append('sender', 'user');
-        await fetch(`${API_URL}/api/ticket-messages/${selectedTicket.id}/media`, {
+        await fetch(apiUrl(`/api/ticket-messages/${selectedTicket.id}/media`), {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -646,17 +647,17 @@ export default function ChatArea({
       return fileUrl;
     }
     
-    // Se começa com /, usar diretamente com API_URL
+    // Se começa com /, usar diretamente com API_BASE_URL
     if (fileUrl.startsWith('/')) {
-      return `${API_URL}${fileUrl}`;
+      return `${API_BASE_URL}${fileUrl}`;
     }
     
     // Se não começa com /, adicionar /uploads/ se necessário
     if (!fileUrl.startsWith('uploads/')) {
-      return `${API_URL}/uploads/${fileUrl}`;
+      return `${API_BASE_URL}/uploads/${fileUrl}`;
     }
     
-    return `${API_URL}/${fileUrl}`;
+    return `${API_BASE_URL}/${fileUrl}`;
   };
 
   // Função para deletar mensagem
@@ -667,7 +668,7 @@ export default function ChatArea({
     )) return;
 
     try {
-      const response = await fetch(`${API_URL}/api/ticket-messages/${messageId}`, {
+      const response = await fetch(apiUrl(`/api/ticket-messages/${messageId}`), {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
@@ -691,7 +692,7 @@ export default function ChatArea({
   // Função para reagir à mensagem
   const handleReactToMessage = async (messageId, reaction) => {
     try {
-      const response = await fetch(`${API_URL}/api/ticket-messages/${messageId}/react`, {
+      const response = await fetch(apiUrl(`/api/ticket-messages/${messageId}/react`), {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
@@ -717,21 +718,36 @@ export default function ChatArea({
     if (!selectedTicket || !quickReplyItem.mediaUrl) return;
     
     try {
+      console.log('🎵 Iniciando simulação de gravação de áudio da resposta rápida');
+      
       // Iniciar simulação de gravação
       setIsRecording(true);
       setRecordingTime(0);
       
       // Notificar WhatsApp que está gravando
+      console.log('🎵 Notificando WhatsApp sobre início da gravação');
       await notifyRecordingStatus(true);
       
-      // Simular tempo de gravação (2-5 segundos baseado no nome do arquivo)
+      // Simular tempo de gravação baseado na duração real do áudio ou nome do arquivo
       const fileName = quickReplyItem.fileName || 'audio';
-      const simulatedDuration = Math.min(Math.max(fileName.length * 0.3, 2), 5);
+      const simulatedDuration = Math.min(Math.max(fileName.length * 0.2, 2), 10); // Entre 2-10 segundos
       
-      // Animar contador de tempo
+      console.log(`🎵 Simulando gravação por ${simulatedDuration} segundos`);
+      
+      // Mostrar feedback visual de que está "gravando"
+      let pulseCount = 0;
+      
+      // Animar contador de tempo com pulso visual
       const interval = setInterval(() => {
         setRecordingTime(prev => {
           const newTime = prev + 0.1;
+          pulseCount++;
+          
+          // A cada 5 decimos de segundo, fazer um "pulso" visual
+          if (pulseCount % 5 === 0) {
+            console.log(`🎵 Gravando... ${newTime.toFixed(1)}s`);
+          }
+          
           return newTime >= simulatedDuration ? simulatedDuration : newTime;
         });
       }, 100);
@@ -745,52 +761,114 @@ export default function ChatArea({
       setRecordingTime(0);
       
       // Notificar WhatsApp que parou de gravar
+      console.log('🎵 Notificando WhatsApp sobre fim da gravação');
       await notifyRecordingStatus(false);
       
+      // Enviar status "digitando" para simular processamento do áudio
+      console.log('🎵 Enviando status "digitando" enquanto processa áudio');
+      await notifyTypingStatus(true);
+      
+      // Pequena pausa antes de enviar (simular processamento)
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Parar status de digitação
+      await notifyTypingStatus(false);
+      
       // Enviar o arquivo de áudio da resposta rápida
-      await sendQuickReplyAudio(quickReplyItem);
+      console.log('🎵 Enviando áudio gravado');
+      await sendQuickReplyAudio(quickReplyItem, simulatedDuration);
       
     } catch (error) {
-      console.error('Erro ao simular gravação de áudio:', error);
+      console.error('🎵 Erro ao simular gravação de áudio:', error);
       setIsRecording(false);
       setRecordingTime(0);
       await notifyRecordingStatus(false);
+      throw error;
     }
   };
 
   // Enviar áudio de resposta rápida
-  const sendQuickReplyAudio = async (quickReplyItem) => {
+  const sendQuickReplyAudio = async (quickReplyItem, duration = null) => {
     if (!selectedTicket || !quickReplyItem.mediaUrl) return;
     
     try {
       setUploadingFile(true);
       
+      console.log('🎵 Iniciando envio de áudio de resposta rápida:', {
+        mediaUrl: quickReplyItem.mediaUrl,
+        ticketId: selectedTicket.id,
+        fileName: quickReplyItem.fileName,
+        duration: duration
+      });
+      
       // Fetch do arquivo de áudio
-      const audioResponse = await fetch(`${API_URL}${quickReplyItem.mediaUrl}`, {
+      const audioResponse = await fetch(`${API_BASE_URL}${quickReplyItem.mediaUrl}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
       
+      console.log('🎵 Resposta do fetch do áudio:', audioResponse.status, audioResponse.statusText);
+      
       if (!audioResponse.ok) {
-        throw new Error('Não foi possível carregar o arquivo de áudio');
+        throw new Error(`Não foi possível carregar o arquivo de áudio: ${audioResponse.status} ${audioResponse.statusText}`);
       }
       
       const audioBlob = await audioResponse.blob();
-      const audioFile = new File([audioBlob], quickReplyItem.fileName || `audio_${Date.now()}.webm`, { 
-        type: audioBlob.type || 'audio/webm' 
+      console.log('🎵 Blob do áudio carregado:', {
+        size: audioBlob.size,
+        type: audioBlob.type
       });
       
-      // Criar FormData
+      // Validar se o áudio tem tamanho mínimo
+      if (audioBlob.size < 1000) {
+        throw new Error('Arquivo de áudio da resposta rápida muito pequeno');
+      }
+      
+      // Gerar nome único para o arquivo com timestamp
+      const timestamp = Date.now();
+      
+      // Para notas de voz, usar sempre nome apropriado para PTT
+      const audioFileName = `voice_quick_reply_${timestamp}.webm`;
+      
+      // Criar o arquivo com mimetype otimizado para WhatsApp PTT
+      const audioFile = new File([audioBlob], audioFileName, { 
+        type: 'audio/webm;codecs=opus' // Formato otimizado para PTT
+      });
+      
+      console.log('🎵 Arquivo PTT criado:', {
+        name: audioFile.name,
+        size: audioFile.size,
+        type: audioFile.type,
+        originalType: audioBlob.type
+      });
+      
+      // Criar FormData com parâmetros otimizados para PTT
       const formData = new FormData();
       formData.append('file', audioFile);
-      formData.append('sender', 'quick-reply'); // Flag para identificar como Quick Reply
+      formData.append('sender', 'quick-reply'); // Marcar como quick reply
+      formData.append('messageType', 'audio'); // Indicar que é áudio
+      formData.append('isVoiceNote', 'true'); // FORÇAR como nota de voz PTT
+      
+      // Adicionar duração se disponível
+      if (duration && duration > 0) {
+        formData.append('audioDuration', duration.toString());
+        console.log('🎵 Duração da quick reply adicionada:', duration, 'segundos');
+      } else {
+        // Estimar duração baseada no tamanho do arquivo
+        const estimatedDuration = Math.max(1, Math.floor(audioBlob.size / 8000)); // Estimativa baseada em 8KB/s
+        formData.append('audioDuration', estimatedDuration.toString());
+        console.log('🎵 Duração estimada para quick reply:', estimatedDuration, 'segundos');
+      }
       
       // Adicionar conteúdo de texto se houver
       if (quickReplyItem.content) {
         formData.append('content', quickReplyItem.content);
+        console.log('🎵 Conteúdo de texto da quick reply adicionado:', quickReplyItem.content);
       }
       
+      console.log('🎵 Enviando PTT de quick reply para API...');
+      
       // Enviar via API
-      const response = await fetch(`${API_URL}/api/ticket-messages/${selectedTicket.id}/media`, {
+      const response = await fetch(apiUrl(`/api/ticket-messages/${selectedTicket.id}/media`), {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -798,15 +876,21 @@ export default function ChatArea({
         body: formData
       });
       
+      console.log('🎵 Resposta da API para quick reply:', response.status, response.statusText);
+      
       if (!response.ok) {
-        throw new Error('Erro ao enviar áudio');
+        const errorData = await response.text();
+        console.error('🎵 Erro da API ao enviar quick reply:', errorData);
+        throw new Error(`Erro ao enviar áudio de quick reply: ${response.status} - ${errorData}`);
       }
       
-      console.log('Áudio de resposta rápida enviado com sucesso');
+      const responseData = await response.json();
+      console.log('🎵 PTT de resposta rápida enviado com sucesso:', responseData);
       
     } catch (error) {
-      console.error('Erro ao enviar áudio de resposta rápida:', error);
-      setRecordingError('Erro ao enviar áudio.');
+      console.error('🎵 Erro ao enviar PTT de resposta rápida:', error);
+      setRecordingError(`Erro ao enviar áudio de quick reply: ${error.message}`);
+      alert(`Erro ao enviar áudio de quick reply: ${error.message}`);
     } finally {
       setUploadingFile(false);
     }
@@ -821,31 +905,62 @@ export default function ChatArea({
     try {
       setRecordingError(null);
       
-      // Solicitar permissão de microfone
+      // Verificar suporte do navegador
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Seu navegador não suporta gravação de áudio');
+      }
+      
+      // Verificar suporte do MediaRecorder
+      if (!window.MediaRecorder) {
+        throw new Error('MediaRecorder não suportado pelo navegador');
+      }
+      
+      // Solicitar permissão de microfone com configurações otimizadas
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          sampleRate: 44100
+          autoGainControl: true,
+          sampleRate: 16000, // Reduzido para melhor compatibilidade
+          channelCount: 1    // Mono para PTT
         } 
       });
       
-      // Criar MediaRecorder
-      const recorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus'
-      });
+      // Verificar formatos suportados (prioridade: webm > ogg > mp4)
+      let mimeType = 'audio/webm;codecs=opus';
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'audio/ogg;codecs=opus';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+          mimeType = 'audio/mp4';
+          if (!MediaRecorder.isTypeSupported(mimeType)) {
+            mimeType = ''; // Usar padrão do navegador
+          }
+        }
+      }
+      
+      console.log('🎵 Usando mimetype:', mimeType);
+      
+      // Criar MediaRecorder com configurações otimizadas
+      const recorderOptions = mimeType ? { mimeType } : {};
+      const recorder = new MediaRecorder(stream, recorderOptions);
       
       const chunks = [];
       
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           chunks.push(event.data);
+          console.log('🎵 Chunk gravado:', event.data.size, 'bytes');
         }
       };
       
       recorder.onstop = () => {
-        // Parar todas as tracks do stream
+        console.log('🎵 Gravação parada, total de chunks:', chunks.length);
         stream.getTracks().forEach(track => track.stop());
+      };
+      
+      recorder.onerror = (event) => {
+        console.error('🎵 Erro no MediaRecorder:', event.error);
+        setRecordingError('Erro durante a gravação: ' + event.error);
       };
       
       // Definir estados
@@ -855,7 +970,7 @@ export default function ChatArea({
       setRecordingTime(0);
       
       // Iniciar gravação
-      recorder.start();
+      recorder.start(1000); // Gerar chunks a cada segundo
       
       // Iniciar contador de tempo
       const interval = setInterval(() => {
@@ -867,8 +982,8 @@ export default function ChatArea({
       await notifyRecordingStatus(true);
       
     } catch (error) {
-      console.error('Erro ao iniciar gravação:', error);
-      setRecordingError('Erro ao acessar microfone. Verifique as permissões.');
+      console.error('🎵 Erro ao iniciar gravação:', error);
+      setRecordingError(`Erro ao acessar microfone: ${error.message}`);
     }
   };
 
@@ -967,7 +1082,9 @@ export default function ChatArea({
     if (!selectedTicket) return;
     
     try {
-      await fetch(`${API_URL}/api/tickets/${selectedTicket.id}/recording-status`, {
+      console.log(`🎵 Enviando status de gravação: ${isRecording ? 'INICIANDO' : 'PARANDO'}`);
+      
+      const response = await fetch(apiUrl(`/api/tickets/${selectedTicket.id}/recording-status`), {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
@@ -975,45 +1092,100 @@ export default function ChatArea({
         },
         body: JSON.stringify({ isRecording })
       });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log(`🎵 Status de gravação ${isRecording ? 'iniciado' : 'parado'} com sucesso:`, result);
+      } else {
+        console.error(`🎵 Erro ao definir status de gravação:`, response.status, response.statusText);
+      }
     } catch (error) {
-      console.error('Erro ao notificar status de gravação:', error);
+      console.error('🎵 Erro ao notificar status de gravação:', error);
+    }
+  };
+
+  // Notificar status de digitação ao WhatsApp
+  const notifyTypingStatus = async (isTyping) => {
+    if (!selectedTicket) return;
+    
+    try {
+      console.log(`⌨️ Enviando status de digitação: ${isTyping ? 'INICIANDO' : 'PARANDO'}`);
+      
+      const response = await fetch(apiUrl(`/api/tickets/${selectedTicket.id}/typing-status`), {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ isTyping })
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log(`⌨️ Status de digitação ${isTyping ? 'iniciado' : 'parado'} com sucesso:`, result);
+      } else {
+        console.error(`⌨️ Erro ao definir status de digitação:`, response.status, response.statusText);
+      }
+    } catch (error) {
+      console.error('⌨️ Erro ao notificar status de digitação:', error);
     }
   };
 
   // Enviar mensagem de áudio
   const sendAudioMessage = async (audioBlob) => {
-    if (!selectedTicket || !audioBlob) return;
+    if (!selectedTicket || !audioBlob) {
+      console.error('🎵 Ticket ou audioBlob não disponível');
+      return;
+    }
     
     try {
       setUploadingFile(true);
       
-      // Criar FormData
-      const formData = new FormData();
-      // Tentar diferentes formatos de áudio dependendo do suporte do browser
-      let fileName = `audio_${Date.now()}`;
-      let audioFile;
+      console.log('🎵 Processando áudio para envio:', {
+        size: audioBlob.size,
+        type: audioBlob.type,
+        duration: recordingTime
+      });
       
-      // Verificar se o browser suporta conversão para wav
-      if (audioBlob.type === 'audio/webm;codecs=opus') {
-        // Converter para um formato mais compatível se possível
-        try {
-          // Criar um arquivo WAV ou MP3 se o browser suportar
-          audioFile = new File([audioBlob], `${fileName}.webm`, { type: 'audio/webm' });
-        } catch (error) {
-          console.log('Usando áudio webm original');
-          audioFile = new File([audioBlob], `${fileName}.webm`, { type: 'audio/webm' });
-        }
-      } else {
-        // Usar o formato original
-        const extension = audioBlob.type.includes('webm') ? 'webm' : 'ogg';
-        audioFile = new File([audioBlob], `${fileName}.${extension}`, { type: audioBlob.type });
+      // Validar se o áudio tem tamanho mínimo
+      if (audioBlob.size < 1000) {
+        throw new Error('Áudio muito curto ou corrompido');
       }
       
-  formData.append('file', audioFile);
-  formData.append('sender', 'user');
+      // Validar duração mínima
+      if (recordingTime < 1) {
+        throw new Error('Gravação muito curta (mínimo 1 segundo)');
+      }
       
-  // Enviar áudio
-  const response = await fetch(`${API_URL}/api/ticket-messages/${selectedTicket.id}/media`, {
+      // Criar FormData com informações detalhadas
+      const formData = new FormData();
+      
+      // Gerar nome único com timestamp
+      const timestamp = Date.now();
+      const fileName = `voice_note_${timestamp}.webm`;
+      
+      // Criar arquivo com tipo correto
+      const audioFile = new File([audioBlob], fileName, { 
+        type: audioBlob.type || 'audio/webm;codecs=opus'
+      });
+      
+      // Adicionar dados ao FormData
+      formData.append('file', audioFile);
+      formData.append('sender', 'user');
+      formData.append('messageType', 'audio');
+      formData.append('isVoiceNote', 'true'); // CRUCIAL: marcar como PTT
+      formData.append('audioDuration', recordingTime.toString());
+      
+      console.log('🎵 Enviando PTT:', {
+        fileName: fileName,
+        size: audioFile.size,
+        type: audioFile.type,
+        duration: recordingTime,
+        isVoiceNote: true
+      });
+      
+      // Enviar para API
+      const response = await fetch(apiUrl(`/api/ticket-messages/${selectedTicket.id}/media`), {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -1021,16 +1193,19 @@ export default function ChatArea({
         body: formData
       });
       
-      if (response.ok) {
-        console.log('Áudio enviado com sucesso');
-      } else {
-        console.error('Erro ao enviar áudio');
-        setRecordingError('Erro ao enviar áudio.');
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('🎵 Erro da API:', response.status, errorText);
+        throw new Error(`Erro no servidor: ${response.status} - ${errorText}`);
       }
       
+      const result = await response.json();
+      console.log('🎵 PTT enviado com sucesso:', result);
+      
     } catch (error) {
-      console.error('Erro ao enviar áudio:', error);
-      setRecordingError('Erro ao enviar áudio.');
+      console.error('🎵 Erro ao enviar PTT:', error);
+      setRecordingError(`Erro ao enviar áudio: ${error.message}`);
+      alert(`Erro ao enviar áudio: ${error.message}`);
     } finally {
       setUploadingFile(false);
     }

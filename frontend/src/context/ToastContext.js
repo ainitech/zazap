@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
+import { apiUrl } from '../utils/apiClient';
 
 const ToastContext = createContext();
 
@@ -142,13 +143,12 @@ export const ToastProvider = ({ children }) => {
 
   // Helper to create a ticket-action toast with common ticket operations.
   const addTicketActionToast = useCallback((ticketId, message = `Ação no ticket ${ticketId}`, { duration = 15000, type = 'info' } = {}) => {
-    const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
     const token = () => localStorage.getItem('token');
 
     const doRequest = async (path, method = 'POST', body = null) => {
-      const headers = { 'Authorization': `Bearer ${token()}` };
+  const headers = { 'Authorization': `Bearer ${token()}` };
       if (body) headers['Content-Type'] = 'application/json';
-      const resp = await fetch(`${API_URL}${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  const resp = await fetch(apiUrl(path), { method, headers, body: body ? JSON.stringify(body) : undefined });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
         throw new Error(err.error || 'request_failed');

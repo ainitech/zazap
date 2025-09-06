@@ -11,6 +11,7 @@ import {
   LinkIcon
 } from '@heroicons/react/24/outline';
 import { useSocket } from '../../context/SocketContext';
+import { apiUrl } from '../../utils/apiClient';
 
 const predefinedColors = [
   { name: 'Azul', value: 'bg-blue-500', text: 'text-blue-400', bg: 'bg-blue-900/20', border: 'border-blue-500/30' },
@@ -169,10 +170,11 @@ export default function ConversationList({
 
   // Filtrar tickets por termo de busca e por tipo (grupos/individuais)
   const filteredTickets = tickets.filter(ticket => {
-    // Filtro de busca
+    // Filtro de busca - incluir formattedNumber na busca
     const matchesSearch = ticket.contact.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (ticket.Contact?.name && ticket.Contact.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (ticket.Contact?.pushname && ticket.Contact.pushname.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (ticket.Contact?.formattedNumber && ticket.Contact.formattedNumber.includes(searchTerm)) ||
       (ticket.lastMessage && ticket.lastMessage.toLowerCase().includes(searchTerm.toLowerCase()));
 
     // Se grupos estão desabilitados, filtrar apenas contatos individuais
@@ -206,10 +208,9 @@ export default function ConversationList({
   const fetchPreviewMessages = async (ticketId) => {
     try {
       setLoadingPreview(true);
-      const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
       const token = localStorage.getItem('token');
       
-  const response = await fetch(`${API_URL}/api/ticket-messages/${ticketId}`, {
+      const response = await fetch(apiUrl(`/api/ticket-messages/${ticketId}`), {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -243,7 +244,13 @@ export default function ConversationList({
 
   const renderTicket = (ticket, showQueueInfo = true, isWaiting = false) => {
     const isRecent = isRecentlyActive(ticket.updatedAt);
-    const displayName = ticket.Contact?.name || ticket.Contact?.pushname || ticket.contact;
+    
+    // Priorizar nome do contato, depois pushname, depois número formatado, por último o contact completo
+    const displayName = ticket.Contact?.name || 
+                       ticket.Contact?.pushname || 
+                       ticket.Contact?.formattedNumber || 
+                       (ticket.contact ? ticket.contact.split('@')[0] : 'Desconhecido');
+                       
     const avatarUrl = ticket.Contact?.profilePicUrl;
     
   const handleAcceptClick = (e) => {

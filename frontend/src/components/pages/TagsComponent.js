@@ -12,7 +12,7 @@ import {
   FunnelIcon,
   Squares2X2Icon
 } from '@heroicons/react/24/outline';
-import { apiFetch, safeJson } from '../../utils/apiClient';
+import { apiFetch, safeJson, apiUrl } from '../../utils/apiClient';
 
 const predefinedColors = [
   { name: 'Azul', value: 'bg-blue-500', text: 'text-blue-500', bg: 'bg-blue-100', border: 'border-blue-200' },
@@ -65,13 +65,13 @@ export default function TagsComponent() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+  // API base is resolved via apiUrl helper
 
   const fetchTags = async () => {
     console.log('🏷️ TagsComponent: Carregando tags...');
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/tags`, {
+  const res = await fetch(apiUrl('/api/tags'), {
         headers: { Authorization: `Bearer ${localStorage.getItem('token') || token}` },
       });
       console.log('🏷️ TagsComponent: Resposta da API:', res.status, res.statusText);
@@ -125,8 +125,8 @@ export default function TagsComponent() {
 
     try {
       const url = editingTag 
-        ? `${API_URL}/api/tags/${editingTag.id}`
-        : `${API_URL}/api/tags`;
+        ? apiUrl(`/api/tags/${editingTag.id}`)
+        : apiUrl('/api/tags');
       
       const method = editingTag ? 'PUT' : 'POST';
       
@@ -170,7 +170,7 @@ export default function TagsComponent() {
     if (!window.confirm('Tem certeza que deseja excluir esta tag?')) return;
 
     try {
-      const res = await fetch(`${API_URL}/api/tags/${tagId}`, {
+  const res = await fetch(apiUrl(`/api/tags/${tagId}`), {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${localStorage.getItem('token') || token}` }
       });
@@ -186,7 +186,7 @@ export default function TagsComponent() {
 
   const handleAddPredefined = async (predefinedTag) => {
     try {
-      const res = await fetch(`${API_URL}/api/tags`, {
+  const res = await fetch(apiUrl('/api/tags'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

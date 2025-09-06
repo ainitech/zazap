@@ -30,7 +30,8 @@ export default function LoginPage() {
       if (isRegister) {
         console.log('🔑 LoginPage: Iniciando registro para:', form.email);
         // Registro
-        const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/auth/register`, {
+  const { apiUrl } = await import('../utils/apiClient');
+  const response = await fetch(apiUrl('/api/auth/register'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

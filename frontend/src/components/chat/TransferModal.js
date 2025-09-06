@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiUrl } from '../../utils/apiClient';
 import { 
   ArrowRightIcon,
   UserIcon,
@@ -8,7 +9,7 @@ import {
   InformationCircleIcon
 } from '@heroicons/react/24/outline';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+// API base is resolved via apiUrl helper
 
 export default function TransferModal({ 
   isOpen, 
@@ -33,7 +34,7 @@ export default function TransferModal({
 
   const fetchUsers = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/users`, {
+  const response = await fetch(apiUrl('/api/users'), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -49,7 +50,7 @@ export default function TransferModal({
 
   const fetchQueues = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/queues`, {
+  const response = await fetch(apiUrl('/api/queues'), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -69,7 +70,7 @@ export default function TransferModal({
 
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/tickets/${ticket.id}/transfer`, {
+  const response = await fetch(apiUrl(`/api/tickets/${ticket.id}/transfer`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -35,46 +35,31 @@ const server = createServer(app);
 const io = initializeSocket(server);
 
 // Middlewares
+// Permitir APENAS o frontend definido no .env (FRONTEND_URL ou FRONTEND_ORIGINS csv)
+const parseAllowedOrigins = () => {
+  const raw = process.env.FRONTEND_ORIGINS || process.env.FRONTEND_URL || '';
+  const fromEnv = raw
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+  if (fromEnv.length > 0) return fromEnv;
+  // Fallback amigável apenas em desenvolvimento
+  if ((process.env.NODE_ENV || 'development') !== 'production') {
+    return ['http://localhost:3000'];
+  }
+  return [];
+};
+
+const ALLOWED_ORIGINS = parseAllowedOrigins();
+const isAllowedOrigin = (origin) => !!origin && ALLOWED_ORIGINS.includes(origin);
+
 const corsOptions = {
   origin: function (origin, callback) {
     // Permitir requests sem origin (como mobile apps, Postman, etc)
     if (!origin) return callback(null, true);
-    
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:3001',
-      // Adicionar IPs locais comuns
-      'http://192.168.0.1:3000',
-      'http://192.168.0.1:3001',
-      'http://10.0.0.1:3000',
-      'http://10.0.0.1:3001',
-      // Permitir qualquer IP local na rede
-      /^http:\/\/192\.168\.\d+\.\d+:3000$/,
-      /^http:\/\/192\.168\.\d+\.\d+:3001$/,
-      /^http:\/\/10\.\d+\.\d+\.\d+:3000$/,
-      /^http:\/\/10\.\d+\.\d+\.\d+:3001$/,
-      /^http:\/\/172\.\d+\.\d+\.\d+:3000$/,
-      /^http:\/\/172\.\d+\.\d+\.\d+:3001$/,
-    ];
-    
-    // Verificar se a origem está na lista de permitidas
-    const isAllowed = allowedOrigins.some(allowedOrigin => {
-      if (typeof allowedOrigin === 'string') {
-        return allowedOrigin === origin;
-      } else if (allowedOrigin instanceof RegExp) {
-        return allowedOrigin.test(origin);
-      }
-      return false;
-    });
-    
-    if (isAllowed) {
-      callback(null, true);
-    } else {
-      console.log(`🚫 CORS bloqueado para origem: ${origin}`);
-      callback(new Error('Not allowed by CORS'));
-    }
+    if (isAllowedOrigin(origin)) return callback(null, true);
+    console.log(`🚫 CORS bloqueado para origem: ${origin}`);
+    return callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
@@ -88,7 +73,11 @@ app.use(express.urlencoded({ extended: true }));
 // Servir arquivos enviados
 // Caminho público correto: /uploads/arquivo.ext (NÃO /api/uploads)
 app.use('/uploads', (req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+  if (origin && isAllowedOrigin(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Vary', 'Origin');
+  }
   res.header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   res.header('Cache-Control', 'public, max-age=3600'); // Cache por 1 hora

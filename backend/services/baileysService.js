@@ -1,5 +1,4 @@
-import baileys from '@whiskeysockets/baileys';
-const { makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason } = baileys;
+import makeWASocket, { useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import qrcode from 'qrcode';
 import fs from 'fs/promises';
@@ -10,6 +9,49 @@ import { emitToTicket, emitToAll } from './socket.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Sanitiza o ID para um nome de pasta compatível com Windows/macOS/Linux
+const sanitizeForFs = (name) => String(name).replace(/[^a-zA-Z0-9._-]/g, '_');
+
+// Centraliza os arquivos de autenticação do Baileys em uma pasta única (configurável por env)
+const getAuthRoot = () => {
+  return process.env.BAILEYS_AUTH_ROOT
+    ? path.resolve(process.cwd(), process.env.BAILEYS_AUTH_ROOT)
+    : path.resolve(process.cwd(), 'privated', 'baileys');
+};
+
+const getAuthDir = (sessionId) => {
+  // Normalizar sessionId - sempre usar apenas o número base sem device ID
+  const baseNumber = sessionId.split(':')[0]; // Remove o :XX se existir
+  const sanitized = sanitizeForFs(baseNumber);
+  return path.resolve(getAuthRoot(), sanitized);
+};
+
+// Função auxiliar para encontrar sessão por ID normalizado
+const findSessionIndex = (sessionId) => {
+  const baseNumber = sessionId.split(':')[0];
+  return sessions.findIndex(s => {
+    const sBaseNumber = s.sessionId.split(':')[0];
+    return sBaseNumber === baseNumber;
+  });
+};
+
+// Função para limpar e recriar pasta de autenticação
+const cleanAndRecreateAuthDir = (sessionId) => {
+  const authDir = getAuthDir(sessionId);
+  try {
+    // Remover pasta existente se existir
+    if (fs.existsSync(authDir)) {
+      fs.rmSync(authDir, { recursive: true, force: true });
+      console.log(`🧹 Pasta de auth limpa: ${authDir}`);
+    }
+    // Recriar pasta
+    fs.mkdirSync(authDir, { recursive: true });
+    console.log(`📁 Pasta de auth recriada: ${authDir}`);
+  } catch (error) {
+    console.error(`❌ Erro ao limpar/recriar pasta de auth:`, error);
+  }
+};
 
 // Interface para sessões
 class BaileysSession {
@@ -24,6 +66,7 @@ class BaileysSession {
 const sessions = [];
 
 // Função para criar ou atualizar contato no Baileys
+// IMPORTANTE: Não sobrescrever name/pushname existentes com valores nulos ou vazios
 const createOrUpdateContactBaileys = async (whatsappId, sessionId, sock) => {
   try {
     console.log(`👤 Criando/atualizando contato Baileys: ${whatsappId} na sessão: ${sessionId}`);
@@ -62,8 +105,9 @@ const createOrUpdateContactBaileys = async (whatsappId, sessionId, sock) => {
     const contactData = {
       whatsappId,
       sessionId,
-      name: contactInfo?.notify || null,
-      pushname: contactInfo?.notify || null,
+      // Só definir name/pushname se houver valor novo; caso contrário preservamos existente
+      ...(contactInfo?.notify ? { name: contactInfo.notify } : {}),
+      ...(contactInfo?.notify ? { pushname: contactInfo.notify } : {}),
       formattedNumber: phoneNumber || null,
       profilePicUrl: profilePicUrl || null,
       isBlocked: false,
@@ -73,9 +117,13 @@ const createOrUpdateContactBaileys = async (whatsappId, sessionId, sock) => {
     };
     
     if (contact) {
-      // Atualizar contato existente
-      await contact.update(contactData);
-      console.log(`✅ Contato Baileys atualizado: ${contactData.name || contactData.whatsappId}`);
+      // Garantir que não apagaremos name/pushname existentes
+      const updatePayload = { ...contactData };
+      if (!('name' in updatePayload)) updatePayload.name = contact.name; // preserva
+      if (!('pushname' in updatePayload)) updatePayload.pushname = contact.pushname; // preserva
+
+      await contact.update(updatePayload);
+      console.log(`✅ Contato Baileys atualizado: ${(updatePayload.name || updatePayload.pushname || updatePayload.whatsappId)}`);
       
       // Emitir evento de contato atualizado
       emitToAll('contact-updated', contact);
@@ -103,15 +151,21 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
     console.log(`Criando sessão Baileys: ${sessionId}`);
 
     // Verificar se já existe uma sessão
-    const existingSessionIndex = sessions.findIndex(s => s.sessionId === sessionId);
+    const existingSessionIndex = findSessionIndex(sessionId);
     if (existingSessionIndex !== -1) {
-      console.log(`Removendo sessão existente: ${sessionId}`);
+      console.log(`Removendo sessão existente: ${sessions[existingSessionIndex].sessionId} (busca: ${sessionId})`);
       await sessions[existingSessionIndex].socket.end();
       sessions.splice(existingSessionIndex, 1);
     }
 
-    // Configurar autenticação
-    const authDir = path.resolve(process.cwd(), `baileys_auth_${sessionId}`);
+    // Limpar e recriar pasta de autenticação para evitar conflitos
+    cleanAndRecreateAuthDir(sessionId);
+    
+    // Garantir que diretórios existam
+    const authRoot = getAuthRoot();
+    await fs.mkdir(authRoot, { recursive: true });
+    const authDir = getAuthDir(sessionId);
+    await fs.mkdir(authDir, { recursive: true });
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     
     // Obter versão mais recente do Baileys
@@ -146,17 +200,10 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
     sessions.push(session);
 
     // LOG DO SOCKET CRIADO PARA ANÁLISE
-    console.log(`🔍 === ANÁLISE DO SOCKET BAILEYS CRIADO ===`);
-    console.log(`📋 Tipo do socket:`, typeof sock);
-    console.log(`📋 Propriedades do socket:`, Object.keys(sock));
-    console.log(`📋 Métodos do socket:`, Object.getOwnPropertyNames(Object.getPrototypeOf(sock)));
-    if (sock.user) {
-      console.log(`📋 sock.user:`, JSON.stringify(sock.user, null, 2));
-    }
+    // Logs detalhados do socket (reduzidos para evitar ruído em produção)
     if (sock.authState) {
-      console.log(`📋 sock.authState existe:`, !!sock.authState);
+      console.log(`sock.authState existe:`, !!sock.authState);
     }
-    console.log(`🔍 === FIM DA ANÁLISE DO SOCKET ===`);
 
     // Evento para salvar credenciais
     sock.ev.on('creds.update', saveCreds);
@@ -265,8 +312,9 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
         }
         
         // Remover da lista de sessões
-        const sessionIndex = sessions.findIndex(s => s.sessionId === sessionId);
+        const sessionIndex = findSessionIndex(sessionId);
         if (sessionIndex !== -1) {
+          console.log(`🗑️ Removendo sessão: ${sessions[sessionIndex].sessionId} (busca: ${sessionId})`);
           sessions.splice(sessionIndex, 1);
         }
         
@@ -298,9 +346,13 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
       if (type === 'notify' && messages && messages.length > 0) {
         for (const msg of messages) {
           if (!msg.key.fromMe && !msg.key.remoteJid.includes('@broadcast')) {
+            console.log(`📨 Mensagem recebida via Baileys:`, msg);
             // Usar apenas o callback onMessage que já está configurado corretamente
             if (onMessage) {
-              await onMessage(msg, sock);
+              console.log(`🔄 Chamando callback onMessage para sessão ${sessionId}`);
+              await onMessage(msg); // Remover o segundo parâmetro
+            } else {
+              console.log(`⚠️ Callback onMessage não definido para sessão ${sessionId}`);
             }
           }
         }
@@ -318,7 +370,7 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
     console.error(`Erro ao criar sessão Baileys ${sessionId}:`, error);
     
     // Remover da lista em caso de erro
-    const sessionIndex = sessions.findIndex(s => s.sessionId === sessionId);
+    const sessionIndex = findSessionIndex(sessionId);
     if (sessionIndex !== -1) {
       sessions.splice(sessionIndex, 1);
     }
@@ -331,12 +383,24 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
  * Obter uma sessão existente
  */
 export const getBaileysSession = (sessionId) => {
-  const sessionIndex = sessions.findIndex(s => s.sessionId === sessionId);
+  // Normalizar sessionId para encontrar a sessão correta
+  const baseNumber = sessionId.split(':')[0]; // Remove o :XX se existir
+  
+  // Procurar por uma sessão que tenha o mesmo número base
+  const sessionIndex = sessions.findIndex(s => {
+    const sBaseNumber = s.sessionId.split(':')[0];
+    return sBaseNumber === baseNumber;
+  });
   
   if (sessionIndex === -1) {
-    throw new Error("Sessão Baileys não encontrada");
+    console.log(`❌ Sessão Baileys não encontrada para ${sessionId} (base: ${baseNumber})`);
+    const available = sessions.map(s => s.sessionId).join(', ');
+    console.log(`📋 Sessões disponíveis: ${available || 'nenhuma'}`);
+    // Não lançar erro aqui; retornar null permite chamadas 'safe' em verificações
+    return null;
   }
   
+  console.log(`✅ Sessão Baileys encontrada: ${sessions[sessionIndex].sessionId} para busca ${sessionId}`);
   return sessions[sessionIndex].socket;
 };
 
@@ -369,17 +433,171 @@ export const sendText = async (sessionId, to, text) => {
 };
 
 /**
+ * Gerar waveform artificial para nota de voz
+ */
+const generateWaveform = (duration = 5) => {
+  // Gerar um waveform artificial com variações realistas
+  const samples = Math.max(32, Math.floor(duration * 10)); // Mínimo 32 amostras
+  const waveform = new Uint8Array(samples);
+  
+  console.log(`🎵 Gerando waveform para ${duration}s com ${samples} amostras`);
+  
+  for (let i = 0; i < samples; i++) {
+    // Criar padrão de onda com variações mais realistas
+    const progress = i / samples;
+    
+    // Envelope natural (começa baixo, sobe, depois desce)
+    let envelope = Math.sin(progress * Math.PI);
+    
+    // Variação aleatória para parecer fala natural
+    const variation = Math.random() * 0.4 + 0.6; // Entre 0.6 e 1.0
+    
+    // Padrão de fala (algumas pausas e picos)
+    const speechPattern = Math.sin(progress * Math.PI * 4) * 0.3 + 0.7;
+    
+    // Adicionar alguns picos e vales para parecer mais natural
+    if (Math.random() < 0.1) {
+      envelope *= 1.5; // Picos ocasionais
+    } else if (Math.random() < 0.05) {
+      envelope *= 0.3; // Vales ocasionais
+    }
+    
+    const amplitude = Math.min(127, Math.max(10, envelope * variation * speechPattern * 100));
+    waveform[i] = Math.floor(amplitude);
+  }
+  
+  // Log de amostra para debug
+  const sampleValues = Array.from(waveform.slice(0, 10)).join(', ');
+  console.log(`🎵 Primeiras 10 amostras do waveform: [${sampleValues}...]`);
+  
+  return waveform;
+};
+
+/**
+ * Calcular duração aproximada do áudio baseada no tamanho do arquivo
+ */
+const estimateAudioDuration = (bufferSize, bitrate = 32000) => {
+  // Estimativa aproximada: tamanho do arquivo / bitrate
+  const estimatedSeconds = Math.max(1, Math.floor(bufferSize / (bitrate / 8)));
+  return Math.min(estimatedSeconds, 60); // Máximo 60 segundos
+};
+
+/**
+ * Enviar áudio como PTT (Push-to-Talk) - mensagem de voz
+ */
+export const sendVoiceNote = async (sessionId, to, buffer, mimetype = 'audio/ogg; codecs=opus', duration = null) => {
+  const sock = getBaileysSession(sessionId);
+  if (!sock) throw new Error('Sessão Baileys não encontrada');
+
+  try {
+    console.log('🎵 Enviando PTT via Baileys:', {
+      to,
+      bufferSize: buffer.length,
+      mimetype,
+      duration
+    });
+    
+    // Validar buffer
+    if (!buffer || buffer.length === 0) {
+      throw new Error('Buffer de áudio vazio');
+    }
+    
+    // Calcular duração mais precisa
+    let audioDuration = duration;
+    if (!audioDuration || audioDuration <= 0) {
+      // Estimativa baseada no tamanho do arquivo e taxa de bits
+      const avgBitrate = 32000; // 32kbps para opus
+      audioDuration = Math.max(1, Math.floor(buffer.length * 8 / avgBitrate));
+      audioDuration = Math.min(audioDuration, 300); // Máximo 5 minutos
+    }
+    
+    console.log('🎵 Duração calculada:', audioDuration, 'segundos');
+    
+    // Gerar waveform mais realista
+    const generateRealisticWaveform = (duration) => {
+      const sampleCount = Math.min(64, duration * 2); // 2 amostras por segundo, máximo 64
+      const waveform = new Uint8Array(sampleCount);
+      
+      for (let i = 0; i < sampleCount; i++) {
+        // Gerar valores mais realistas (0-100)
+        const baseLevel = 20 + Math.random() * 40; // 20-60
+        const variation = Math.sin(i * 0.5) * 20; // Variação senoidal
+        waveform[i] = Math.max(0, Math.min(100, Math.floor(baseLevel + variation)));
+      }
+      
+      return waveform;
+    };
+    
+    const waveform = generateRealisticWaveform(audioDuration);
+    
+    // Garantir mimetype compatível
+    let audioMimetype = mimetype;
+    if (!mimetype.includes('opus') && !mimetype.includes('aac')) {
+      audioMimetype = 'audio/ogg; codecs=opus';
+      console.log('🎵 Convertendo mimetype para:', audioMimetype);
+    }
+    
+    // Mensagem de voz otimizada para WhatsApp
+    const voiceMessage = {
+      audio: buffer,
+      mimetype: audioMimetype,
+      ptt: true,              // OBRIGATÓRIO para PTT
+      seconds: audioDuration,
+      waveform: waveform,
+      fileLength: buffer.length
+    };
+    
+    console.log('🎵 Configuração final do PTT:', {
+      ptt: voiceMessage.ptt,
+      seconds: voiceMessage.seconds,
+      waveformLength: voiceMessage.waveform.length,
+      mimetype: voiceMessage.mimetype,
+      fileLength: voiceMessage.fileLength
+    });
+    
+    // Enviar mensagem
+    const result = await sock.sendMessage(to, voiceMessage);
+    
+    console.log('✅ PTT enviado com sucesso via Baileys');
+    return result;
+    
+  } catch (error) {
+    console.error('❌ Erro ao enviar PTT via Baileys:', error);
+    
+    // Log detalhado do erro
+    console.error('🎵 Detalhes do erro:', {
+      message: error.message,
+      stack: error.stack,
+      sessionId,
+      to,
+      bufferSize: buffer?.length
+    });
+    
+    throw error;
+  }
+};
+
+/**
  * Enviar mídia
  */
-export const sendMedia = async (sessionId, to, buffer, mimetype, caption) => {
+export const sendMedia = async (sessionId, to, buffer, mimetype, caption, options = {}) => {
   const sock = getBaileysSession(sessionId);
   if (!sock) throw new Error('Sessão Baileys não encontrada');
 
   let content;
   try {
     if (mimetype?.startsWith('audio/')) {
-      // Enviar como mensagem de voz (ptt) para parecer gravado na hora
-      content = { audio: buffer, mimetype, ptt: true };
+      // Para áudios, verificar se deve ser enviado como nota de voz
+      const isVoiceNote = options.isVoiceNote !== false; // Por padrão, áudios são notas de voz
+      
+      if (isVoiceNote) {
+        console.log(`🎵 Enviando áudio como nota de voz (PTT)`);
+        return await sendVoiceNote(sessionId, to, buffer, mimetype, options.duration);
+      } else {
+        console.log(`🎵 Enviando áudio como arquivo de mídia`);
+        content = { audio: buffer, mimetype };
+        if (caption) content.caption = caption;
+      }
     } else if (mimetype?.startsWith('image/')) {
       content = { image: buffer, mimetype };
       if (caption) content.caption = caption;
@@ -393,6 +611,7 @@ export const sendMedia = async (sessionId, to, buffer, mimetype, caption) => {
     }
     return await sock.sendMessage(to, content);
   } catch (err) {
+    console.error('Erro ao enviar mídia, tentando fallback:', err);
     // Fallback como documento se falhar
     const fallback = { document: buffer, mimetype };
     if (caption) fallback.caption = caption;
@@ -425,7 +644,7 @@ export const sendPoll = async (sessionId, to, question, options, opts = {}) => {
  */
 export const cleanupBaileysSession = async (sessionId) => {
   try {
-    const sessionIndex = sessions.findIndex(s => s.sessionId === sessionId);
+    const sessionIndex = findSessionIndex(sessionId);
     if (sessionIndex !== -1) {
       const session = sessions[sessionIndex];
       
@@ -440,7 +659,7 @@ export const cleanupBaileysSession = async (sessionId) => {
     
     // Limpar arquivos de autenticação
     try {
-      const authPath = path.resolve(process.cwd(), `baileys_auth_${sessionId}`);
+  const authPath = getAuthDir(sessionId);
       await fs.rm(authPath, { recursive: true, force: true });
       console.log(`Arquivos de autenticação da sessão ${sessionId} removidos`);
     } catch (error) {
@@ -488,13 +707,20 @@ export const shutdownBaileysSession = async (sessionId) => {
   try {
     console.log(`Desligando sessão Baileys: ${sessionId}`);
     
-    const sessionIndex = sessions.findIndex(s => s.sessionId === sessionId);
+    // Normalizar sessionId para encontrar a sessão correta
+    const baseNumber = sessionId.split(':')[0];
+    const sessionIndex = sessions.findIndex(s => {
+      const sBaseNumber = s.sessionId.split(':')[0];
+      return sBaseNumber === baseNumber;
+    });
+    
     if (sessionIndex === -1) {
       console.warn(`Sessão ${sessionId} não encontrada para desligar`);
       return;
     }
 
     const session = sessions[sessionIndex];
+    console.log(`🔄 Sessão encontrada: ${session.sessionId} para desligar ${sessionId}`);
     
     // Fazer logout e destruir a sessão
     try {
@@ -507,7 +733,7 @@ export const shutdownBaileysSession = async (sessionId) => {
     sessions.splice(sessionIndex, 1);
     
     // Remover arquivos da sessão
-    const authPath = path.resolve(process.cwd(), `baileys_auth_${sessionId}`);
+  const authPath = getAuthDir(sessionId);
     
     try {
       await fs.rm(authPath, { recursive: true, force: true });
@@ -527,7 +753,7 @@ export const shutdownBaileysSession = async (sessionId) => {
  * Desconectar sessão manualmente
  */
 export const disconnectBaileysSession = async (sessionId) => {
-  const sessionIndex = sessions.findIndex(s => s.sessionId === sessionId);
+  const sessionIndex = findSessionIndex(sessionId);
   if (sessionIndex !== -1) {
     const session = sessions[sessionIndex];
     try {
@@ -554,7 +780,7 @@ export const listBaileysSessions = () => {
  * Obter status de uma sessão
  */
 export const getBaileysSessionStatus = (sessionId) => {
-  const sessionIndex = sessions.findIndex(s => s.sessionId === sessionId);
+  const sessionIndex = findSessionIndex(sessionId);
   return sessionIndex !== -1 ? sessions[sessionIndex].status : 'disconnected';
 };
 

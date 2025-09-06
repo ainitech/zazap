@@ -1,18 +1,36 @@
 {
   "watch": [
-    "."
+    "index.js",
+    "routes/**/*.js",
+    "controllers/**/*.js",
+    "services/**/*.js",
+    "models/**/*.js",
+    "middleware/**/*.js",
+    "config/**/*.js"
   ],
   "ignore": [
     "node_modules/**/*",
     "uploads/**/*",
-    "baileys_auth_*/**/*",
+    "privated/**/*",
+    "**/privated/**",
+    "**/*.json",
+    "**/baileys/**",
+    "**/.wwebjs_*/*",
     ".wwebjs_auth/**/*",
+    "**/auth_info_baileys/**",
+    "**/creds.json",
+    "**/pre-key-*.json", 
+    "**/sender-key-*.json",
+    "**/session-*.json",
+    "**/app-state-sync-key-*.json",
     "*.log",
     "*.tmp"
   ],
-  "ext": "js,json",
+  "ext": "js",
+  "verbose": false,
+  "legacyWatch": true,
   "env": {
     "NODE_ENV": "development"
   },
-  "delay": 1000
+  "delay": 2000
 }

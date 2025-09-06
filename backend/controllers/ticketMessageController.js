@@ -1,4 +1,5 @@
 import { TicketMessage, Ticket, Session, Contact, MessageReaction, User, Queue } from '../models/index.js';
+import { Op } from 'sequelize';
 import { sendText as sendTextBaileys, getBaileysSession, sendMedia as sendMediaBaileys } from '../services/baileysService.js';
 import { emitToTicket, emitToAll } from '../services/socket.js';
 import path from 'path';
@@ -103,6 +104,24 @@ export const listMessages = async (req, res) => {
   } catch (err) {
     console.error(`❌ Erro ao listar mensagens do ticket ${ticketId}:`, err);
     res.status(500).json({ error: err.message });
+  }
+};
+
+// Listar apenas mídias/anexos de um ticket
+export const listTicketMedia = async (req, res) => {
+  const { ticketId } = req.params;
+  try {
+    const mediaMessages = await TicketMessage.findAll({
+      where: {
+        ticketId,
+        fileUrl: { [Op.ne]: null }
+      },
+      order: [['timestamp', 'ASC']]
+    });
+    return res.json(mediaMessages);
+  } catch (error) {
+    console.error(`❌ Erro ao listar mídias do ticket ${ticketId}:`, error);
+    return res.status(500).json({ error: 'Erro ao listar mídias do ticket' });
   }
 };
 

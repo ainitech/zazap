@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { apiUrl } from '../../utils/apiClient';
 import { 
   ExclamationTriangleIcon,
   FlagIcon,
@@ -7,7 +8,7 @@ import {
   CheckIcon
 } from '@heroicons/react/24/outline';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+// API base is resolved via apiUrl helper
 
 export default function PriorityModal({ 
   isOpen, 
@@ -61,7 +62,7 @@ export default function PriorityModal({
   const handleSave = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/tickets/${ticket.id}/priority`, {
+  const response = await fetch(apiUrl(`/api/tickets/${ticket.id}/priority`), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

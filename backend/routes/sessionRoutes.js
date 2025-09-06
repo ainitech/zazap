@@ -97,6 +97,35 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
+// PUT /api/sessions/:id - Atualizar sessão (ex: defaultQueueId)
+router.put('/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { defaultQueueId, status } = req.body;
+    console.log(`🛠️ [PUT /sessions/${id}] User=${req.user?.id} Body=`, req.body);
+
+    const session = await Session.findOne({ where: { id, userId: req.user.id } });
+    if (!session) {
+      console.log(`⚠️ Sessão id=${id} não encontrada para user=${req.user?.id}`);
+      return res.status(404).json({ error: 'Sessão não encontrada para este usuário' });
+    }
+
+    const payload = {};
+    if (typeof defaultQueueId !== 'undefined') payload.defaultQueueId = defaultQueueId || null;
+    if (typeof status !== 'undefined') payload.status = status;
+
+    await session.update(payload);
+
+    emitToAll('session-updated', { id: session.id, ...payload });
+    console.log(`✅ Sessão ${session.id} atualizada:`, payload);
+
+    return res.json({ message: 'Sessão atualizada', session });
+  } catch (error) {
+    console.error('Erro ao atualizar sessão:', error);
+    return res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
 // POST /api/sessions/:id/start - Iniciar sessão
 router.post('/:id/start', authenticateToken, async (req, res) => {
   try {

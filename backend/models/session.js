@@ -28,6 +28,14 @@ const Session = sequelize.define('Session', {
     allowNull: false,
     defaultValue: 'disconnected',
   },
+  defaultQueueId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'queues',
+      key: 'id'
+    }
+  }
 }, {
   tableName: 'sessions',
   timestamps: true,

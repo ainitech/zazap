@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiUrl } from '../../utils/apiClient';
 import { 
   PuzzlePieceIcon, 
   CheckCircleIcon, 
@@ -9,7 +10,7 @@ import {
   ArrowTopRightOnSquareIcon
 } from '@heroicons/react/24/outline';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+// API base is resolved via apiUrl helper
 
 export default function IntegrationsComponent() {
   const [integrations, setIntegrations] = useState([]);
@@ -37,7 +38,7 @@ export default function IntegrationsComponent() {
 
   const fetchIntegrations = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/integrations`, {
+  const response = await fetch(apiUrl('/api/integrations'), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -58,7 +59,7 @@ export default function IntegrationsComponent() {
 
   const createIntegration = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/integrations`, {
+  const response = await fetch(apiUrl('/api/integrations'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -85,7 +86,7 @@ export default function IntegrationsComponent() {
     if (!window.confirm('Tem certeza que deseja excluir esta integração?')) return;
 
     try {
-      const response = await fetch(`${API_URL}/api/integrations/${integrationId}`, {
+  const response = await fetch(apiUrl(`/api/integrations/${integrationId}`), {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -105,7 +106,7 @@ export default function IntegrationsComponent() {
 
   const toggleIntegration = async (integrationId, isActive) => {
     try {
-      const response = await fetch(`${API_URL}/api/integrations/${integrationId}`, {
+  const response = await fetch(apiUrl(`/api/integrations/${integrationId}`), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

@@ -1,5 +1,5 @@
 
-import { Queue, User, UserQueue, Ticket, Contact } from '../models/index.js';
+import { Queue, User, UserQueue, Ticket, Contact, Integration } from '../models/index.js';
 import { emitToAll } from '../services/socket.js';
 import { Sequelize } from 'sequelize';
 import sequelize from '../services/sequelize.js';
@@ -17,7 +17,15 @@ export const createQueue = async (req, res) => {
       integration, 
       fileList, 
       greetingMessage,
+      outOfHoursMessage,
       autoReceiveMessages,
+      autoAssignment,
+      autoReply,
+      autoClose,
+      autoCloseTime,
+      feedbackCollection,
+      feedbackMessage,
+      isActive,
       options 
     } = req.body;
 
@@ -43,11 +51,19 @@ export const createQueue = async (req, res) => {
       color: color || '#0420BF',
       botOrder: botOrder || 0,
       closeTicket: closeTicket || false,
-      rotation: rotation || 0,
+      rotation: rotation || 'round-robin',
       integration: integration || null,
       fileList: fileList || null,
       greetingMessage: greetingMessage || null,
+      outOfHoursMessage: outOfHoursMessage || null,
       autoReceiveMessages: autoReceiveMessages || false,
+      autoAssignment: autoAssignment || false,
+      autoReply: autoReply || false,
+      autoClose: autoClose || false,
+      autoCloseTime: autoCloseTime || 60,
+      feedbackCollection: feedbackCollection || false,
+      feedbackMessage: feedbackMessage || null,
+      isActive: isActive !== undefined ? isActive : true,
       options: options || null
     });
     
@@ -71,6 +87,11 @@ export const listQueues = async (req, res) => {
         {
           model: User,
           through: { attributes: [] }, // Não incluir campos da tabela intermediária
+          required: false
+        },
+        {
+          model: Integration,
+          through: { attributes: [] },
           required: false
         }
       ],
@@ -242,126 +263,13 @@ export const moveTicketToQueue = async (req, res) => {
   }
 };
 
-// Aceitar ticket (atribuir a um usuário)
-export const acceptTicket = async (req, res) => {
-  try {
-    const { ticketId, userId } = req.body;
-    
-    const ticket = await Ticket.findByPk(ticketId);
-    if (!ticket) {
-      return res.status(404).json({ error: 'Ticket não encontrado' });
-    }
-    
-    const user = await User.findByPk(userId);
-    if (!user) {
-      return res.status(404).json({ error: 'Usuário não encontrado' });
-    }
-    
-    await ticket.update({
-      assignedUserId: userId,
-      chatStatus: 'accepted'
-    });
-    
-    console.log(`✅ Ticket #${ticketId} aceito pelo usuário ${user.name}`);
-    
-    // Buscar ticket atualizado com associações
-    const updatedTicket = await Ticket.findByPk(ticketId, {
-      include: [
-        { model: Queue, required: false },
-        { model: User, as: 'AssignedUser', required: false },
-        { model: Contact, required: false }
-      ]
-    });
-    
-    // Emitir atualização via WebSocket
-    emitToAll('ticket-accepted', updatedTicket);
-    
-    res.json({ message: 'Ticket aceito com sucesso', ticket: updatedTicket });
-  } catch (error) {
-    console.error('❌ Erro ao aceitar ticket:', error);
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// Resolver ticket
-export const resolveTicket = async (req, res) => {
-  try {
-    const { ticketId } = req.params;
-    
-    const ticket = await Ticket.findByPk(ticketId);
-    if (!ticket) {
-      return res.status(404).json({ error: 'Ticket não encontrado' });
-    }
-    
-    await ticket.update({
-      chatStatus: 'resolved'
-    });
-    
-    console.log(`✅ Ticket #${ticketId} resolvido`);
-    
-    // Buscar ticket atualizado com associações
-    const updatedTicket = await Ticket.findByPk(ticketId, {
-      include: [
-        { model: Queue, required: false },
-        { model: User, as: 'AssignedUser', required: false },
-        { model: Contact, required: false }
-      ]
-    });
-    
-    // Emitir atualização via WebSocket
-    emitToAll('ticket-resolved', updatedTicket);
-    
-    res.json({ message: 'Ticket resolvido com sucesso', ticket: updatedTicket });
-  } catch (error) {
-    console.error('❌ Erro ao resolver ticket:', error);
-    res.status(500).json({ error: error.message });
-  }
-};
-// Transferir ticket para outra fila
-export const transferTicket = async (req, res) => {
-  try {
-    const { ticketId } = req.params;
-    const { queueId } = req.body;
-
-    if (!queueId) {
-      return res.status(400).json({ error: 'queueId é obrigatório para transferência.' });
-    }
-
-    const ticket = await Ticket.findByPk(ticketId);
-    if (!ticket) {
-      return res.status(404).json({ error: 'Ticket não encontrado' });
-    }
-
-    const queue = await Queue.findByPk(queueId);
-    if (!queue) {
-      return res.status(404).json({ error: 'Fila de destino não encontrada' });
-    }
-
-    await ticket.update({ queueId });
-
-    // Buscar ticket atualizado com associações
-    const updatedTicket = await Ticket.findByPk(ticketId, {
-      include: [
-        { model: Queue, required: false },
-        { model: User, as: 'AssignedUser', required: false },
-        { model: Contact, required: false }
-      ]
-    });
-
-    // Emitir atualização via WebSocket
-    emitToAll('ticket-queue-updated', updatedTicket);
-
-    res.json({ message: 'Ticket transferido com sucesso', ticket: updatedTicket });
-  } catch (error) {
-    console.error('❌ Erro ao transferir ticket:', error);
-    res.status(500).json({ error: error.message });
-  }
-};
-
 // Atualizar fila
 export const updateQueue = async (req, res) => {
   try {
     const { queueId } = req.params;
+    console.log('📝 Atualizando fila ID:', queueId);
+    console.log('📝 Dados recebidos:', req.body);
+    
     const { 
       name, 
       color, 
@@ -371,7 +279,15 @@ export const updateQueue = async (req, res) => {
       integration, 
       fileList, 
       greetingMessage,
+      outOfHoursMessage,
       autoReceiveMessages,
+      autoAssignment,
+      autoReply,
+      autoClose,
+      autoCloseTime,
+      feedbackCollection,
+      feedbackMessage,
+      isActive,
       options 
     } = req.body;
 
@@ -399,8 +315,18 @@ export const updateQueue = async (req, res) => {
     if (integration !== undefined) updatedData.integration = integration;
     if (fileList !== undefined) updatedData.fileList = fileList;
     if (greetingMessage !== undefined) updatedData.greetingMessage = greetingMessage;
+    if (outOfHoursMessage !== undefined) updatedData.outOfHoursMessage = outOfHoursMessage;
     if (autoReceiveMessages !== undefined) updatedData.autoReceiveMessages = autoReceiveMessages;
+    if (autoAssignment !== undefined) updatedData.autoAssignment = autoAssignment;
+    if (autoReply !== undefined) updatedData.autoReply = autoReply;
+    if (autoClose !== undefined) updatedData.autoClose = autoClose;
+    if (autoCloseTime !== undefined) updatedData.autoCloseTime = autoCloseTime;
+    if (feedbackCollection !== undefined) updatedData.feedbackCollection = feedbackCollection;
+    if (feedbackMessage !== undefined) updatedData.feedbackMessage = feedbackMessage;
+    if (isActive !== undefined) updatedData.isActive = isActive;
     if (options !== undefined) updatedData.options = options;
+
+    console.log('📝 Dados que serão atualizados:', updatedData);
 
     await queue.update(updatedData);
     

@@ -44,7 +44,7 @@ const ButtonModal = ({ isOpen, onClose, ticketId, onSendSuccess }) => {
     setLoading(true);
 
     try {
-      const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+  const { apiUrl } = await import('../../utils/apiClient');
       const token = localStorage.getItem('token');
 
       const payload = {
@@ -54,7 +54,7 @@ const ButtonModal = ({ isOpen, onClose, ticketId, onSendSuccess }) => {
         allowMultipleAnswers: false
       };
 
-      const response = await fetch(`${API_URL}/api/buttons/poll`, {
+  const response = await fetch(apiUrl('/api/buttons/poll'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import io from 'socket.io-client';
+import { API_BASE_URL } from '../utils/apiClient';
 import { useToast } from './ToastContext';
 
 const SocketContext = createContext();
@@ -19,7 +20,7 @@ export const SocketProvider = ({ children }) => {
   const socketRef = useRef(null);
   const toast = useToast();
 
-  const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+  const API_URL = API_BASE_URL || '';
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -28,7 +29,7 @@ export const SocketProvider = ({ children }) => {
     try {
       console.log('🔗 Conectando ao WebSocket...');
       
-      const newSocket = io(API_URL, {
+  const newSocket = io(API_URL || undefined, {
         auth: {
           token: token
         },
@@ -117,7 +118,7 @@ export const SocketProvider = ({ children }) => {
 
               // Enviar ao backend
               const token = localStorage.getItem('token');
-              const resp = await fetch((process.env.REACT_APP_API_URL || '') + '/api/push/subscribe', {
+              const resp = await fetch((API_URL || '') + '/api/push/subscribe', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify(sub)

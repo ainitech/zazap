@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+import { apiUrl } from '../utils/apiClient';
 
 export function useTicketTags(ticketId) {
   const [tags, setTags] = useState([]);
@@ -22,7 +22,7 @@ export function useTicketTags(ticketId) {
     setError(null);
     
     try {
-      const response = await fetch(`${API_URL}/api/tags/ticket/${ticketId}`, {
+      const response = await fetch(apiUrl(`/api/tags/ticket/${ticketId}`), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -47,10 +47,10 @@ export function useTicketTags(ticketId) {
     if (!ticketId) return false;
     
     try {
-      const response = await fetch(`${API_URL}/api/tags/ticket/${ticketId}/tag/${tagId}`, {
+      const response = await fetch(apiUrl(`/api/tags/ticket/${ticketId}/tag/${tagId}`), {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${localStorage.getToken()}`
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
       });
 
@@ -72,7 +72,7 @@ export function useTicketTags(ticketId) {
     if (!ticketId) return false;
     
     try {
-      const response = await fetch(`${API_URL}/api/tags/ticket/${ticketId}/tag/${tagId}`, {
+      const response = await fetch(apiUrl(`/api/tags/ticket/${ticketId}/tag/${tagId}`), {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`

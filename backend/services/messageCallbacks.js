@@ -3,6 +3,13 @@ import { emitToAll } from './socket.js';
 import { sendText as sendTextBaileys } from './baileysService.js';
 import { getBaileysSession } from './baileysService.js';
 import { Session, Ticket, Queue, User, TicketMessage, Contact } from '../models/index.js';
+import emitTicketsUpdate from './ticketBroadcast.js';
+import { detectBaileysMessageType, extractBaileysMessageContent } from '../utils/baileysMessageDetector.js';
+import {
+  processQueueRules,
+  processHumanTransfer,
+  autoReceiveTicketToQueue
+} from './queueRules.js';
 
 // Função para detectar se uma mensagem pode ser resposta de enquete
 const detectPollResponse = async (messageBody, ticketId) => {
@@ -63,589 +70,192 @@ const detectPollResponse = async (messageBody, ticketId) => {
   }
 };
 
-// Função para auto-atribuir ticket para fila baseado na configuração da sessão
+
+// Agora usa a nova implementação unificada do queueRules.js
 const autoAssignTicketToQueue = async (ticket, sessionId) => {
   try {
-    // Buscar a sessão
-    const session = await Session.findByPk(sessionId);
-    if (!session) return false;
+    console.log(`🔍 [autoAssignTicketToQueue] Iniciando para ticket #${ticket.id} (sessão ${sessionId})`);
 
-    // Verificar se a sessão tem autoReceiveMessages habilitado
-    if (!session.autoReceiveMessages) {
-      console.log(`📭 Auto-recebimento desabilitado para sessão ${sessionId}`);
-      return false;
-    }
+    // Primeiro tenta auto-recebimento explícito (caso fila tenha autoReceiveMessages)
+    const receivedQueue = await autoReceiveTicketToQueue(ticket, sessionId);
 
-    // Buscar fila ativa associada à sessão
-    const queue = await Queue.findOne({
-      where: {
-        sessionId: sessionId,
-        isActive: true
+    if (!receivedQueue) {
+      // Se não recebeu por autoReceive, ainda processa regras para tentar atribuição baseada em outras regras
+      const rulesResult = await processQueueRules(ticket, sessionId, true);
+      if (rulesResult.queueId) {
+        console.log(`✅ [autoAssignTicketToQueue] Ticket #${ticket.id} entrou na fila "${rulesResult.queueName}"`);
+        return true;
       }
-    });
-
-    if (!queue) {
-      console.log(`❌ Nenhuma fila ativa encontrada para sessão ${sessionId}`);
+      console.log(`❌ [autoAssignTicketToQueue] Nenhuma fila atribuída ao ticket #${ticket.id}`);
       return false;
     }
 
-    // Atribuir ticket à fila
-    await ticket.update({
-      queueId: queue.id,
-      status: 'open'
-    });
-
-    console.log(`✅ Ticket #${ticket.id} atribuído automaticamente à fila "${queue.name}"`);
-
-    // Processar regras da fila
+    // Já recebeu fila, agora processa regras restantes
     await processQueueRules(ticket, sessionId, true);
-
     return true;
   } catch (error) {
-    console.error(`❌ Erro na auto-atribuição de fila:`, error);
+    console.error(`❌ [autoAssignTicketToQueue] Erro:`, error);
     return false;
   }
 };
 
-// Função para processar regras da fila após direcionamento
-const processQueueRules = async (ticket, sessionId, isNewTicket = false) => {
-  try {
-    if (!ticket.queueId) {
-      console.log(`ℹ️ Ticket #${ticket.id} não tem fila atribuída, pulando processamento de regras`);
-      return;
-    }
+// Removida lógica de normalização avançada (normalizeContactId) a pedido.
+const normalizeSenderPn = (senderPn) => senderPn || null;
 
-    // Buscar fila com todas as informações necessárias
-    const queue = await Queue.findByPk(ticket.queueId, {
-      include: [
-        {
-          model: User,
-          through: { attributes: [] },
-          required: false
-        }
-      ]
-    });
-
-    if (!queue || !queue.isActive) {
-      console.log(`⚠️ Fila #${ticket.queueId} não encontrada ou inativa`);
-      return;
-    }
-
-    console.log(`🔧 Processando regras da fila "${queue.name}" para ticket #${ticket.id}`);
-    console.log(`📊 Configurações da fila: autoAssignment=${queue.autoAssignment}, assignedUserId=${ticket.assignedUserId}, isNewTicket=${isNewTicket}`);
-    console.log(`👥 Usuários na fila: ${queue.Users ? queue.Users.length : 0} usuários`);
-
-    // 1. Atribuição automática (sempre tentar se não houver usuário atribuído)
-    if (!ticket.assignedUserId && queue.Users && queue.Users.length > 0) {
-      console.log(`🎯 Tentando atribuição automática para ticket #${ticket.id}`);
-      // Se autoAssignment estiver habilitado OU se for um ticket sem usuário (fallback)
-      if (queue.autoAssignment || !ticket.assignedUserId) {
-        await processAutoAssignment(ticket, queue);
-      }
-    } else {
-      console.log(`ℹ️ Pulando atribuição automática: assignedUserId=${ticket.assignedUserId}, usersCount=${queue.Users ? queue.Users.length : 0}`);
-    }
-
-    // 2. Mensagem de saudação (apenas para tickets novos)
-    if (isNewTicket && queue.greetingMessage) {
-      await processGreetingMessage(ticket, queue, sessionId);
-    }
-
-    // 3. Resposta automática (para tickets novos quando habilitada)
-    if (isNewTicket && queue.autoReply && queue.greetingMessage) {
-      await processAutoReply(ticket, queue, sessionId);
-    }
-
-    // 4. Coleta de feedback (quando ticket for fechado)
-    if (ticket.status === 'closed' && queue.feedbackCollection) {
-      await processFeedbackCollection(ticket, queue, sessionId);
-    }
-
-    // 5. Fechamento automático (para tickets inativos)
-    if (queue.autoClose && ticket.status === 'open') {
-      await processAutoClose(ticket, queue);
-    }
-
-    console.log(`✅ Regras da fila processadas para ticket #${ticket.id}`);
-
-  } catch (error) {
-    console.error(`❌ Erro ao processar regras da fila:`, error);
-  }
-};
-
-// Algoritmos de rotação para atribuição de usuários
-const getNextUserRoundRobin = async (queue) => {
-  if (!queue.Users || queue.Users.length === 0) {
-    console.log(`❌ Nenhum usuário na fila "${queue.name}" para round-robin`);
-    return null;
-  }
-
-  console.log(`🔄 Executando round-robin para ${queue.Users.length} usuários`);
-
-  // Implementar round-robin baseado no último usuário que recebeu um ticket
-  const lastAssignment = await Ticket.findOne({
-    where: {
-      queueId: queue.id,
-      assignedUserId: { [Op.not]: null }
-    },
-    order: [['updatedAt', 'DESC']]
-  });
-
-  if (!lastAssignment) {
-    console.log(`📝 Primeiro ticket da fila, selecionando primeiro usuário: ${queue.Users[0].name}`);
-    return queue.Users[0]; // Primeiro usuário se nenhum ticket foi atribuído ainda
-  }
-
-  // Encontrar o próximo usuário na sequência
-  const lastUserIndex = queue.Users.findIndex(user => user.id === lastAssignment.assignedUserId);
-  const nextIndex = (lastUserIndex + 1) % queue.Users.length;
-  const nextUser = queue.Users[nextIndex];
-
-  console.log(`🔄 Último usuário: ${queue.Users[lastUserIndex]?.name}, Próximo: ${nextUser.name}`);
-  return nextUser;
-};
-
-const getRandomUser = async (queue) => {
-  if (!queue.Users || queue.Users.length === 0) return null;
-  const randomIndex = Math.floor(Math.random() * queue.Users.length);
-  return queue.Users[randomIndex];
-};
-
-const getFirstAvailableUser = async (queue) => {
-  if (!queue.Users || queue.Users.length === 0) {
-    console.log(`❌ Nenhum usuário na fila "${queue.name}"`);
-    return null;
-  }
-
-  console.log(`🔍 Verificando disponibilidade de ${queue.Users.length} usuários na fila "${queue.name}"`);
-
-  // Retornar o primeiro usuário que tem menos tickets ativos
-  for (const user of queue.Users) {
-    const activeTickets = await Ticket.count({
-      where: {
-        assignedUserId: user.id,
-        status: 'open'
-      }
-    });
-
-    console.log(`👤 Usuário ${user.name}: ${activeTickets} tickets ativos`);
-
-    // Se o usuário tem menos de 5 tickets ativos, considerá-lo disponível
-    if (activeTickets < 5) {
-      console.log(`✅ Usuário ${user.name} selecionado (disponível)`);
-      return user;
-    }
-  }
-
-  // Se todos estão "ocupados" (>= 5 tickets), retornar o primeiro mesmo assim
-  console.log(`⚠️ Todos os usuários têm >= 5 tickets, selecionando o primeiro: ${queue.Users[0].name}`);
-  return queue.Users[0];
-};
-
-const getLeastLoadedUser = async (queue) => {
-  if (!queue.Users || queue.Users.length === 0) return null;
-  
-  let leastLoadedUser = null;
-  let minTickets = Infinity;
-
-  for (const user of queue.Users) {
-    const activeTickets = await Ticket.count({
-      where: {
-        assignedUserId: user.id,
-        status: 'open'
-      }
-    });
-
-    if (activeTickets < minTickets) {
-      minTickets = activeTickets;
-      leastLoadedUser = user;
-    }
-  }
-
-  return leastLoadedUser;
-};
-
-// Função para atribuição automática
-const processAutoAssignment = async (ticket, queue) => {
-  try {
-    console.log(`🎯 Iniciando atribuição automática para ticket #${ticket.id}`);
-    console.log(`📊 Fila: ${queue.name}, Rotação: ${queue.rotation}`);
-
-    // Verificar se já tem usuário atribuído
-    if (ticket.assignedUserId) {
-      console.log(`ℹ️ Ticket #${ticket.id} já tem usuário atribuído (${ticket.assignedUserId}), pulando atribuição automática`);
-      return;
-    }
-
-    // Verificar se há usuários na fila
-    if (!queue.Users || queue.Users.length === 0) {
-      console.log(`⚠️ Nenhum usuário encontrado na fila "${queue.name}"`);
-      return;
-    }
-
-    console.log(`👥 Usuários disponíveis: ${queue.Users.map(u => u.name).join(', ')}`);
-
-    // Implementar lógica de rotação baseada no tipo configurado
-    let assignedUser = null;
-
-    switch (queue.rotation) {
-      case 'round-robin':
-        console.log(`🔄 Usando rotação round-robin`);
-        assignedUser = await getNextUserRoundRobin(queue);
-        break;
-      case 'random':
-        console.log(`🎲 Usando rotação aleatória`);
-        assignedUser = await getRandomUser(queue);
-        break;
-      case 'fifo':
-        console.log(`📋 Usando rotação FIFO`);
-        assignedUser = await getFirstAvailableUser(queue);
-        break;
-      case 'load-based':
-        console.log(`⚖️ Usando rotação baseada em carga`);
-        assignedUser = await getLeastLoadedUser(queue);
-        break;
-      default:
-        console.log(`🔄 Usando rotação padrão (FIFO)`);
-        assignedUser = await getFirstAvailableUser(queue);
-    }
-
-    if (assignedUser) {
-      console.log(`✅ Usuário selecionado: ${assignedUser.name} (ID: ${assignedUser.id})`);
-
-      await ticket.update({
-        assignedUserId: assignedUser.id
-      });
-
-      console.log(`✅ Ticket #${ticket.id} atribuído automaticamente para ${assignedUser.name}`);
-
-      // Emitir evento
-      emitToAll('ticket-assigned', {
-        ticketId: ticket.id,
-        userId: assignedUser.id,
-        userName: assignedUser.name,
-        autoAssigned: true
-      });
-    } else {
-      console.log(`❌ Nenhum usuário disponível para atribuição na fila "${queue.name}"`);
-    }
-  } catch (error) {
-    console.error(`❌ Erro na atribuição automática:`, error);
-  }
-};
-
-// Função para resposta automática
-const processAutoReply = async (ticket, queue, sessionId) => {
-  try {
-    if (!queue.greetingMessage || !queue.autoReply) return;
-
-    const session = await Session.findByPk(sessionId);
-    if (!session) return;
-
-    console.log(`💬 Enviando resposta automática para ticket #${ticket.id}`);
-
-    let messageText = queue.greetingMessage;
-
-    // Personalizar mensagem com dados do contato
-    if (ticket.contact) {
-      messageText = messageText.replace('{nome}', ticket.contact.split('@')[0]);
-    }
-
-  if (session.library === 'baileys') {
-      const baileys = getBaileysSession(session.whatsappId);
-      if (baileys) {
-        await sendTextBaileys(session.whatsappId, ticket.contact, messageText);
-
-        // Salvar mensagem no sistema
-        await TicketMessage.create({
-          ticketId: ticket.id,
-          sender: 'system',
-          content: messageText,
-          timestamp: new Date(),
-          isFromGroup: false,
-          messageType: 'text'
-        });
-
-        console.log(`✅ Resposta automática enviada para ticket #${ticket.id}`);
-
-        // Emitir evento
-        emitToAll('auto-reply-sent', {
-          ticketId: ticket.id,
-          message: messageText,
-          queueId: queue.id
-        });
-      }
-    }
-  } catch (error) {
-    console.error(`❌ Erro na resposta automática:`, error);
-  }
-};
-
-// Função para mensagem de saudação
-const processGreetingMessage = async (ticket, queue, sessionId) => {
-  try {
-    if (!queue.greetingMessage) {
-      console.log(`ℹ️ Nenhuma mensagem de saudação configurada para a fila "${queue.name}"`);
-      return;
-    }
-
-    const session = await Session.findByPk(sessionId);
-    if (!session) {
-      console.log(`⚠️ Sessão não encontrada para ID ${sessionId}`);
-      return;
-    }
-
-    // Verificar se a sessão está conectada
-    if (session.status !== 'CONNECTED' && session.status !== 'connected') {
-      console.log(`⚠️ Sessão "${session.name}" não está conectada (status: ${session.status}), pulando mensagem de saudação`);
-      return;
-    }
-
-    console.log(`👋 Enviando mensagem de saudação para ticket #${ticket.id}`);
-    console.log(`📊 Detalhes da sessão: ID=${sessionId}, Status=${session.status}, Library=${session.library}, WhatsAppId=${session.whatsappId}`);
-
-    let messageText = queue.greetingMessage;
-
-    // Personalizar mensagem com dados do contato
-    if (ticket.contact) {
-      messageText = messageText.replace('{nome}', ticket.contact.split('@')[0]);
-    }
-
-    console.log(`📨 Tentando enviar mensagem: "${messageText}" para contato: ${ticket.contact}`);
-
-    if (session.library === 'baileys') {
-      const baileys = getBaileysSession(session.whatsappId);
-      if (baileys) {
-        console.log(`📤 Enviando mensagem via Baileys...`);
-        await sendTextBaileys(session.whatsappId, ticket.contact, messageText);
-
-        // Salvar mensagem no sistema
-        await TicketMessage.create({
-          ticketId: ticket.id,
-          sender: 'system',
-          content: messageText,
-          timestamp: new Date(),
-          isFromGroup: false,
-          messageType: 'text'
-        });
-
-        console.log(`✅ Mensagem de saudação enviada para ticket #${ticket.id}`);
-
-        // Emitir evento
-        emitToAll('greeting-sent', {
-          ticketId: ticket.id,
-          message: messageText,
-          queueId: queue.id
-        });
-      }
-    }
-  } catch (error) {
-    console.error(`❌ Erro na mensagem de saudação:`, error.message);
-    console.log(`ℹ️ Sistema continuará funcionando sem a mensagem de saudação para ticket #${ticket.id}`);
-    // Não relançar o erro para não interromper o fluxo principal
-  }
-};
-
-// Função para fechamento automático
-const processAutoClose = async (ticket, queue) => {
-  try {
-    if (!queue.autoClose || !queue.autoCloseTime) return;
-
-    // Agendar fechamento automático
-    setTimeout(async () => {
-      try {
-        const updatedTicket = await Ticket.findByPk(ticket.id);
-        if (updatedTicket && updatedTicket.status === 'open') {
-          await updatedTicket.update({
-            status: 'closed',
-            closedAt: new Date()
-          });
-
-          console.log(`🔒 Ticket #${ticket.id} fechado automaticamente`);
-
-          // Emitir evento
-          emitToAll('ticket-auto-closed', {
-            ticketId: ticket.id,
-            queueId: queue.id
-          });
-        }
-      } catch (error) {
-        console.error(`❌ Erro no fechamento automático:`, error);
-      }
-    }, queue.autoCloseTime * 60 * 1000); // Converter minutos para milissegundos
-
-  } catch (error) {
-    console.error(`❌ Erro no processamento de fechamento automático:`, error);
-  }
-};
-
-// Função para coleta de feedback
-const processFeedbackCollection = async (ticket, queue, sessionId) => {
-  try {
-    if (!queue.feedbackCollection || !queue.feedbackMessage) return;
-
-    const session = await Session.findByPk(sessionId);
-    if (!session) return;
-
-    console.log(`📝 Enviando solicitação de feedback para ticket #${ticket.id}`);
-
-    let messageText = queue.feedbackMessage;
-
-    // Personalizar mensagem com dados do contato
-    if (ticket.contact) {
-      messageText = messageText.replace('{nome}', ticket.contact.split('@')[0]);
-    }
-
-  if (session.library === 'baileys') {
-      const baileys = getBaileysSession(session.whatsappId);
-      if (baileys) {
-        await sendTextBaileys(session.whatsappId, ticket.contact, messageText);
-
-        // Salvar mensagem no sistema
-        await TicketMessage.create({
-          ticketId: ticket.id,
-          sender: 'system',
-          content: messageText,
-          timestamp: new Date(),
-          isFromGroup: false,
-          messageType: 'text'
-        });
-
-        console.log(`✅ Solicitação de feedback enviada para ticket #${ticket.id}`);
-
-        // Emitir evento
-        emitToAll('feedback-request-sent', {
-          ticketId: ticket.id,
-          message: messageText,
-          queueId: queue.id
-        });
-      }
-    }
-  } catch (error) {
-    console.error(`❌ Erro na coleta de feedback:`, error);
-  }
-};
-
-// Função para normalizar contactId (tratar @lid e @s.whatsapp.net)
-const normalizeContactId = (remoteJid) => {
-  if (!remoteJid) return null;
-
-  // Se termina com @lid, converter para @s.whatsapp.net
-  if (remoteJid.endsWith('@lid')) {
-    // Remover @lid e adicionar @s.whatsapp.net
-    const number = remoteJid.replace('@lid', '');
-    console.log(`🔄 Convertendo @lid para @s.whatsapp.net: ${remoteJid} -> ${number}@s.whatsapp.net`);
-    return `${number}@s.whatsapp.net`;
-  }
-
-  // Se já termina com @s.whatsapp.net, retornar como está
-  if (remoteJid.endsWith('@s.whatsapp.net')) {
-    return remoteJid;
-  }
-
-  // Se é apenas um número, adicionar @s.whatsapp.net
-  if (/^\d+$/.test(remoteJid)) {
-    console.log(`🔄 Adicionando @s.whatsapp.net ao número: ${remoteJid} -> ${remoteJid}@s.whatsapp.net`);
-    return `${remoteJid}@s.whatsapp.net`;
-  }
-
-  // Retornar como está para outros casos
-  return remoteJid;
-};
-
-// WhatsApp.js handler removido; Baileys é a única biblioteca suportada
 
 // Função para processar mensagens do Baileys
 const handleBaileysMessage = async (message, sessionId) => {
   try {
-    console.log(`📨 Processando mensagem Baileys:`, message);
+    console.log(`� [BAILEYS] handleBaileysMessage CHAMADO - sessionId: ${sessionId}`);
+    console.log(`�📨 [BAILEYS] Processando mensagem Baileys:`, JSON.stringify(message, null, 2));
 
-    const contactId = normalizeContactId(message.key.remoteJid);
-    if (!contactId) {
-      console.log(`❌ ContactId inválido:`, message.key.remoteJid);
+  // Determine primary JID for contact/ticket:
+  // - For groups (@g.us): use the group JID (normalized).
+  // - For 1:1: prefer senderPn when provided (real phone JID), else normalized remoteJid (may be @s.whatsapp.net from @lid conversion).
+  const remoteJidRaw = message.key.remoteJid;
+  const isGroup = remoteJidRaw && remoteJidRaw.endsWith('@g.us');
+  // Usar diretamente os IDs fornecidos sem normalização adicional
+  const remoteNorm = remoteJidRaw;
+  const pnNorm = message.key?.senderPn || null;
+  const contactId = isGroup ? remoteNorm : (pnNorm || remoteNorm);
+
+  if (!contactId) {
+      console.log(`❌ [BAILEYS] ContactId inválido:`, message.key.remoteJid);
       return;
     }
 
-    console.log(`📞 Contact ID normalizado: ${contactId}`);
+  console.log(`📞 [BAILEYS] Contact ID normalizado: ${contactId} (original: ${message.key.remoteJid}, senderPn: ${message.key?.senderPn || 'N/A'})`);
 
     // Buscar ou criar contato
     let contact = await Contact.findOne({ where: { whatsappId: contactId } });
     if (!contact) {
-      const contactName = message.pushName || contactId.split('@')[0];
+      // Extrair número limpo para nome se não houver pushName
+      const sourceForNumber = contactId; // já é pnNorm quando disponível
+      const cleanNumber = sourceForNumber.split('@')[0];
+      
+      const contactName = message.pushName || cleanNumber;
+      
       contact = await Contact.create({
-        whatsappId: contactId,
+        whatsappId: contactId, // Mantém normalizado para consistência no banco
         sessionId: sessionId,
         name: contactName,
+        pushname: message.pushName, // Nome do WhatsApp
+        formattedNumber: cleanNumber, // Número limpo sem @lid/@s.whatsapp.net
         isGroup: contactId.includes('@g.us')
       });
-      console.log(`👤 Novo contato criado: ${contactName} (${contactId})`);
+      console.log(`👤 [BAILEYS] Novo contato criado: ${contactName} (${contactId})`);
+    } else {
+      console.log(`👤 [BAILEYS] Contato existente encontrado: ${contact.name} (${contactId})`);
+      // Atualiza somente foto se ainda não houver e não for grupo
+      if (!contact.profilePicUrl && !contact.isGroup) {
+        try {
+          const session = await Session.findByPk(sessionId);
+          if (session?.library === 'baileys') {
+            const sock = getBaileysSession(session.whatsappId);
+            if (sock) {
+              try {
+                const pic = await sock.profilePictureUrl(contactId, 'image');
+                if (pic) {
+                  await contact.update({ profilePicUrl: pic, lastSeen: new Date() });
+                  emitToAll('contact-updated', contact);
+                  console.log(`🖼️ [BAILEYS] Foto adicionada ao contato ${contactId}`);
+                }
+              } catch (picErr) {
+                console.log(`⚠️ [BAILEYS] Não foi possível obter foto para ${contactId}: ${picErr.message}`);
+              }
+            }
+          }
+        } catch (updErr) {
+          console.log(`⚠️ [BAILEYS] Erro ao tentar atualizar foto do contato ${contactId}: ${updErr.message}`);
+        }
+      }
     }
 
-    // Buscar ticket existente ou criar novo
-    let ticket = await Ticket.findOne({
+  // Buscar ticket existente ou criar novo (diagnóstico detalhado)
+  console.log('🧪[MSG] Iniciando busca de ticket para contato', contactId, 'remoteNorm', remoteNorm, 'session', sessionId);
+  let ticket = await Ticket.findOne({
       where: {
-        contact: contactId,
+        contact: { [Op.in]: [contactId, remoteNorm].filter(Boolean) },
         status: ['open', 'pending']
       },
       order: [['createdAt', 'DESC']]
     });
 
+    console.log(`🎫 [BAILEYS] Busca de ticket para ${contactId}: ${ticket ? `encontrado #${ticket.id}` : 'não encontrado'}`);
+
     let isNewTicket = false;
     if (!ticket) {
+      console.log('🧪[MSG] Nenhum ticket aberto encontrado. Criando novo ticket...');
       // Criar novo ticket
+      // Buscar sessão para aplicar defaultQueueId se existir
+      const sess = await Session.findByPk(sessionId);
+      const defaultQueueId = sess?.defaultQueueId || null;
       ticket = await Ticket.create({
         contact: contactId,
         contactId: contact.id,
         status: 'pending',
         unreadCount: 1,
-        sessionId: sessionId
+        sessionId: sessionId,
+        queueId: defaultQueueId
       });
       isNewTicket = true;
-      console.log(`🎫 Novo ticket criado: #${ticket.id}`);
+      console.log(`🎫 [BAILEYS] Novo ticket criado: #${ticket.id}`);
+      if (defaultQueueId) {
+        console.log(`🧪[MSG] defaultQueueId aplicado na criação: ${defaultQueueId}`);
+      }
 
       // Tentar auto-atribuir à fila
-      await autoAssignTicketToQueue(ticket, sessionId);
+      const assignResult = await autoAssignTicketToQueue(ticket, sessionId);
+      console.log('🧪[MSG] Resultado autoAssignTicketToQueue:', assignResult, 'queueId final=', ticket.queueId);
     } else {
+      // Se ticket foi encontrado por remoteNorm e temos pnNorm (1:1), migrar o ticket para usar pnNorm como contato principal
+      if (!isGroup && pnNorm && ticket.contact !== pnNorm) {
+        console.log(`🔁 [BAILEYS] Migrando ticket #${ticket.id} de contato ${ticket.contact} -> ${pnNorm}`);
+        await ticket.update({ contact: pnNorm, contactId: contact.id });
+      }
       // Atualizar ticket existente
-      const messageText = message.message?.conversation || 
-                         message.message?.extendedTextMessage?.text || 
-                         'Mensagem de mídia';
+      const messageText = extractBaileysMessageContent(message);
       
       await ticket.update({
         unreadCount: ticket.unreadCount + 1,
         lastMessage: messageText,
         updatedAt: new Date()
       });
-      console.log(`🎫 Ticket existente atualizado: #${ticket.id}`);
+      console.log(`🎫 [BAILEYS] Ticket existente atualizado: #${ticket.id} (unread: ${ticket.unreadCount + 1})`);
     }
 
-    // Extrair conteúdo da mensagem
-    const messageContent = message.message?.conversation || 
-                          message.message?.extendedTextMessage?.text || 
-                          message.message?.imageMessage?.caption ||
-                          'Mensagem de mídia';
+    // Extrair conteúdo da mensagem usando função especializada
+    const messageContent = extractBaileysMessageContent(message);
+    
+    // Detectar tipo de mensagem corretamente
+    const messageType = detectBaileysMessageType(message);
+
+    console.log(`💬 [BAILEYS] Conteúdo da mensagem extraído: "${messageContent}"`);
+    console.log(`🔍 [BAILEYS] Tipo de mensagem detectado: "${messageType}"`);
 
     // Verificar se é resposta de enquete
     const pollResponse = await detectPollResponse(messageContent, ticket.id);
     
     // Extrair participant (para mensagens de grupo)
-    const rawParticipant = message.key?.participant;
-    const participantIdNorm = rawParticipant ? normalizeContactId(rawParticipant) : null;
+  const rawParticipant = message.key?.participant;
+  const participantIdNorm = rawParticipant || null;
 
     let messageData = {
       ticketId: ticket.id,
-      sender: 'customer',
+      sender: 'contact',  // Mudança: usar 'contact' em vez de 'customer' para consistência com frontend
       content: messageContent,
       messageId: message.key.id,
       timestamp: new Date(),
-      isFromGroup: contactId.includes('@g.us'),
-      messageType: Object.keys(message.message || {})[0] || 'text',
+      isFromGroup: (remoteNorm || '').includes('@g.us'),
+      messageType: messageType, // Usar tipo detectado corretamente
       // LID support if provided by Baileys (v6.7.19+)
       senderLid: message.key?.senderLid,
       participantLid: message.key?.participantLid,
       senderPn: message.key?.senderPn,
       participantId: participantIdNorm || null
     };
+
+    console.log(`💾 [BAILEYS] Dados da mensagem para salvar:`, messageData);
 
     // Se for resposta de enquete, adicionar campos específicos
     if (pollResponse) {
@@ -658,43 +268,59 @@ const handleBaileysMessage = async (message, sessionId) => {
     // Salvar mensagem
     const savedMessage = await TicketMessage.create(messageData);
 
-    console.log(`💾 Mensagem salva para ticket #${ticket.id}`);
+    console.log(`💾 [BAILEYS] Mensagem salva com ID ${savedMessage.id} para ticket #${ticket.id}`);
 
     // Processar regras da fila se não for novo (novo já foi processado no autoAssignTicketToQueue)
     if (!isNewTicket && ticket.queueId) {
       await processQueueRules(ticket, sessionId, false);
     }
 
-    // Emitir evento
-  emitToAll('new-message', {
+    // Emitir evento - enviar mensagem diretamente com ticketId incluído
+    const eventData = {
+      id: savedMessage.id,
       ticketId: ticket.id,
-      message: {
-        id: savedMessage.id,
-        sender: 'customer',
-        content: messageContent,
-        timestamp: new Date(),
-        messageType: savedMessage.messageType,
-        pollResponse: savedMessage.pollResponse,
-    pollMessageId: savedMessage.pollMessageId,
-    senderLid: savedMessage.senderLid,
-    participantLid: savedMessage.participantLid,
-    senderPn: savedMessage.senderPn
-      }
-    });
+      sender: 'contact',  // Consistente com como foi salvo
+      content: messageContent,
+      timestamp: new Date(),
+      messageType: savedMessage.messageType,
+      pollResponse: savedMessage.pollResponse,
+      pollMessageId: savedMessage.pollMessageId,
+      senderLid: savedMessage.senderLid,
+      participantLid: savedMessage.participantLid,
+  senderPn: savedMessage.senderPn,
+  lastMessage: messageContent,
+  ticketUpdatedAt: ticket.updatedAt
+    };
+    
+    console.log(`🚀 [BAILEYS] Emitindo evento new-message para ticket #${ticket.id}:`);
+    console.log(`📡 [BAILEYS] Dados do evento:`, JSON.stringify(eventData, null, 2));
+    
+    // Emitir para todos (global) e especificamente para a sala do ticket
+    emitToAll('new-message', eventData);
+    console.log(`✅ [BAILEYS] Evento emitido globalmente`);
+    
+    // Também emitir especificamente para clientes conectados à sala do ticket
+    const { emitToTicket } = await import('./socket.js');
+    emitToTicket(ticket.id, 'new-message', eventData);
+    console.log(`✅ [BAILEYS] Evento emitido para sala do ticket ${ticket.id}`);
+    
+    // Atualizar lista de tickets para frontend (Aguardando/Accepted tabs)
+    // Evitar excesso: apenas ao criar ticket novo ou quando unreadCount muda.
+    try {
+      await emitTicketsUpdate();
+    } catch (e) {
+      console.error('Erro ao emitir tickets-update após mensagem:', e.message);
+    }
+
+    console.log(`🎯 [BAILEYS] Processamento completo da mensagem para ticket #${ticket.id} - ID da mensagem: ${savedMessage.id}`);
 
   } catch (error) {
-    console.error(`❌ Erro ao processar mensagem Baileys:`, error);
+    console.error(`❌ [BAILEYS] Erro ao processar mensagem Baileys:`, error);
   }
 };
 
 export {
   autoAssignTicketToQueue,
-  processQueueRules,
-  processAutoAssignment,
-  processAutoReply,
-  processGreetingMessage,
-  processAutoClose,
-  processFeedbackCollection,
   handleBaileysMessage,
-  normalizeContactId
+  normalizeSenderPn
 };

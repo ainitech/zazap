@@ -6,8 +6,7 @@ import {
   HeartIcon
 } from '@heroicons/react/24/outline';
 import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid';
-
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+import { apiUrl } from '../../utils/apiClient';
 
 export default function FavoritesComponent() {
   const [favoriteTickets, setFavoriteTickets] = useState([]);
@@ -20,7 +19,7 @@ export default function FavoritesComponent() {
 
   const fetchFavoriteTickets = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/tickets?favorite=true`, {
+      const response = await fetch(apiUrl('/api/tickets?favorite=true'), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }

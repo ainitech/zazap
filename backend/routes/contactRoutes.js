@@ -215,6 +215,109 @@ router.delete('/contact/:contactId', authenticateToken, async (req, res) => {
 
 });
 
+// POST /api/contacts/contact - Criar um novo contato
+router.post('/contact', authenticateToken, async (req, res) => {
+  try {
+    const { name, pushname, number, whatsappId, sessionId, isGroup, formattedNumber, profilePicUrl } = req.body || {};
+
+    if (!sessionId) {
+      return res.status(400).json({ error: 'sessionId é obrigatório' });
+    }
+
+    let jid = whatsappId || number;
+    if (!jid) {
+      return res.status(400).json({ error: 'Informe whatsappId ou number' });
+    }
+
+    // Normalização: tolera números puros, @lid, @c.us/@s.whatsapp.net e grupos
+    const normalizeJid = (val) => {
+      if (!val) return null;
+      if (val.endsWith('@g.us')) return val; // grupo
+      let clean = String(val).trim();
+      clean = clean.replace(/@lid$/, ''); // remover @lid
+      // Se já vier com domínio aceito, mantém
+      if (/@(c\.us|s\.whatsapp\.net)$/i.test(clean)) return clean;
+      if (/^\d+$/.test(clean)) return `${clean}@s.whatsapp.net`;
+      // fallback: manter como veio
+      return clean;
+    };
+
+    jid = normalizeJid(jid);
+
+    // Verificar duplicidade
+    const existing = await Contact.findOne({ where: { whatsappId: jid, sessionId } });
+    if (existing) {
+      return res.status(409).json({ error: 'Contato já existe para esta sessão', contact: existing });
+    }
+
+    const created = await Contact.create({
+      whatsappId: jid,
+      sessionId,
+      name: name || null,
+      pushname: pushname || null,
+      formattedNumber: formattedNumber || (jid.includes('@') ? jid.split('@')[0] : jid),
+      profilePicUrl: profilePicUrl || null,
+      isGroup: Boolean(isGroup)
+    });
+
+    emitToAll('contact-updated', created);
+    res.status(201).json({ success: true, contact: created });
+  } catch (error) {
+    console.error('Erro ao criar contato:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/contacts/contact/:contactId - Atualizar dados do contato (ex.: nome)
+router.put('/contact/:contactId', authenticateToken, async (req, res) => {
+  try {
+    const { contactId } = req.params;
+    const { name, pushname, formattedNumber, profilePicUrl } = req.body || {};
+
+    const contact = await Contact.findByPk(contactId);
+    if (!contact) {
+      return res.status(404).json({ error: 'Contato não encontrado' });
+    }
+
+    const allowed = {};
+    if (typeof name === 'string') allowed.name = name;
+    if (typeof pushname === 'string') allowed.pushname = pushname;
+    if (typeof formattedNumber === 'string') allowed.formattedNumber = formattedNumber;
+    if (typeof profilePicUrl === 'string') allowed.profilePicUrl = profilePicUrl;
+
+    await contact.update(allowed);
+
+    // Emitir atualização para todos os clientes conectados
+    emitToAll('contact-updated', contact);
+
+    res.json({ success: true, contact });
+  } catch (error) {
+    console.error('Erro ao atualizar contato:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Alias: PUT /api/contacts/:contactId (mesma funcionalidade de atualizar contato)
+router.put('/:contactId', authenticateToken, async (req, res) => {
+  try {
+    const { contactId } = req.params;
+    const { name, pushname, formattedNumber, profilePicUrl } = req.body || {};
+    const contact = await Contact.findByPk(contactId);
+    if (!contact) return res.status(404).json({ error: 'Contato não encontrado' });
+    const allowed = {};
+    if (typeof name === 'string') allowed.name = name;
+    if (typeof pushname === 'string') allowed.pushname = pushname;
+    if (typeof formattedNumber === 'string') allowed.formattedNumber = formattedNumber;
+    if (typeof profilePicUrl === 'string') allowed.profilePicUrl = profilePicUrl;
+    await contact.update(allowed);
+    emitToAll('contact-updated', contact);
+    res.json({ success: true, contact });
+  } catch (error) {
+    console.error('Erro ao atualizar contato (alias):', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // DELETE /api/contacts/ticket/:ticketId - Deletar ticket e dados relacionados
 router.delete('/ticket/:ticketId', authenticateToken, async (req, res) => {
   try {
@@ -294,6 +397,121 @@ router.get('/contact/:contactId/media', authenticateToken, async (req, res) => {
     res.json(medias);
   } catch (error) {
     console.error('Erro ao buscar mídias de todos os tickets do contato:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/contacts/contact/:contactId/message - Salvar uma nota/mensagem vinculada ao contato
+router.post('/contact/:contactId/message', authenticateToken, async (req, res) => {
+  try {
+    const { contactId } = req.params;
+    const { content, sessionId } = req.body || {};
+    if (!content || !content.trim()) {
+      return res.status(400).json({ error: 'content é obrigatório' });
+    }
+
+    const contact = await Contact.findByPk(contactId);
+    if (!contact) {
+      return res.status(404).json({ error: 'Contato não encontrado' });
+    }
+
+    // Encontrar ticket aberto mais recente para o contato, senão criar um rascunho
+    let ticket = await Ticket.findOne({
+      where: { contactId: contact.id, status: ['open', 'pending'] },
+      order: [['updatedAt', 'DESC']]
+    });
+
+    if (!ticket) {
+      // Criar um ticket rascunho para armazenar a mensagem vinculada ao contato
+      ticket = await Ticket.create({
+        contact: contact.whatsappId,
+        contactId: contact.id,
+        sessionId: sessionId || contact.sessionId,
+        status: 'open',
+        chatStatus: 'waiting',
+        unreadCount: 0
+      });
+    }
+
+    const message = await TicketMessage.create({
+      ticketId: ticket.id,
+      sender: 'user',
+      content: content.trim(),
+      timestamp: new Date(),
+      isFromGroup: false,
+      messageType: 'text'
+    });
+
+    emitToAll('message-update', { ticketId: ticket.id, message });
+    res.status(201).json({ success: true, ticketId: ticket.id, message });
+  } catch (error) {
+    console.error('Erro ao salvar mensagem do contato:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Alias: POST /api/contacts/:contactId/message
+router.post('/:contactId/message', authenticateToken, async (req, res) => {
+  try {
+    const { contactId } = req.params;
+    const { content, sessionId } = req.body || {};
+    if (!content || !content.trim()) {
+      return res.status(400).json({ error: 'content é obrigatório' });
+    }
+    const contact = await Contact.findByPk(contactId);
+    if (!contact) return res.status(404).json({ error: 'Contato não encontrado' });
+
+    let ticket = await Ticket.findOne({
+      where: { contactId: contact.id, status: ['open', 'pending'] },
+      order: [['updatedAt', 'DESC']]
+    });
+    if (!ticket) {
+      ticket = await Ticket.create({
+        contact: contact.whatsappId,
+        contactId: contact.id,
+        sessionId: sessionId || contact.sessionId,
+        status: 'open',
+        chatStatus: 'waiting',
+        unreadCount: 0
+      });
+    }
+    const message = await TicketMessage.create({
+      ticketId: ticket.id,
+      sender: 'user',
+      content: content.trim(),
+      timestamp: new Date(),
+      isFromGroup: false,
+      messageType: 'text'
+    });
+    emitToAll('message-update', { ticketId: ticket.id, message });
+    res.status(201).json({ success: true, ticketId: ticket.id, message });
+  } catch (error) {
+    console.error('Erro ao salvar mensagem do contato (alias):', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Alias: DELETE /api/contacts/:contactId
+router.delete('/:contactId', authenticateToken, async (req, res) => {
+  try {
+    const { contactId } = req.params;
+    const contact = await Contact.findByPk(contactId);
+    if (!contact) return res.status(404).json({ error: 'Contato não encontrado' });
+
+    const tickets = await Ticket.findAll({ where: { contactId } });
+    await TicketMessage.destroy({ where: { ticketId: tickets.map(t => t.id) } });
+    await Ticket.destroy({ where: { contactId } });
+    await contact.destroy();
+
+    const remainingTickets = await Ticket.findAll({
+      include: [{ model: Contact, required: false }],
+      order: [['updatedAt', 'DESC']]
+    });
+    emitToAll('tickets-update', remainingTickets);
+    emitToAll('contact-deleted', { contactId });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Erro no delete de contato (alias):', error);
     res.status(500).json({ error: error.message });
   }
 });

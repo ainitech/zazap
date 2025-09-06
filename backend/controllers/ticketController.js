@@ -1,50 +1,52 @@
 
-import { Ticket, Queue, Contact, User, TicketMessage, TicketComment, MessageReaction, Tag, TicketTag } from '../models/index.js';
+import { Ticket, Queue, Contact, User, TicketMessage, TicketComment, MessageReaction, Tag, TicketTag, Integration } from '../models/index.js';
 import { Op } from 'sequelize';
 import { emitToAll } from '../services/socket.js';
+import emitTicketsUpdateShared from '../services/ticketBroadcast.js';
+import integrationService from '../services/integrationService.js';
 import fs from 'fs';
 import path from 'path';
+
+// Helper para includes padrão com integrações
+const getTicketIncludes = () => [
+  {
+    model: Contact,
+    required: false
+  },
+  {
+    model: Queue,
+    required: false,
+    include: [
+      {
+        model: Integration,
+        through: { attributes: [] },
+        required: false
+      }
+    ]
+  },
+  {
+    model: User,
+    as: 'AssignedUser',
+    required: false
+  },
+  {
+    model: Tag,
+    as: 'tags',
+    through: { attributes: ['addedAt'] },
+    required: false
+  },
+  {
+    model: Integration,
+    through: { attributes: [] },
+    required: false
+  }
+];
 
 // Função utilitária para emitir atualizações de tickets
 const emitTicketsUpdate = async () => {
   try {
-    const tickets = await Ticket.findAll({
-      include: [
-        {
-          model: Contact,
-          required: false // LEFT JOIN para incluir tickets sem contato vinculado
-        },
-        {
-          model: Queue,
-          required: false // LEFT JOIN para incluir tickets sem fila vinculada
-        },
-        {
-          model: User,
-          as: 'AssignedUser',
-          required: false // LEFT JOIN para incluir tickets sem usuário atribuído
-        },
-        {
-          model: Tag,
-          as: 'tags',
-          through: { attributes: ['addedAt'] },
-          required: false // LEFT JOIN para incluir tickets sem tags
-        }
-      ],
-      order: [['updatedAt', 'DESC']]
-    });
-
-    // Buscar última mensagem para cada ticket
-    for (const ticket of tickets) {
-      const lastMessage = await TicketMessage.findOne({
-        where: { ticketId: ticket.id },
-        order: [['createdAt', 'DESC']],
-        attributes: ['id', 'content', 'sender', 'isFromGroup', 'participantName', 'groupName', 'createdAt']
-      });
-      ticket.dataValues.LastMessage = lastMessage;
-    }
-
-    console.log(`🔄 Emitindo atualização de tickets via WebSocket: ${tickets.length} tickets`);
-    emitToAll('tickets-update', tickets);
+  // Use serviço compartilhado para manter consistência com outros pontos de emissão
+  await emitTicketsUpdateShared();
   } catch (error) {
     console.error('❌ Erro ao emitir atualização de tickets:', error);
   }
@@ -97,7 +99,14 @@ export const listTickets = async (req, res) => {
         },
         {
           model: Queue,
-          required: false // LEFT JOIN para incluir tickets sem fila vinculada
+          required: false, // LEFT JOIN para incluir tickets sem fila vinculada
+          include: [
+            {
+              model: Integration,
+              through: { attributes: [] },
+              required: false // LEFT JOIN para incluir integrações da fila
+            }
+          ]
         },
         {
           model: User,
@@ -109,6 +118,11 @@ export const listTickets = async (req, res) => {
           as: 'tags',
           through: { attributes: ['addedAt'] },
           required: false // LEFT JOIN para incluir tickets sem tags
+        },
+        {
+          model: Integration,
+          through: { attributes: [] },
+          required: false // LEFT JOIN para incluir integrações do ticket
         }
       ],
       order: [['updatedAt', 'DESC']], // Ordenar por updatedAt para mostrar mais recentes primeiro
@@ -156,27 +170,7 @@ export const getTicketByUid = async (req, res) => {
 
     const ticket = await Ticket.findOne({
       where: { uid },
-      include: [
-        {
-          model: Contact,
-          required: false
-        },
-        {
-          model: Queue,
-          required: false
-        },
-        {
-          model: User,
-          as: 'AssignedUser',
-          required: false
-        },
-        {
-          model: Tag,
-          as: 'tags',
-          through: { attributes: ['addedAt'] },
-          required: false
-        }
-      ]
+      include: getTicketIncludes()
     });
 
     if (!ticket) {
@@ -226,16 +220,7 @@ export const acceptTicket = async (req, res) => {
     
     // Buscar ticket
     const ticket = await Ticket.findByPk(ticketId, {
-      include: [
-        {
-          model: Contact,
-          required: false
-        },
-        {
-          model: Queue,
-          required: false
-        }
-      ]
+      include: getTicketIncludes()
     });
     
     if (!ticket) {
@@ -250,7 +235,7 @@ export const acceptTicket = async (req, res) => {
     }
     
     // Atualizar ticket para aceito
-    await ticket.update({
+  await ticket.update({
       chatStatus: 'accepted',
       assignedUserId: userId,
       unreadCount: 0 // Zerar contador quando aceitar
@@ -260,25 +245,14 @@ export const acceptTicket = async (req, res) => {
     
     // Buscar ticket atualizado com associações
     const updatedTicket = await Ticket.findByPk(ticketId, {
-      include: [
-        {
-          model: Contact,
-          required: false
-        },
-        {
-          model: Queue,
-          required: false
-        },
-        {
-          model: User,
-          as: 'AssignedUser',
-          required: false
-        }
-      ]
+      include: getTicketIncludes()
     });
+
+    // Processar integração de mudança de status
+    await integrationService.processTicketStatusChanged(updatedTicket, 'waiting', 'accepted');
     
-    // Emitir atualização de tickets
-    await emitTicketsUpdate();
+  // Emitir atualização de tickets
+  await emitTicketsUpdate();
     
     res.json({ 
       success: true, 
@@ -355,11 +329,7 @@ export const updateTicketPriority = async (req, res) => {
     // Opcional: salvar reason em um histórico, se desejar
     // Emitir atualização via WebSocket
     const updatedTicket = await Ticket.findByPk(ticketId, {
-      include: [
-        { model: Queue, required: false },
-        { model: User, as: 'AssignedUser', required: false },
-        { model: Contact, required: false }
-      ]
+      include: getTicketIncludes()
     });
     emitToAll('ticket-priority-updated', updatedTicket);
     res.json({ message: 'Prioridade do ticket atualizada com sucesso', ticket: updatedTicket });
@@ -705,12 +675,11 @@ export const createTicket = async (req, res) => {
 
     // Buscar ticket com associações para retorno
     const created = await Ticket.findByPk(ticket.id, {
-      include: [
-        { model: Contact, required: false },
-        { model: Queue, required: false },
-        { model: User, as: 'AssignedUser', required: false }
-      ]
+      include: getTicketIncludes()
     });
+
+    // Processar integrações do ticket criado
+    await integrationService.processTicketCreated(created);
 
     // Emitir atualização via WebSocket
     await emitTicketsUpdate();

@@ -43,7 +43,7 @@ export default function TagSelector({
   const dropdownRef = useRef(null);
   const searchInputRef = useRef(null);
 
-  const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+  const { apiUrl } = require('../utils/apiClient');
 
   useEffect(() => {
     if (isOpen) {
@@ -72,7 +72,7 @@ export default function TagSelector({
   const fetchAvailableTags = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${API_URL}/api/tags?limit=100`, {
+  const response = await fetch(apiUrl('/api/tags?limit=100'), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -98,7 +98,7 @@ export default function TagSelector({
     if (!ticketId) return;
 
     try {
-      const response = await fetch(`${API_URL}/api/tags/ticket/${ticketId}/tag/${tag.id}`, {
+  const response = await fetch(apiUrl(`/api/tags/ticket/${ticketId}/tag/${tag.id}`), {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -122,7 +122,7 @@ export default function TagSelector({
     if (!ticketId) return;
 
     try {
-      const response = await fetch(`${API_URL}/api/tags/ticket/${ticketId}/tag/${tag.id}`, {
+  const response = await fetch(apiUrl(`/api/tags/ticket/${ticketId}/tag/${tag.id}`), {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -145,7 +145,7 @@ export default function TagSelector({
     if (!newTagForm.name.trim()) return;
 
     try {
-      const response = await fetch(`${API_URL}/api/tags`, {
+  const response = await fetch(apiUrl('/api/tags'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

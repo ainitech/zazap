@@ -12,8 +12,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { FileText } from 'lucide-react';
 import io from 'socket.io-client';
-
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+import { apiUrl } from '../../utils/apiClient';
 
 export default function ContactInfo({ selectedTicket, showContactInfo }) {
   const [contactInfo, setContactInfo] = useState(null);
@@ -32,7 +31,7 @@ export default function ContactInfo({ selectedTicket, showContactInfo }) {
   // Conectar ao WebSocket quando o componente monta
   useEffect(() => {
     if (!socketRef.current) {
-      socketRef.current = io(API_URL, {
+  socketRef.current = io(apiUrl('/').replace(/\/$/, ''), {
         transports: ['websocket'],
         autoConnect: true
       });
@@ -89,7 +88,7 @@ export default function ContactInfo({ selectedTicket, showContactInfo }) {
     const fetchAllContactMedia = async () => {
       if (selectedTicket?.contactId) {
         try {
-          const response = await fetch(`${API_URL}/api/contacts/contact/${selectedTicket.contactId}/media`, {
+          const response = await fetch(apiUrl(`/api/contacts/contact/${selectedTicket.contactId}/media`), {
             headers: {
               'Authorization': `Bearer ${localStorage.getItem('token')}`
             }
@@ -117,7 +116,7 @@ export default function ContactInfo({ selectedTicket, showContactInfo }) {
         return;
       }
       try {
-        const response = await fetch(`${API_URL}/api/tickets?ticketId=${ticketId}`, {
+  const response = await fetch(apiUrl(`/api/tickets?ticketId=${ticketId}`), {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
@@ -164,7 +163,7 @@ export default function ContactInfo({ selectedTicket, showContactInfo }) {
       if (!contactInfo) {
         setLoading(true);
       }
-      const response = await fetch(`${API_URL}/api/contacts/${selectedTicket.contactId}`, {
+  const response = await fetch(apiUrl(`/api/contacts/${selectedTicket.contactId}`), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -184,12 +183,12 @@ export default function ContactInfo({ selectedTicket, showContactInfo }) {
   const fetchMediaAndAttachments = async () => {
     try {
       const [mediaResponse, attachmentsResponse] = await Promise.all([
-        fetch(`${API_URL}/api/tickets/${selectedTicket.id}/media`, {
+        fetch(apiUrl(`/api/tickets/${selectedTicket.id}/media`), {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
         }),
-        fetch(`${API_URL}/api/tickets/${selectedTicket.id}/attachments`, {
+        fetch(apiUrl(`/api/tickets/${selectedTicket.id}/attachments`), {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }

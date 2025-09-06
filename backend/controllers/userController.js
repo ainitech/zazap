@@ -40,7 +40,7 @@ export const getUsers = async (req, res) => {
       order: [['createdAt', 'DESC']]
     });
 
-    res.json(users);
+    res.json({ success: true, users });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

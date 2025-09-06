@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiUrl } from '../../utils/apiClient';
 import { 
   ClockIcon,
   MagnifyingGlassIcon,
@@ -6,7 +7,7 @@ import {
   ChatBubbleBottomCenterTextIcon
 } from '@heroicons/react/24/outline';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+// API base is resolved via apiUrl helper
 
 export default function RecentComponent() {
   const [recentTickets, setRecentTickets] = useState([]);
@@ -19,7 +20,7 @@ export default function RecentComponent() {
 
   const fetchRecentTickets = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/tickets?recent=true&limit=50`, {
+  const response = await fetch(apiUrl('/api/tickets?recent=true&limit=50'), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }

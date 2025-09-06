@@ -8,11 +8,43 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
 export const sendFileMessage = async (req, res) => {
   const { ticketId } = req.params;
-  const { content, sender } = req.body;
+  const { content, sender, messageType, isVoiceNote, audioDuration } = req.body;
   if (!req.file) return res.status(400).json({ error: 'Arquivo não enviado.' });
   
   try {
-    console.log(`📁 Enviando arquivo para ticket ${ticketId} - sender: ${sender}`);
+    console.log(`📁 Enviando arquivo para ticket ${ticketId}`, {
+      sender,
+      messageType,
+      isVoiceNote,
+      audioDuration,
+      fileType: req.file.mimetype,
+      fileName: req.file.originalname,
+      fileSize: req.file.size
+    });
+    
+    // Validações específicas para áudio PTT
+    if (req.file.mimetype && req.file.mimetype.startsWith('audio/')) {
+      console.log('🎵 Processando arquivo de áudio:', {
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        isVoiceNote: isVoiceNote,
+        duration: audioDuration
+      });
+      
+      // Validar tamanho mínimo do arquivo de áudio
+      if (req.file.size < 1000) {
+        console.error('❌ Arquivo de áudio muito pequeno:', req.file.size, 'bytes');
+        return res.status(400).json({ error: 'Arquivo de áudio muito pequeno (mínimo 1KB)' });
+      }
+      
+      // Validar duração se fornecida
+      if (audioDuration && (parseFloat(audioDuration) < 1 || parseFloat(audioDuration) > 300)) {
+        console.error('❌ Duração do áudio inválida:', audioDuration);
+        return res.status(400).json({ error: 'Duração do áudio inválida (1-300 segundos)' });
+      }
+      
+      console.log('✅ Arquivo de áudio validado com sucesso');
+    }
     
     const ticket = await Ticket.findByPk(ticketId);
     if (!ticket) {
@@ -21,7 +53,9 @@ export const sendFileMessage = async (req, res) => {
     }
     
     const fileUrl = `/uploads/${req.file.filename}`;
-    const msg = await TicketMessage.create({
+    
+    // Criar dados da mensagem
+    const messageData = {
       ticketId,
       sender,
       content: content || '',
@@ -29,9 +63,22 @@ export const sendFileMessage = async (req, res) => {
       fileUrl,
       fileName: req.file.originalname,
       fileType: req.file.mimetype
-    });
+    };
     
-    console.log(`✅ Mensagem com arquivo criada - ID: ${msg.id}`);
+    // Adicionar metadados específicos para áudio/voz
+    if (messageType === 'audio' || isVoiceNote === 'true') {
+      messageData.messageType = 'audio';
+      if (audioDuration) {
+        messageData.audioDuration = parseFloat(audioDuration);
+      }
+    }
+    
+    const msg = await TicketMessage.create(messageData);
+    
+    console.log(`✅ Mensagem com arquivo criada - ID: ${msg.id}`, {
+      type: messageData.messageType || 'file',
+      isVoice: isVoiceNote === 'true'
+    });
     
     // Enviar arquivo via WhatsApp se sender for 'user'
     if (sender === 'user') {
@@ -57,8 +104,32 @@ export const sendFileMessage = async (req, res) => {
             try {
               console.log(`📤 Enviando arquivo via Baileys para ${ticket.contact}`);
               const fileBuffer = fs.readFileSync(filePath);
+              
+              // Preparar opções para áudio
+              const mediaOptions = {};
+              
+              // Se for áudio e tiver informações específicas
+              if (req.file.mimetype.startsWith('audio/')) {
+                mediaOptions.isVoiceNote = isVoiceNote === 'true';
+                
+                if (audioDuration) {
+                  mediaOptions.duration = audioDuration;
+                  console.log(`🎵 Enviando áudio com duração: ${audioDuration}s`);
+                }
+                
+                console.log(`🎵 Enviando como ${mediaOptions.isVoiceNote ? 'nota de voz (PTT)' : 'arquivo de áudio'}`);
+              }
+              
               // Usar session.whatsappId em vez de ticket.sessionId
-              await sendMediaBaileys(session.whatsappId, ticket.contact, fileBuffer, req.file.mimetype);
+              await sendMediaBaileys(
+                session.whatsappId, 
+                ticket.contact, 
+                fileBuffer, 
+                req.file.mimetype, 
+                content || '', // caption
+                mediaOptions
+              );
+              
               console.log(`✅ Arquivo enviado via Baileys`);
               fileSent = true;
             } catch (baileysError) {

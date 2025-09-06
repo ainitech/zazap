@@ -41,9 +41,16 @@ const authenticateSocket = async (socket, next) => {
 };
 
 export const initializeSocket = (server) => {
+  const raw = process.env.FRONTEND_ORIGINS || process.env.FRONTEND_URL || '';
+  const allowed = raw
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+  const socketCorsOrigins = allowed.length > 0 ? allowed : (process.env.NODE_ENV !== 'production' ? ['http://localhost:3000'] : []);
+
   io = new SocketIOServer(server, {
     cors: {
-      origin: ['http://localhost:3000', 'http://localhost:3001'],
+      origin: socketCorsOrigins,
       methods: ['GET', 'POST'],
       credentials: true
     },
@@ -111,7 +118,7 @@ export const emitToTicket = (ticketId, event, data) => {
     const room = io.sockets.adapter.rooms.get(`ticket-${ticketId}`);
     const clientCount = room ? room.size : 0;
     
-    
+    console.log(`📊 Emitindo '${event}' para sala ticket-${ticketId} (${clientCount} clientes conectados)`);
     io.to(`ticket-${ticketId}`).emit(event, data);
     console.log(`✅ Evento '${event}' emitido para sala ticket-${ticketId}`);
   } else {
@@ -121,8 +128,9 @@ export const emitToTicket = (ticketId, event, data) => {
 
 export const emitToAll = (event, data) => {
   if (io) {
+    const connectedClients = io.sockets.sockets.size;
+    console.log(`✅ Evento '${event}' emitido para todos os clientes (${connectedClients} conectados)`);
     io.emit(event, data);
-    console.log(`✅ Evento '${event}' emitido para todos os clientes`);
   } else {
     console.error(`❌ Socket.IO não inicializado para emitir evento '${event}' globalmente`);
   }

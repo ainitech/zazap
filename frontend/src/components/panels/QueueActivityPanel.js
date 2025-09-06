@@ -12,6 +12,7 @@ import {
   ArchiveBoxIcon,
   ArrowPathIcon
 } from '@heroicons/react/24/outline';
+import { apiUrl } from '../../utils/apiClient';
 
 const QueueActivityPanel = ({ isOpen, onClose }) => {
   const [activities, setActivities] = useState([]);
@@ -20,8 +21,10 @@ const QueueActivityPanel = ({ isOpen, onClose }) => {
   useEffect(() => {
     if (isOpen) {
       fetchRecentActivities();
-      // Configurar WebSocket para atividades em tempo real
-      const ws = new WebSocket(process.env.REACT_APP_WS_URL || 'ws://localhost:3001');
+  // Configurar WebSocket para atividades em tempo real
+  const httpBase = apiUrl('/').replace(/\/$/, '');
+  const wsUrl = httpBase.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
+  const ws = new WebSocket(wsUrl);
       
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
@@ -40,7 +43,7 @@ const QueueActivityPanel = ({ isOpen, onClose }) => {
     setIsLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/queues/activities', {
+  const response = await fetch(apiUrl('/api/queues/activities'), {
         headers: {
           'Authorization': `Bearer ${token}`
         }

@@ -22,7 +22,16 @@ import { SocketProvider } from './context/SocketContext';
 import { ProtectedRoute } from './components/PageLayout';
 
 function AppRoutes() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
+
+  // Evitar redirecionamentos prematuros enquanto autenticação carrega
+  if (loading) {
+    return (
+      <Routes>
+        <Route path="*" element={<div className="flex items-center justify-center h-screen bg-slate-900 text-slate-300">Carregando...</div>} />
+      </Routes>
+    );
+  }
 
   console.log('🚦 AppRoutes: Renderizando, isAuthenticated:', isAuthenticated);
 

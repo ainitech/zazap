@@ -5,24 +5,94 @@ import {
   listBaileysSessions 
 } from './baileysService.js';
 import { emitToAll } from './socket.js';
-const { 
+import { 
   handleBaileysMessage 
-} = await import('./messageCallbacks.js');
+} from './messageCallbacks.js';
+
+// Função para normalizar sessionId (remover device ID)
+const normalizeSessionId = (sessionId) => {
+  return sessionId.split(':')[0];
+};
+
+// Função para encontrar sessão no banco usando base normalizada
+const findSessionByBaseNumber = async (whatsappId) => {
+  const baseNumber = normalizeSessionId(whatsappId);
+  
+  // Primeiro tentar busca exata
+  let session = await Session.findOne({ where: { whatsappId } });
+  
+  if (!session) {
+    // Se não encontrar, buscar por base number
+    const allSessions = await Session.findAll();
+    session = allSessions.find(s => normalizeSessionId(s.whatsappId) === baseNumber);
+    
+    if (session) {
+      console.log(`🔄 Sessão encontrada por base number: ${session.whatsappId} para busca ${whatsappId}`);
+    }
+  }
+  
+  return session;
+};
 
 // Função para verificar se uma sessão está realmente ativa
 const isSessionActuallyActive = async (whatsappId, library) => {
   try {
-    console.log(`🔍 Verificando se sessão ${whatsappId} (${library}) está realmente ativa...`);
+    // Sempre usar o número base para verificações
+    const baseNumber = normalizeSessionId(whatsappId);
+    console.log(`🔍 Verificando se sessão ${baseNumber} (${library}) está realmente ativa...`);
 
-  if (library === 'baileys') {
-      const session = getBaileysSession(whatsappId);
-      const isActive = session && session.user;
+    if (library === 'baileys') {
+      // Primeiro tentar encontrar pela ID exata
+      let session = getBaileysSession(baseNumber);
+      let isActive = session && session.user;
 
-      console.log(`📱 Baileys - Sessão encontrada: ${!!session}`);
-      console.log(`📱 Baileys - Tem user: ${!!(session && session.user)}`);
-      console.log(`📱 Baileys - Status final: ${isActive ? 'ATIVA' : 'INATIVA'}`);
+      if (isActive) {
+        console.log(`✅ Sessão encontrada pela ID base: ${baseNumber}`);
+        console.log(`📱 Baileys - Sessão encontrada: ${!!session}`);
+        console.log(`📱 Baileys - Tem user: ${!!(session && session.user)}`);
+        console.log(`📱 Baileys - Status final: ATIVA`);
+        return true;
+      }
 
-      return isActive;
+      // Se não encontrou pela ID base, tentar pelo ID completo (com device ID)
+      console.log(`🔄 Tentando encontrar sessão pelo ID completo: ${whatsappId}`);
+      session = getBaileysSession(whatsappId);
+      isActive = session && session.user;
+
+      if (isActive) {
+        console.log(`✅ Sessão encontrada pelo ID completo: ${whatsappId}`);
+        return true;
+      }
+
+      // Verificar todas as sessões ativas para encontrar uma com o mesmo base number
+      const activeSessions = listBaileysSessions();
+      console.log(`📋 Sessões ativas no Baileys: ${activeSessions.map(s => s.sessionId).join(', ') || 'nenhuma'}`);
+
+      // Procurar por uma sessão ativa com o mesmo número base
+      const matchingSession = activeSessions.find(s => {
+        const sBaseNumber = normalizeSessionId(s.sessionId);
+        return sBaseNumber === baseNumber;
+      });
+
+      if (matchingSession) {
+        console.log(`🔄 Sessão encontrada por base number: ${matchingSession.sessionId} para busca ${baseNumber}`);
+
+        // Atualizar o whatsappId no banco de dados para o ID correto
+        try {
+          const dbSession = await findSessionByBaseNumber(whatsappId);
+          if (dbSession && dbSession.whatsappId !== matchingSession.sessionId) {
+            console.log(`📝 Atualizando whatsappId no banco: ${dbSession.whatsappId} → ${matchingSession.sessionId}`);
+            await dbSession.update({ whatsappId: matchingSession.sessionId });
+          }
+        } catch (updateError) {
+          console.error(`❌ Erro ao atualizar whatsappId no banco:`, updateError.message);
+        }
+
+        return true;
+      }
+
+      console.log(`❌ Nenhuma sessão ativa encontrada para ${baseNumber}`);
+      return false;
     }
 
     console.log(`❌ Biblioteca não reconhecida: ${library}`);
@@ -31,9 +101,7 @@ const isSessionActuallyActive = async (whatsappId, library) => {
     console.error(`❌ Erro ao verificar sessão ${whatsappId}:`, error.message);
     return false;
   }
-};
-
-// Função para reativar uma sessão específica
+};// Função para reativar uma sessão específica
 const reactivateSession = async (session) => {
   try {
     console.log(`🔄 Reativando sessão ${session.whatsappId} (${session.library}) com callbacks de mídia...`);
@@ -48,10 +116,22 @@ const reactivateSession = async (session) => {
   if (session.library === 'baileys') {
       // Criar callback para processamento de mensagens
       const onMessage = async (message) => {
-        await handleBaileysMessage(message, session.id);
+        console.log(`📨 [SESSION MANAGER] Callback onMessage chamado para sessão ${session.id}`);
+        console.log(`📨 [SESSION MANAGER] Verificando se handleBaileysMessage existe:`, typeof handleBaileysMessage);
+        try {
+          if (typeof handleBaileysMessage === 'function') {
+            console.log(`📨 [SESSION MANAGER] Chamando handleBaileysMessage...`);
+            await handleBaileysMessage(message, session.id);
+            console.log(`📨 [SESSION MANAGER] handleBaileysMessage concluído`);
+          } else {
+            console.error(`❌ [SESSION MANAGER] handleBaileysMessage não é uma função:`, handleBaileysMessage);
+          }
+        } catch (error) {
+          console.error(`❌ [SESSION MANAGER] Erro no handleBaileysMessage:`, error);
+        }
       };
       // Baileys: (sessionId, onQR, onReady, onMessage)
-      await createBaileysSession(session.whatsappId, null, null, onMessage);
+  await createBaileysSession(normalizeSessionId(session.whatsappId), null, null, onMessage);
     }
 
     console.log(`✅ Sessão ${session.whatsappId} reativada com sucesso com callbacks de mensagens e mídia`);
@@ -75,21 +155,48 @@ export const syncAllSessions = async () => {
     let reconnectedCount = 0;
     let disconnectedCount = 0;
 
+    // Primeiro, obter todas as sessões ativas do Baileys
+    const activeBaileysSessions = listBaileysSessions();
+  console.log(`📋 Sessões ativas no Baileys: ${activeBaileysSessions.map(s => s.sessionId).join(', ') || 'nenhuma'}`);
+
     for (const session of sessions) {
-      console.log(`🔍 Verificando sessão ${session.whatsappId} (${session.library}) - Status atual: ${session.status}`);
+      // Sempre usar o número base para verificações
+      const baseNumber = normalizeSessionId(session.whatsappId);
+      console.log(`🔍 Verificando sessão ${baseNumber} (${session.library}) - Status atual: ${session.status}`);
 
       const isActive = await isSessionActuallyActive(session.whatsappId, session.library);
 
-      if (session.status === 'connected' && !isActive) {
-        console.log(`⚠️ Sessão ${session.whatsappId} está marcada como conectada mas não está ativa`);
+      // Verificar se existe uma sessão ativa com o mesmo base number
+      if (!isActive && session.library === 'baileys') {
+        const activeSessionWithSameBase = activeBaileysSessions.find(s => {
+          const sBaseNumber = normalizeSessionId(s.sessionId);
+          return sBaseNumber === baseNumber;
+        });
 
-  console.log(`⏳ Mantendo sessão Baileys ${session.whatsappId} (não reativar automaticamente)`);
+        if (activeSessionWithSameBase) {
+          console.log(`🔄 Encontrada sessão ativa com mesmo base number: ${activeSessionWithSameBase.sessionId} para ${baseNumber}`);
+
+          // Atualizar o whatsappId na sessão do banco de dados para usar apenas o número base
+          await session.update({
+            whatsappId: baseNumber, // Sempre usar apenas o número base
+            status: 'connected'
+          });
+
+          console.log(`✅ Sessão ${session.whatsappId} atualizada para ${baseNumber}`);
+          reconnectedCount++;
+          continue;
+        }
+      }
+
+      if (session.status === 'connected' && !isActive) {
+        console.log(`⚠️ Sessão ${baseNumber} está marcada como conectada mas não está ativa`);
+        console.log(`⏳ Mantendo sessão Baileys ${baseNumber} (não reativar automaticamente)`);
       } else if (session.status === 'connected' && isActive) {
-        console.log(`✅ Sessão ${session.whatsappId} está ativa e conectada`);
+        console.log(`✅ Sessão ${baseNumber} está ativa e conectada`);
       } else if (session.status === 'disconnected') {
-        console.log(`🔌 Sessão ${session.whatsappId} está desconectada (normal)`);
+        console.log(`🔌 Sessão ${baseNumber} está desconectada (normal)`);
       } else {
-        console.log(`📋 Sessão ${session.whatsappId} tem status: ${session.status}`);
+        console.log(`📋 Sessão ${baseNumber} tem status: ${session.status}`);
       }
     }
 
@@ -139,11 +246,11 @@ export const autoReconnectSessions = async () => {
   try {
     console.log('🚀 Iniciando reconexão automática de sessões...');
 
-    const sessions = await Session.findAll({
-      where: { status: 'connected' }
-    });
+  // Buscar todas as sessões e filtrar em memória (case-insensitive)
+  const all = await Session.findAll();
+  const sessions = all.filter(s => String(s.status || '').toLowerCase() === 'connected');
 
-    if (sessions.length === 0) {
+  if (sessions.length === 0) {
       console.log('📱 Nenhuma sessão para reconectar');
       return;
     }
@@ -151,17 +258,19 @@ export const autoReconnectSessions = async () => {
     console.log(`📱 Encontradas ${sessions.length} sessões marcadas como conectadas`);
 
     for (const session of sessions) {
-      console.log(`� Verificando se sessão ${session.whatsappId} realmente precisa de reconexão...`);
+      // Sempre normalizar o ID para evitar problemas com device IDs
+      const baseNumber = normalizeSessionId(session.whatsappId);
+      console.log(`🔍 Verificando se sessão ${baseNumber} realmente precisa de reconexão...`);
 
       // Verificar se a sessão já está ativa antes de tentar reconectar
       const isAlreadyActive = await isSessionActuallyActive(session.whatsappId, session.library);
 
       if (isAlreadyActive) {
-        console.log(`✅ Sessão ${session.whatsappId} já está ativa, pulando reconexão`);
+        console.log(`✅ Sessão ${baseNumber} já está ativa, pulando reconexão`);
         continue;
       }
 
-      console.log(`🔄 Sessão ${session.whatsappId} não está ativa, tentando reconectar...`);
+      console.log(`🔄 Sessão ${baseNumber} não está ativa, tentando reconectar...`);
 
       // Aguardar um pouco entre tentativas para não sobrecarregar
       await new Promise(resolve => setTimeout(resolve, 2000));

@@ -5,8 +5,9 @@ import ConversationList from '../chat/ConversationList';
 import ChatArea from '../chat/ChatArea';
 import ContactInfo from '../chat/ContactInfo';
 import { useSocket } from '../../context/SocketContext';
+import { apiUrl } from '../../utils/apiClient';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+// Use centralized apiUrl for backend requests
 
 export default function ChatComponent() {
   const { ticketId, uid } = useParams();
@@ -120,7 +121,7 @@ useEffect(() => {
     };
     
     // Listener para novas mensagens
-    const handleNewMessage = (message) => {
+  const handleNewMessage = (message) => {
       try {
         console.log('🔔 ChatComponent: handleNewMessage chamado');
         console.log('📝 Dados recebidos (raw):', message);
@@ -168,6 +169,32 @@ useEffect(() => {
             selectedTicketId: selectedTicket?.id,
             msgTicketId,
             areEqual: selectedTicket && msgTicketId === selectedTicket.id
+          });
+
+          // Se a mensagem é de um ticket que não está na lista atual, atualizar a lista de tickets
+          const existsInList = Array.isArray(tickets) && tickets.some(t => Number(t.id) === Number(msgTicketId));
+          if (!existsInList && msgTicketId) {
+            console.log('🔄 Ticket não está na lista atual. Atualizando tickets...');
+            fetchTickets(true);
+          }
+        }
+
+        // Atualizar sempre a lista de tickets com lastMessage e updatedAt para o ticket correspondente
+        if (msgTicketId) {
+          setTickets(prev => {
+            if (!Array.isArray(prev)) return prev;
+            const updated = prev.map(t => {
+              if (Number(t.id) === Number(msgTicketId)) {
+                return {
+                  ...t,
+                  lastMessage: normalized.content || normalized.lastMessage || t.lastMessage,
+                  updatedAt: normalized.ticketUpdatedAt || new Date().toISOString(),
+                  unreadCount: (selectedTicket && selectedTicket.id === msgTicketId) ? 0 : ((t.unreadCount || 0) + (normalized.sender === 'contact' ? 1 : 0))
+                };
+              }
+              return t;
+            });
+            return updated;
           });
         }
       } catch (err) {
@@ -262,7 +289,7 @@ useEffect(() => {
     try {
       console.log(`🎫 Aceitando ticket #${ticketId}...`);
       
-      const response = await fetch(`${API_URL}/api/tickets/${ticketId}/accept`, {
+      const response = await fetch(apiUrl(`/api/tickets/${ticketId}/accept`), {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
@@ -301,7 +328,7 @@ useEffect(() => {
         console.trace('Stack trace da chamada fetchTickets:');
       }
       
-      const response = await fetch(`${API_URL}/api/tickets`, {
+  const response = await fetch(apiUrl('/api/tickets'), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -323,7 +350,7 @@ useEffect(() => {
     try {
       console.log(`🔍 [FETCH BY UID] Buscando ticket por UID: ${uid}`);
       
-      const response = await fetch(`${API_URL}/api/tickets/uid/${uid}`, {
+  const response = await fetch(apiUrl(`/api/tickets/uid/${uid}`), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -349,7 +376,7 @@ useEffect(() => {
     try {
       console.log(`🔍 [FETCH BY ID] Buscando ticket por ID: ${id}`);
       
-      const response = await fetch(`${API_URL}/api/tickets?ticketId=${id}`, {
+  const response = await fetch(apiUrl(`/api/tickets?ticketId=${id}`), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -379,7 +406,7 @@ useEffect(() => {
       console.log(`🔄 [FETCH ONCE] Buscando mensagens iniciais para ticket ${ticketId}...`);
       console.trace('Stack trace da chamada fetchMessagesOnce:');
       
-      const response = await fetch(`${API_URL}/api/ticket-messages/${ticketId}`, {
+  const response = await fetch(apiUrl(`/api/ticket-messages/${ticketId}`), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -464,7 +491,7 @@ useEffect(() => {
       console.log(`📤 Enviando mensagem para ticket ${selectedTicket.id}...`);
       console.log(`🔗 WebSocket conectado: ${isConnected}, Socket: ${socket ? 'OK' : 'NULL'}`);
       
-      const response = await fetch(`${API_URL}/api/ticket-messages/${selectedTicket.id}`, {
+  const response = await fetch(apiUrl(`/api/ticket-messages/${selectedTicket.id}`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiUrl, API_BASE_URL } from '../../utils/apiClient';
 import { 
   PlusIcon,
   QueueListIcon,
@@ -34,7 +35,10 @@ import {
   PauseIcon,
   PlayIcon,
   ArrowsUpDownIcon,
-  ClipboardDocumentListIcon
+  ClipboardDocumentListIcon,
+  BoltIcon,
+  StarIcon,
+  InboxIcon
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../../context/AuthContext';
 
@@ -46,7 +50,7 @@ import QueueAdvancedSettingsModal from '../modals/QueueAdvancedSettingsModal';
 import QueueActivityPanel from '../panels/QueueActivityPanel';
 import QueueMetricsBar from '../metrics/QueueMetricsBar';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+// API base is resolved via apiUrl helper
 
 export default function QueuesComponent() {
   const { user } = useAuth();
@@ -89,6 +93,12 @@ export default function QueuesComponent() {
     rotation: 'round-robin',
     integration: 'whatsapp',
     autoReceiveMessages: false,
+    autoAssignment: false,
+    autoReply: false,
+    autoClose: false,
+    autoCloseTime: 60,
+    feedbackCollection: false,
+    feedbackMessage: '',
     fileList: [],
     options: {
       autoAssign: true,
@@ -97,7 +107,6 @@ export default function QueuesComponent() {
         start: '08:00',
         end: '18:00'
       },
-      autoReply: false,
       transferToHuman: true,
       collectFeedback: false,
       responseTimeLimit: 30,
@@ -136,7 +145,7 @@ export default function QueuesComponent() {
 
   const fetchSessions = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/sessions`, {
+  const response = await fetch(apiUrl('/api/sessions'), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -157,7 +166,7 @@ export default function QueuesComponent() {
   const fetchQueues = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${API_URL}/api/queues`, {
+  const response = await fetch(apiUrl('/api/queues'), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -179,7 +188,7 @@ export default function QueuesComponent() {
 
   const fetchUsers = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/users`, {
+  const response = await fetch(apiUrl('/api/users'), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -205,7 +214,7 @@ export default function QueuesComponent() {
   // Novas funções de gerenciamento avançado
   const fetchQueueStats = async (queueId) => {
     try {
-      const response = await fetch(`${API_URL}/api/queues/${queueId}/stats`, {
+  const response = await fetch(apiUrl(`/api/queues/${queueId}/stats`), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -229,7 +238,7 @@ export default function QueuesComponent() {
         updatedAt: undefined
       };
       
-      const response = await fetch(`${API_URL}/api/queues`, {
+  const response = await fetch(apiUrl('/api/queues'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -250,7 +259,7 @@ export default function QueuesComponent() {
 
   const toggleQueueStatus = async (queueId, currentStatus) => {
     try {
-      const response = await fetch(`${API_URL}/api/queues/${queueId}`, {
+  const response = await fetch(apiUrl(`/api/queues/${queueId}`), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -271,7 +280,7 @@ export default function QueuesComponent() {
     if (!window.confirm('Tem certeza que deseja arquivar esta fila? Ela ficará inativa e oculta da lista principal.')) return;
     
     try {
-      const response = await fetch(`${API_URL}/api/queues/${queueId}/archive`, {
+      const response = await fetch(apiUrl(`/api/queues/${queueId}/archive`), {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -304,7 +313,7 @@ export default function QueuesComponent() {
     if (!window.confirm(confirmMessage[action])) return;
 
     try {
-      const response = await fetch(`${API_URL}/api/queues/bulk`, {
+      const response = await fetch(apiUrl('/api/queues/bulk'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -378,11 +387,17 @@ export default function QueuesComponent() {
       alert('Selecione uma sessão para a fila.');
       return;
     }
+    
+    console.log('Dados sendo enviados:', formData);
+    
     try {
       const url = editingQueue 
-        ? `${API_URL}/api/queues/${editingQueue.id}`
-        : `${API_URL}/api/queues`;
+        ? apiUrl(`/api/queues/${editingQueue.id}`)
+        : apiUrl('/api/queues');
       const method = editingQueue ? 'PUT' : 'POST';
+      
+      console.log(`Enviando ${method} para ${url}`);
+      
       const response = await fetch(url, {
         method,
         headers: {
@@ -391,12 +406,21 @@ export default function QueuesComponent() {
         },
         body: JSON.stringify(formData)
       });
+      
+      const responseData = await response.json();
+      console.log('Resposta do servidor:', responseData);
+      
       if (response.ok) {
         await fetchQueues();
         handleCloseModal();
+        console.log('Fila salva com sucesso!');
+      } else {
+        console.error('Erro na resposta:', responseData);
+        alert('Erro ao salvar fila: ' + (responseData.error || 'Erro desconhecido'));
       }
     } catch (error) {
       console.error('Erro ao salvar fila:', error);
+      alert('Erro ao salvar fila: ' + error.message);
     }
   };
 
@@ -404,7 +428,7 @@ export default function QueuesComponent() {
     if (!window.confirm('Tem certeza que deseja excluir esta fila?')) return;
     
     try {
-      const response = await fetch(`${API_URL}/api/queues/${queueId}`, {
+      const response = await fetch(apiUrl(`/api/queues/${queueId}`), {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -433,6 +457,12 @@ export default function QueuesComponent() {
       rotation: queue.rotation || 'round-robin',
       integration: queue.integration || 'whatsapp',
       autoReceiveMessages: queue.autoReceiveMessages || false,
+      autoAssignment: queue.autoAssignment || false,
+      autoReply: queue.autoReply || false,
+      autoClose: queue.autoClose || false,
+      autoCloseTime: queue.autoCloseTime || 60,
+      feedbackCollection: queue.feedbackCollection || false,
+      feedbackMessage: queue.feedbackMessage || '',
       fileList: queue.fileList || [],
       options: queue.options || {
         autoAssign: true,
@@ -461,24 +491,32 @@ export default function QueuesComponent() {
       rotation: 'round-robin',
       integration: 'whatsapp',
       autoReceiveMessages: false,
+      autoAssignment: false,
+      autoReply: false,
+      autoClose: false,
+      autoCloseTime: 60,
+      feedbackCollection: false,
+      feedbackMessage: '',
       fileList: [],
       options: {
-        autoAssign: true,
         maxTicketsPerUser: 5,
         workingHours: {
           start: '08:00',
           end: '18:00'
         },
-        autoReply: false,
         transferToHuman: true,
-        collectFeedback: false
+        responseTimeLimit: 30,
+        priority: 'normal',
+        notifyNewTicket: true,
+        notifyTimeouts: true,
+        allowedFileTypes: ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'doc', 'docx', 'txt', 'mp3', 'mp4', 'avi', 'zip', 'xlsx', 'csv']
       }
     });
   };
 
   const assignUserToQueue = async (queueId, userId) => {
     try {
-      const response = await fetch(`${API_URL}/api/queues/assign`, {
+      const response = await fetch(apiUrl('/api/queues/assign'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -497,7 +535,7 @@ export default function QueuesComponent() {
 
   const removeUserFromQueue = async (queueId, userId) => {
     try {
-      const response = await fetch(`${API_URL}/api/queues/remove-user`, {
+      const response = await fetch(apiUrl('/api/queues/remove-user'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -530,7 +568,7 @@ export default function QueuesComponent() {
     if (!editQueueName.trim() || !selectedQueue) return;
 
     try {
-      const response = await fetch(`${API_URL}/api/queues/${selectedQueue.id}`, {
+      const response = await fetch(apiUrl(`/api/queues/${selectedQueue.id}`), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -557,7 +595,7 @@ export default function QueuesComponent() {
   // Novas funções para funcionalidades avançadas
   const handleTransferTicket = async (data) => {
     try {
-      const response = await fetch(`${API_URL}/api/queues/${selectedQueueForAction.id}/transfer-ticket`, {
+      const response = await fetch(apiUrl(`/api/queues/${selectedQueueForAction.id}/transfer-ticket`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -582,7 +620,7 @@ export default function QueuesComponent() {
 
   const handleDuplicateQueue = async (data) => {
     try {
-      const response = await fetch(`${API_URL}/api/queues/${selectedQueueForAction.id}/duplicate`, {
+      const response = await fetch(apiUrl(`/api/queues/${selectedQueueForAction.id}/duplicate`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -628,7 +666,7 @@ export default function QueuesComponent() {
 
   const handleAdvancedSettingsSave = async (settings) => {
     try {
-      const response = await fetch(`${API_URL}/api/queues/${selectedQueueForAction.id}/advanced-settings`, {
+      const response = await fetch(apiUrl(`/api/queues/${selectedQueueForAction.id}/advanced-settings`), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -660,63 +698,72 @@ export default function QueuesComponent() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 p-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-4">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-white mb-2">Gerenciamento de Filas</h1>
-            <p className="text-slate-400">Organize e distribua atendimentos por departamentos</p>
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-xl shadow-lg">
+              <QueueListIcon className="h-5 w-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-yellow-400 to-orange-500 bg-clip-text text-transparent">
+                Gerenciamento de Filas
+              </h1>
+              <p className="text-slate-400 text-sm">Organize e distribua atendimentos por departamentos</p>
+            </div>
           </div>
           
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-2">
             <button
               onClick={() => setShowHelpModal(true)}
-              className="flex items-center space-x-2 bg-slate-700 text-white px-4 py-2 rounded-lg font-medium hover:bg-slate-600 transition-colors"
+              className="flex items-center space-x-2 bg-slate-700/50 text-slate-300 px-3 py-2 rounded-lg font-medium hover:bg-slate-600/50 transition-all duration-200 backdrop-blur-sm border border-slate-600/30"
             >
-              <QuestionMarkCircleIcon className="w-5 h-5" />
-              <span>Ajuda</span>
+              <QuestionMarkCircleIcon className="w-4 h-4" />
+              <span className="text-sm">Ajuda</span>
             </button>
             <button
               onClick={() => setShowActivityPanel(true)}
-              className="flex items-center space-x-2 bg-slate-700 text-white px-4 py-2 rounded-lg font-medium hover:bg-slate-600 transition-colors"
+              className="flex items-center space-x-2 bg-slate-700/50 text-slate-300 px-3 py-2 rounded-lg font-medium hover:bg-slate-600/50 transition-all duration-200 backdrop-blur-sm border border-slate-600/30"
             >
-              <BellIcon className="w-5 h-5" />
-              <span>Atividades</span>
+              <BellIcon className="w-4 h-4" />
+              <span className="text-sm">Atividades</span>
             </button>
             <button
               onClick={() => setShowModal(true)}
-              className="flex items-center space-x-2 bg-yellow-500 text-slate-900 px-4 py-2 rounded-lg font-medium hover:bg-yellow-400 transition-colors"
+              className="flex items-center space-x-2 bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-3 py-2 rounded-lg font-medium hover:from-yellow-600 hover:to-orange-600 transition-all duration-200 shadow-lg"
             >
-              <PlusIcon className="w-5 h-5" />
-              <span>Nova Fila</span>
+              <PlusIcon className="w-4 h-4" />
+              <span className="text-sm">Nova Fila</span>
             </button>
           </div>
         </div>
 
         {/* Metrics Bar */}
-        <QueueMetricsBar queues={filteredQueues} />
+        <div className="mb-4">
+          <QueueMetricsBar queues={filteredQueues} />
+        </div>
 
         {/* Toolbar */}
-        <div className="bg-slate-800 rounded-lg border border-slate-700 p-4 mb-6">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0">
+        <div className="bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-xl p-4 mb-4">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-3 lg:space-y-0">
             {/* Search and Filters */}
-            <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
+            <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3">
               <div className="relative">
-                <MagnifyingGlassIcon className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" />
+                <MagnifyingGlassIcon className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
                   placeholder="Buscar filas..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 pr-4 py-2 bg-slate-700 text-white rounded-lg border border-slate-600 custom-input w-full sm:w-64"
+                  className="pl-9 pr-3 py-2 bg-slate-700/70 text-white rounded-lg border border-slate-700/50 focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all duration-200 backdrop-blur-sm w-full sm:w-56 text-sm"
                 />
               </div>
 
               <select
                 value={filterStatus}
                 onChange={(e) => setFilterStatus(e.target.value)}
-                className="px-3 py-2 bg-slate-700 text-white rounded-lg border border-slate-600 custom-input"
+                className="px-3 py-2 bg-slate-700/70 text-white rounded-lg border border-slate-700/50 focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all duration-200 backdrop-blur-sm text-sm"
               >
                 <option value="all">Todas as filas</option>
                 <option value="active">Apenas ativas</option>
@@ -728,7 +775,7 @@ export default function QueuesComponent() {
                 <select
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value)}
-                  className="px-3 py-2 bg-slate-700 text-white rounded-lg border border-slate-600 custom-input"
+                  className="px-3 py-2 bg-slate-700/70 text-white rounded-lg border border-slate-700/50 focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all duration-200 backdrop-blur-sm text-sm"
                 >
                   <option value="name">Ordenar por nome</option>
                   <option value="botOrder">Ordenar por ordem</option>
@@ -737,7 +784,7 @@ export default function QueuesComponent() {
                 
                 <button
                   onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-                  className="p-2 bg-slate-700 text-white rounded-lg border border-slate-600 hover:bg-slate-600 transition-colors"
+                  className="p-2 bg-slate-700/70 text-white rounded-lg border border-slate-700/50 hover:bg-slate-600/70 transition-all duration-200"
                 >
                   <ArrowsUpDownIcon className="w-4 h-4" />
                 </button>
@@ -745,7 +792,7 @@ export default function QueuesComponent() {
             </div>
 
             {/* Bulk Actions */}
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-2">
               {selectedQueues.length > 0 && (
                 <div className="flex items-center space-x-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-3 py-2">
                   <span className="text-yellow-400 text-sm font-medium">
@@ -754,32 +801,28 @@ export default function QueuesComponent() {
                   
                   <button
                     onClick={() => bulkAction('activate')}
-                    className="p-1 text-green-400 hover:text-green-300 transition-colors tooltip"
-                    data-tooltip="Ativar selecionadas"
+                    className="p-1 text-green-400 hover:text-green-300 transition-colors"
                   >
                     <PlayIcon className="w-4 h-4" />
                   </button>
                   
                   <button
                     onClick={() => bulkAction('deactivate')}
-                    className="p-1 text-orange-400 hover:text-orange-300 transition-colors tooltip"
-                    data-tooltip="Desativar selecionadas"
+                    className="p-1 text-orange-400 hover:text-orange-300 transition-colors"
                   >
                     <PauseIcon className="w-4 h-4" />
                   </button>
                   
                   <button
                     onClick={() => bulkAction('archive')}
-                    className="p-1 text-blue-400 hover:text-blue-300 transition-colors tooltip"
-                    data-tooltip="Arquivar selecionadas"
+                    className="p-1 text-blue-400 hover:text-blue-300 transition-colors"
                   >
                     <ArchiveBoxIcon className="w-4 h-4" />
                   </button>
                   
                   <button
                     onClick={() => bulkAction('delete')}
-                    className="p-1 text-red-400 hover:text-red-300 transition-colors tooltip"
-                    data-tooltip="Excluir selecionadas"
+                    className="p-1 text-red-400 hover:text-red-300 transition-colors"
                   >
                     <TrashIcon className="w-4 h-4" />
                   </button>
@@ -788,7 +831,7 @@ export default function QueuesComponent() {
 
               <button
                 onClick={selectAllQueues}
-                className="flex items-center space-x-2 px-3 py-2 bg-slate-700 text-white rounded-lg border border-slate-600 hover:bg-slate-600 transition-colors"
+                className="flex items-center space-x-2 px-3 py-2 bg-slate-700/70 text-white rounded-lg border border-slate-700/50 hover:bg-slate-600/70 transition-all duration-200 text-sm"
               >
                 <ClipboardDocumentListIcon className="w-4 h-4" />
                 <span>{selectedQueues.length === sortedQueues.length ? 'Desmarcar' : 'Selecionar'} todas</span>
@@ -797,27 +840,27 @@ export default function QueuesComponent() {
           </div>
 
           {/* Stats Summary */}
-          <div className="mt-4 pt-4 border-t border-slate-700">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="mt-3 pt-3 border-t border-slate-700/50">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="text-center">
-                <div className="text-2xl font-bold text-white">{queues.length}</div>
-                <div className="text-sm text-slate-400">Total de Filas</div>
+                <div className="text-xl font-bold text-white">{queues.length}</div>
+                <div className="text-xs text-slate-400">Total de Filas</div>
               </div>
               <div className="text-center">
-                <div className="text-2xl font-bold text-green-400">{queues.filter(q => q.isActive).length}</div>
-                <div className="text-sm text-slate-400">Filas Ativas</div>
+                <div className="text-xl font-bold text-green-400">{queues.filter(q => q.isActive).length}</div>
+                <div className="text-xs text-slate-400">Filas Ativas</div>
               </div>
               <div className="text-center">
-                <div className="text-2xl font-bold text-yellow-400">
+                <div className="text-xl font-bold text-yellow-400">
                   {queues.reduce((acc, q) => acc + (q._count?.waitingTickets || 0), 0)}
                 </div>
-                <div className="text-sm text-slate-400">Tickets Aguardando</div>
+                <div className="text-xs text-slate-400">Tickets Aguardando</div>
               </div>
               <div className="text-center">
-                <div className="text-2xl font-bold text-blue-400">
+                <div className="text-xl font-bold text-blue-400">
                   {queues.reduce((acc, q) => acc + (q.Users?.length || 0), 0)}
                 </div>
-                <div className="text-sm text-slate-400">Agentes Vinculados</div>
+                <div className="text-xs text-slate-400">Agentes Vinculados</div>
               </div>
             </div>
           </div>
@@ -825,15 +868,15 @@ export default function QueuesComponent() {
 
         {/* Queues Grid */}
         {loading ? (
-          <div className="flex items-center justify-center py-12">
+          <div className="flex items-center justify-center py-8">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-yellow-500"></div>
           </div>
         ) : (
           <div className="grid-auto-fit">
             {sortedQueues.map(queue => (
-              <div key={queue.id} className="bg-slate-800 rounded-lg border border-slate-700 p-6 card-hover fade-in relative">
+              <div key={queue.id} className="bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-xl p-4 hover:border-yellow-500/50 transition-all duration-200 card-hover fade-in relative">
                 {/* Selection Checkbox */}
-                <div className="absolute top-4 right-4">
+                <div className="absolute top-3 right-3">
                   <input
                     type="checkbox"
                     checked={selectedQueues.includes(queue.id)}
@@ -843,14 +886,14 @@ export default function QueuesComponent() {
                 </div>
 
                 {/* Queue Header */}
-                <div className="flex items-center justify-between mb-4 mr-8">
-                  <div className="flex items-center space-x-3">
+                <div className="flex items-center justify-between mb-3 mr-6">
+                  <div className="flex items-center space-x-2">
                     <div 
-                      className="w-5 h-5 rounded-full border-2 border-white/20 shadow-lg"
+                      className="w-4 h-4 rounded-full border-2 border-white/20 shadow-lg"
                       style={{ backgroundColor: queue.color || '#0420BF' }}
                     ></div>
                     <div>
-                      <h3 className="text-white font-semibold">{queue.name}</h3>
+                      <h3 className="text-white font-semibold text-sm">{queue.name}</h3>
                       <div className="flex items-center space-x-2 text-xs text-slate-400">
                         <span>Ordem: {queue.botOrder || 0}</span>
                         <span>•</span>
@@ -866,64 +909,55 @@ export default function QueuesComponent() {
                         fetchQueueStats(queue.id);
                         setShowStatsModal(true);
                       }}
-                      className="p-2 text-slate-400 hover:text-blue-400 hover:bg-slate-700 rounded transition-all tooltip"
-                      data-tooltip="Ver estatísticas"
+                      className="p-1 text-slate-400 hover:text-yellow-400 hover:bg-slate-700/50 rounded-lg transition-all"
                     >
                       <ChartBarIcon className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => duplicateQueue(queue)}
-                      className="p-2 text-slate-400 hover:text-purple-400 hover:bg-slate-700 rounded transition-all tooltip"
-                      data-tooltip="Duplicar fila"
+                      className="p-1 text-slate-400 hover:text-orange-400 hover:bg-slate-700/50 rounded-lg transition-all"
                     >
                       <DocumentDuplicateIcon className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => openTransferModal(queue)}
-                      className="p-2 text-slate-400 hover:text-indigo-400 hover:bg-slate-700 rounded transition-all tooltip"
-                      data-tooltip="Transferir ticket"
+                      className="p-1 text-slate-400 hover:text-indigo-400 hover:bg-slate-700 rounded transition-all"
                     >
                       <ArrowRightIcon className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => openPerformanceModal(queue)}
-                      className="p-2 text-slate-400 hover:text-green-400 hover:bg-slate-700 rounded transition-all tooltip"
-                      data-tooltip="Performance detalhada"
+                      className="p-1 text-slate-400 hover:text-green-400 hover:bg-slate-700 rounded transition-all"
                     >
                       <ChartBarIcon className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => openAdvancedSettingsModal(queue)}
-                      className="p-2 text-slate-400 hover:text-blue-400 hover:bg-slate-700 rounded transition-all tooltip"
-                      data-tooltip="Configurações avançadas"
+                      className="p-1 text-slate-400 hover:text-blue-400 hover:bg-slate-700 rounded transition-all"
                     >
                       <Cog6ToothIcon className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => toggleQueueStatus(queue.id, queue.isActive)}
-                      className="p-2 text-slate-400 hover:text-yellow-400 hover:bg-slate-700 rounded transition-all tooltip"
-                      data-tooltip={queue.isActive ? 'Desativar' : 'Ativar'}
+                      className="p-1 text-slate-400 hover:text-yellow-400 hover:bg-slate-700 rounded transition-all"
                     >
                       {queue.isActive ? <PauseIcon className="w-4 h-4" /> : <PlayIcon className="w-4 h-4" />}
                     </button>
                     <button
                       onClick={() => handleEdit(queue)}
-                      className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-all tooltip"
-                      data-tooltip="Editar fila"
+                      className="p-1 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-all"
                     >
                       <PencilIcon className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => archiveQueue(queue.id)}
-                      className="p-2 text-slate-400 hover:text-orange-400 hover:bg-slate-700 rounded transition-all tooltip"
-                      data-tooltip="Arquivar fila"
+                      className="p-1 text-slate-400 hover:text-orange-400 hover:bg-slate-700 rounded transition-all"
                     >
                       <ArchiveBoxIcon className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => handleDelete(queue.id)}
-                      className="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-700 rounded transition-all tooltip"
-                      data-tooltip="Excluir fila"
+                      className="p-1 text-slate-400 hover:text-red-400 hover:bg-slate-700 rounded transition-all"
                     >
                       <TrashIcon className="w-4 h-4" />
                     </button>
@@ -931,44 +965,44 @@ export default function QueuesComponent() {
                 </div>
 
                 {/* Integration Badge */}
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center space-x-2">
-                    <span className="badge badge-primary">
+                    <span className="badge badge-primary text-xs">
                       {queue.integration || 'WhatsApp'}
                     </span>
                     {queue.closeTicket && (
-                      <span className="badge badge-success">
+                      <span className="badge badge-success text-xs">
                         Auto-close
                       </span>
                     )}
                   </div>
                   
-                  <div className={`flex items-center space-x-1 text-sm ${queue.isActive ? 'text-green-400' : 'text-red-400'}`}>
+                  <div className={`flex items-center space-x-1 text-xs ${queue.isActive ? 'text-green-400' : 'text-red-400'}`}>
                     {queue.isActive ? (
-                      <CheckCircleIcon className="w-4 h-4" />
+                      <CheckCircleIcon className="w-3 h-3" />
                     ) : (
-                      <XMarkIcon className="w-4 h-4" />
+                      <XMarkIcon className="w-3 h-3" />
                     )}
                     <span>{queue.isActive ? 'Ativa' : 'Inativa'}</span>
                   </div>
                 </div>
 
                 {/* Queue Stats */}
-                <div className="grid grid-cols-3 gap-3 mb-4">
-                  <div className="text-center p-3 bg-slate-700/50 rounded-lg border border-slate-600/50 hover:border-yellow-500/30 transition-colors">
-                    <div className="text-yellow-400 text-lg font-semibold">
+                <div className="grid grid-cols-3 gap-2 mb-3">
+                  <div className="text-center p-2 bg-slate-700/50 rounded-lg border border-slate-600/50 hover:border-yellow-500/30 transition-colors">
+                    <div className="text-yellow-400 text-sm font-semibold">
                       {queue._count?.waitingTickets || 0}
                     </div>
                     <div className="text-slate-400 text-xs">Aguardando</div>
                   </div>
-                  <div className="text-center p-3 bg-slate-700/50 rounded-lg border border-slate-600/50 hover:border-green-500/30 transition-colors">
-                    <div className="text-green-400 text-lg font-semibold">
+                  <div className="text-center p-2 bg-slate-700/50 rounded-lg border border-slate-600/50 hover:border-green-500/30 transition-colors">
+                    <div className="text-green-400 text-sm font-semibold">
                       {queue._count?.activeTickets || 0}
                     </div>
                     <div className="text-slate-400 text-xs">Ativos</div>
                   </div>
-                  <div className="text-center p-3 bg-slate-700/50 rounded-lg border border-slate-600/50 hover:border-blue-500/30 transition-colors">
-                    <div className="text-blue-400 text-lg font-semibold">
+                  <div className="text-center p-2 bg-slate-700/50 rounded-lg border border-slate-600/50 hover:border-blue-500/30 transition-colors">
+                    <div className="text-blue-400 text-sm font-semibold">
                       {queue._count?.resolvedTickets || 0}
                     </div>
                     <div className="text-slate-400 text-xs">Resolvidos</div>
@@ -977,10 +1011,10 @@ export default function QueuesComponent() {
 
                 {/* Configuration Info */}
                 {(queue.options?.maxTicketsPerUser || queue.fileList?.length > 0) && (
-                  <div className="mb-4 p-3 bg-slate-700/30 rounded-lg border border-slate-600/30">
-                    <div className="flex items-center space-x-2 mb-2">
-                      <AdjustmentsHorizontalIcon className="w-4 h-4 text-yellow-500" />
-                      <span className="text-slate-300 text-sm font-medium">Configurações</span>
+                  <div className="mb-3 p-2 bg-slate-700/30 rounded-lg border border-slate-600/30">
+                    <div className="flex items-center space-x-2 mb-1">
+                      <AdjustmentsHorizontalIcon className="w-3 h-3 text-yellow-500" />
+                      <span className="text-slate-300 text-xs font-medium">Configurações</span>
                     </div>
                     
                     {queue.options?.maxTicketsPerUser && (
@@ -1093,14 +1127,14 @@ export default function QueuesComponent() {
         {/* Empty State */}
         {!loading && queues.length === 0 && (
           <div className="text-center py-16">
-            <div className="w-20 h-20 bg-yellow-500 rounded-2xl flex items-center justify-center mx-auto mb-6">
-              <QueueListIcon className="h-10 w-10 text-slate-900" />
+            <div className="p-4 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-2xl inline-flex items-center justify-center mx-auto mb-6">
+              <QueueListIcon className="h-10 w-10 text-white" />
             </div>
             <h3 className="text-xl font-medium text-white mb-2">Nenhuma fila criada</h3>
             <p className="text-slate-400 mb-8">Comece criando sua primeira fila de atendimento.</p>
             <button
               onClick={() => setShowModal(true)}
-              className="bg-yellow-500 text-slate-900 px-6 py-3 rounded-xl font-semibold hover:bg-yellow-400 transition-colors"
+              className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-6 py-3 rounded-xl font-semibold hover:from-yellow-600 hover:to-orange-600 transition-all duration-200"
             >
               Criar primeira fila
             </button>
@@ -1109,459 +1143,620 @@ export default function QueuesComponent() {
 
         {/* Modal */}
         {showModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 modal-backdrop flex items-center justify-center z-50 p-4">
-            <div className="bg-slate-800 rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto custom-scrollbar fade-in">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-white text-xl font-semibold">
-                  {editingQueue ? 'Editar Fila' : 'Nova Fila'}
-                </h2>
-                <button
-                  onClick={handleCloseModal}
-                  className="text-slate-400 hover:text-white transition-colors p-1 rounded hover:bg-slate-700"
-                  data-tooltip="Fechar"
-                >
-                  <XMarkIcon className="w-6 h-6" />
-                </button>
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm modal-backdrop flex items-center justify-center z-50 p-4">
+            <div className="bg-slate-800/90 backdrop-blur-sm border border-slate-700/50 rounded-2xl shadow-2xl p-0 w-full max-w-5xl max-h-[95vh] overflow-hidden fade-in">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-slate-800/80 to-slate-700/80 border-b border-slate-700/50 px-8 py-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-xl">
+                      <QueueListIcon className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-bold bg-gradient-to-r from-yellow-400 to-orange-500 bg-clip-text text-transparent">
+                        {editingQueue ? 'Editar Fila de Atendimento' : 'Nova Fila de Atendimento'}
+                      </h2>
+                      <p className="text-slate-400 text-sm mt-1">
+                        {editingQueue ? 'Modifique as configurações da fila' : 'Configure uma nova fila para organizar seu atendimento'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleCloseModal}
+                    className="text-slate-400 hover:text-white transition-all duration-200 p-2 rounded-xl hover:bg-slate-700/50 group"
+                    data-tooltip="Fechar"
+                  >
+                    <XMarkIcon className="w-6 h-6 group-hover:rotate-90 transition-transform duration-200" />
+                  </button>
+                </div>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Informações Básicas */}
-                  <div className="space-y-4">
-                    <h3 className="text-white text-lg font-medium flex items-center">
-                      <QueueListIcon className="w-5 h-5 mr-2 text-yellow-500" />
-                      Informações Básicas
-                    </h3>
+              {/* Content */}
+              <div className="p-6 overflow-y-auto max-h-[calc(95vh-120px)] custom-scrollbar">
+                <form onSubmit={handleSubmit} className="space-y-6">
+                  {/* Informações Básicas e Configurações - Grid de 2 Colunas */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Informações Básicas */}
+                    <div className="space-y-4">
+                      <div className="bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-xl p-4">
+                        <div className="text-center mb-4">
+                          <div className="inline-flex items-center justify-center p-2 bg-gradient-to-r from-yellow-400 to-orange-500 rounded-xl mb-3">
+                            <QueueListIcon className="w-5 h-5 text-white" />
+                          </div>
+                          <h3 className="text-lg font-bold bg-gradient-to-r from-yellow-400 to-orange-500 bg-clip-text text-transparent">
+                            Informações Básicas
+                          </h3>
+                        </div>
 
-                    <div>
-                      <label className="block text-slate-300 text-sm font-medium mb-2">Sessão *</label>
-                      <select
-                        value={formData.sessionId}
-                        onChange={e => setFormData({ ...formData, sessionId: e.target.value })}
-                        className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 custom-input transition-colors"
-                        required
-                      >
-                        <option value="">Selecione uma sessão</option>
-                        {sessions.map(session => (
-                          <option key={session.id} value={session.id}>{session.name || session.id}</option>
-                        ))}
-                      </select>
-                    </div>
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-slate-300 text-sm font-medium mb-2">
+                              Sessão *
+                            </label>
+                            <select
+                              value={formData.sessionId}
+                              onChange={e => setFormData({ ...formData, sessionId: e.target.value })}
+                              className="w-full bg-slate-700/70 text-white px-3 py-2 rounded-lg border border-slate-700/50 focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all duration-200"
+                              required
+                            >
+                              <option value="">Selecione uma sessão</option>
+                              {sessions.map(session => (
+                                <option key={session.id} value={session.id}>{session.name || session.id}</option>
+                              ))}
+                            </select>
+                          </div>
 
-                    <div>
-                      <label className="block text-slate-300 text-sm font-medium mb-2">Nome da Fila *</label>
-                      <input
-                        type="text"
-                        value={formData.name}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 custom-input transition-colors"
-                        placeholder="Ex: Suporte Técnico"
-                        required
-                      />
-                    </div>
+                          <div>
+                            <label className="block text-slate-300 text-sm font-medium mb-2">
+                              Nome da Fila *
+                            </label>
+                            <input
+                              type="text"
+                              value={formData.name}
+                              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                              className="w-full bg-slate-700/70 text-white px-3 py-2 rounded-lg border border-slate-700/50 focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all duration-200"
+                              placeholder="Ex: Suporte Técnico"
+                              required
+                            />
+                          </div>
 
-                    <div>
-                      <label className="block text-slate-300 text-sm font-medium mb-2">Cor da Fila</label>
-                      <div className="flex items-center space-x-3">
-                        <input
-                          type="color"
-                          value={formData.color}
-                          onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                          className="color-picker"
-                        />
-                        <input
-                          type="text"
-                          value={formData.color}
-                          onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                          className="flex-1 bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 custom-input transition-colors"
-                          placeholder="#0420BF"
-                        />
+                          <div>
+                            <label className="block text-slate-300 text-sm font-medium mb-2">
+                              Cor da Fila
+                            </label>
+                            <div className="flex items-center space-x-3">
+                              <input
+                                type="color"
+                                value={formData.color}
+                                onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                                className="w-10 h-10 rounded-lg border-2 border-slate-700 cursor-pointer"
+                              />
+                              <input
+                                type="text"
+                                value={formData.color}
+                                onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                                className="flex-1 bg-slate-700/70 text-white px-3 py-2 rounded-lg border border-slate-700/50 focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all duration-200 font-mono text-sm"
+                                placeholder="#0420BF"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-slate-300 text-sm font-medium mb-2">Ordem no Bot</label>
+                            <input
+                              type="number"
+                              value={formData.botOrder}
+                              onChange={(e) => setFormData({ ...formData, botOrder: parseInt(e.target.value) || 0 })}
+                              className="w-full bg-slate-700/70 text-white px-3 py-2 rounded-lg border border-slate-700/50 focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all duration-200"
+                              min="0"
+                              placeholder="0"
+                            />
+                          </div>
+                        </div>
                       </div>
                     </div>
 
-                    <div>
-                      <label className="block text-slate-300 text-sm font-medium mb-2">Ordem no Bot</label>
-                      <input
-                        type="number"
-                        value={formData.botOrder}
-                        onChange={(e) => setFormData({ ...formData, botOrder: parseInt(e.target.value) || 0 })}
-                        className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 custom-input transition-colors"
-                        min="0"
-                        placeholder="0"
-                      />
+                    {/* Configurações Avançadas */}
+                    <div className="space-y-4">
+                      <div className="bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-xl p-4">
+                        <div className="text-center mb-4">
+                          <div className="inline-flex items-center justify-center p-2 bg-gradient-to-r from-slate-600 to-slate-700 rounded-xl mb-3">
+                            <Cog6ToothIcon className="w-5 h-5 text-white" />
+                          </div>
+                          <h3 className="text-lg font-bold bg-gradient-to-r from-slate-300 to-slate-400 bg-clip-text text-transparent">
+                            Configurações
+                          </h3>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-slate-300 text-sm font-medium mb-2">
+                              Tipo de Rodízio
+                            </label>
+                            <select
+                              value={formData.rotation}
+                              onChange={e => setFormData({ ...formData, rotation: e.target.value })}
+                              className="w-full bg-slate-700/70 text-white px-3 py-2 rounded-lg border border-slate-700/50 focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all duration-200"
+                            >
+                              {rotationOptions.map(option => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-slate-300 text-sm font-medium mb-2">
+                              Integração
+                            </label>
+                            <select
+                              value={formData.integration}
+                              onChange={e => setFormData({ ...formData, integration: e.target.value })}
+                              className="w-full bg-slate-700/70 text-white px-3 py-2 rounded-lg border border-slate-700/50 focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all duration-200"
+                            >
+                              {integrationOptions.map(option => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-slate-300 text-sm font-medium mb-2">Máximo de Tickets por Usuário</label>
+                            <input
+                              type="number"
+                              value={formData.options.maxTicketsPerUser}
+                              onChange={(e) => setFormData({ 
+                                ...formData, 
+                                options: { 
+                                  ...formData.options, 
+                                  maxTicketsPerUser: parseInt(e.target.value) || 5 
+                                } 
+                              })}
+                              className="w-full bg-slate-700/70 text-white px-3 py-2 rounded-lg border border-slate-700/50 focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all duration-200"
+                              min="1"
+                              max="20"
+                            />
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Configurações Avançadas */}
-                  <div className="space-y-4">
-                    <h3 className="text-white text-lg font-medium flex items-center">
-                      <Cog6ToothIcon className="w-5 h-5 mr-2 text-yellow-500" />
-                      Configurações
-                    </h3>
-
-                    <div>
-                      <label className="block text-slate-300 text-sm font-medium mb-2">Tipo de Rodízio</label>
-                      <select
-                        value={formData.rotation}
-                        onChange={e => setFormData({ ...formData, rotation: e.target.value })}
-                        className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 custom-input transition-colors"
-                      >
-                        {rotationOptions.map(option => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-300 text-sm font-medium mb-2">Integração</label>
-                      <select
-                        value={formData.integration}
-                        onChange={e => setFormData({ ...formData, integration: e.target.value })}
-                        className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 custom-input transition-colors"
-                      >
-                        {integrationOptions.map(option => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-300 text-sm font-medium mb-2">Máximo de Tickets por Usuário</label>
-                      <input
-                        type="number"
-                        value={formData.options.maxTicketsPerUser}
-                        onChange={(e) => setFormData({ 
-                          ...formData, 
-                          options: { 
-                            ...formData.options, 
-                            maxTicketsPerUser: parseInt(e.target.value) || 5 
-                          } 
-                        })}
-                        className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 custom-input transition-colors"
-                        min="1"
-                        max="20"
-                      />
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="flex items-center">
-                        <input
-                          type="checkbox"
-                          id="isActive"
-                          checked={formData.isActive}
-                          onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
-                          className="custom-checkbox mr-3"
-                        />
-                        <label htmlFor="isActive" className="text-slate-300 text-sm">Fila ativa</label>
+                  {/* Configurações de Automação - Seção Completa */}
+                  <div className="bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-xl p-5">
+                    <div className="text-center mb-5">
+                      <div className="inline-flex items-center justify-center p-2 bg-gradient-to-r from-purple-500 to-purple-600 rounded-xl mb-3">
+                        <BoltIcon className="w-6 h-6 text-white" />
                       </div>
+                      <h3 className="text-lg font-bold bg-gradient-to-r from-purple-400 to-purple-600 bg-clip-text text-transparent mb-2">
+                        Configurações de Automação
+                      </h3>
+                      <p className="text-slate-400 text-sm">Configure as funcionalidades automáticas da sua fila</p>
+                    </div>
 
-                      <div className="flex items-center">
-                        <input
-                          type="checkbox"
-                          id="autoReceiveMessages"
-                          checked={formData.autoReceiveMessages}
-                          onChange={(e) => setFormData({ ...formData, autoReceiveMessages: e.target.checked })}
-                          className="custom-checkbox mr-3"
-                        />
-                        <label htmlFor="autoReceiveMessages" className="text-slate-300 text-sm">Receber mensagens automaticamente</label>
-                        <div className="ml-2 text-xs text-slate-500">
-                          (Novas mensagens vão diretamente para esta fila)
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                      {/* Fila Ativa */}
+                      <div className={`relative overflow-hidden rounded-lg border-2 transition-all duration-200 cursor-pointer ${
+                        formData.isActive 
+                          ? 'border-green-500/50 bg-green-500/10' 
+                          : 'border-slate-600/50 bg-slate-700/30 hover:border-slate-500/50'
+                      }`}
+                      onClick={() => setFormData({ ...formData, isActive: !formData.isActive })}
+                      >
+                        <div className="p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                              formData.isActive ? 'bg-green-500' : 'bg-slate-600'
+                            }`}>
+                              <CheckCircleIcon className="w-4 h-4 text-white" />
+                            </div>
+                            <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                              formData.isActive 
+                                ? 'border-green-500 bg-green-500' 
+                                : 'border-slate-400 bg-transparent'
+                            }`}>
+                              {formData.isActive && <CheckIcon className="w-3 h-3 text-white" />}
+                            </div>
+                          </div>
+                          <h4 className="text-white font-medium mb-1 text-sm">Fila Ativa</h4>
+                          <p className="text-slate-400 text-xs">
+                            Habilita funcionamento da fila
+                          </p>
                         </div>
                       </div>
 
-                      <div className="flex items-center">
-                        <input
-                          type="checkbox"
-                          id="closeTicket"
-                          checked={formData.closeTicket}
-                          onChange={(e) => setFormData({ ...formData, closeTicket: e.target.checked })}
-                          className="custom-checkbox mr-3"
-                        />
-                        <label htmlFor="closeTicket" className="text-slate-300 text-sm">Fechar ticket automaticamente</label>
-                      </div>
-
-                      <div className="flex items-center">
-                        <input
-                          type="checkbox"
-                          id="autoAssign"
-                          checked={formData.options.autoAssign}
-                          onChange={(e) => setFormData({ 
-                            ...formData, 
-                            options: { 
-                              ...formData.options, 
-                              autoAssign: e.target.checked 
-                            } 
-                          })}
-                          className="custom-checkbox mr-3"
-                        />
-                        <label htmlFor="autoAssign" className="text-slate-300 text-sm">Atribuição automática</label>
-                      </div>
-
-                      <div className="flex items-center">
-                        <input
-                          type="checkbox"
-                          id="autoReply"
-                          checked={formData.options.autoReply}
-                          onChange={(e) => setFormData({ 
-                            ...formData, 
-                            options: { 
-                              ...formData.options, 
-                              autoReply: e.target.checked 
-                            } 
-                          })}
-                          className="custom-checkbox mr-3"
-                        />
-                        <label htmlFor="autoReply" className="text-slate-300 text-sm">Resposta automática ativa</label>
-                      </div>
-
-                      <div className="flex items-center">
-                        <input
-                          type="checkbox"
-                          id="transferToHuman"
-                          checked={formData.options.transferToHuman}
-                          onChange={(e) => setFormData({ 
-                            ...formData, 
-                            options: { 
-                              ...formData.options, 
-                              transferToHuman: e.target.checked 
-                            } 
-                          })}
-                          className="custom-checkbox mr-3"
-                        />
-                        <label htmlFor="transferToHuman" className="text-slate-300 text-sm">Permitir transferência para humano</label>
-                      </div>
-
-                      <div className="flex items-center">
-                        <input
-                          type="checkbox"
-                          id="collectFeedback"
-                          checked={formData.options.collectFeedback}
-                          onChange={(e) => setFormData({ 
-                            ...formData, 
-                            options: { 
-                              ...formData.options, 
-                              collectFeedback: e.target.checked 
-                            } 
-                          })}
-                          className="custom-checkbox mr-3"
-                        />
-                        <label htmlFor="collectFeedback" className="text-slate-300 text-sm">Coletar feedback do cliente</label>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Configurações de Notificação */}
-                <div className="space-y-4">
-                  <h3 className="text-white text-lg font-medium flex items-center">
-                    <BellIcon className="w-5 h-5 mr-2 text-yellow-500" />
-                    Notificações e Alertas
-                  </h3>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-slate-300 text-sm font-medium mb-2">Tempo Limite de Resposta (minutos)</label>
-                      <input
-                        type="number"
-                        value={formData.options.responseTimeLimit || 30}
-                        onChange={(e) => setFormData({ 
-                          ...formData, 
-                          options: { 
-                            ...formData.options, 
-                            responseTimeLimit: parseInt(e.target.value) || 30 
-                          } 
-                        })}
-                        className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 custom-input transition-colors"
-                        min="5"
-                        max="240"
-                        placeholder="30"
-                      />
-                      <p className="text-xs text-slate-400 mt-1">Tempo para alertar sobre tickets sem resposta</p>
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-300 text-sm font-medium mb-2">Prioridade da Fila</label>
-                      <select
-                        value={formData.options.priority || 'normal'}
-                        onChange={e => setFormData({ 
-                          ...formData, 
-                          options: { 
-                            ...formData.options, 
-                            priority: e.target.value 
-                          } 
-                        })}
-                        className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 custom-input transition-colors"
+                      {/* Atribuição Automática */}
+                      <div className={`relative overflow-hidden rounded-lg border-2 transition-all duration-200 cursor-pointer ${
+                        formData.autoAssignment 
+                          ? 'border-blue-500/50 bg-blue-500/10' 
+                          : 'border-slate-600/50 bg-slate-700/30 hover:border-slate-500/50'
+                      }`}
+                      onClick={() => {
+                        console.log('Clicando em autoAssignment, valor atual:', formData.autoAssignment);
+                        const newValue = !formData.autoAssignment;
+                        console.log('Novo valor será:', newValue);
+                        setFormData({ ...formData, autoAssignment: newValue });
+                      }}
                       >
-                        <option value="low">Baixa</option>
-                        <option value="normal">Normal</option>
-                        <option value="high">Alta</option>
-                        <option value="urgent">Urgente</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="flex items-center">
-                      <input
-                        type="checkbox"
-                        id="notifyNewTicket"
-                        checked={formData.options.notifyNewTicket !== false}
-                        onChange={(e) => setFormData({ 
-                          ...formData, 
-                          options: { 
-                            ...formData.options, 
-                            notifyNewTicket: e.target.checked 
-                          } 
-                        })}
-                        className="custom-checkbox mr-3"
-                      />
-                      <label htmlFor="notifyNewTicket" className="text-slate-300 text-sm">Notificar novos tickets</label>
-                    </div>
-
-                    <div className="flex items-center">
-                      <input
-                        type="checkbox"
-                        id="notifyTimeouts"
-                        checked={formData.options.notifyTimeouts !== false}
-                        onChange={(e) => setFormData({ 
-                          ...formData, 
-                          options: { 
-                            ...formData.options, 
-                            notifyTimeouts: e.target.checked 
-                          } 
-                        })}
-                        className="custom-checkbox mr-3"
-                      />
-                      <label htmlFor="notifyTimeouts" className="text-slate-300 text-sm">Alertar sobre timeouts</label>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Mensagens e Horários */}
-                <div className="space-y-4">
-                  <h3 className="text-white text-lg font-medium flex items-center">
-                    <ChatBubbleLeftRightIcon className="w-5 h-5 mr-2 text-yellow-500" />
-                    Mensagens e Horários
-                  </h3>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-slate-300 text-sm font-medium mb-2">Mensagem de Saudação</label>
-                      <textarea
-                        value={formData.greetingMessage}
-                        onChange={(e) => setFormData({ ...formData, greetingMessage: e.target.value })}
-                        className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 custom-input transition-colors resize-none"
-                        rows="3"
-                        placeholder="Olá! Bem-vindo ao nosso atendimento. Como posso ajudá-lo?"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-300 text-sm font-medium mb-2">Mensagem Fora do Horário</label>
-                      <textarea
-                        value={formData.outOfHoursMessage}
-                        onChange={(e) => setFormData({ ...formData, outOfHoursMessage: e.target.value })}
-                        className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 custom-input transition-colors resize-none"
-                        rows="3"
-                        placeholder="Nosso horário de atendimento é das 08h às 18h. Deixe sua mensagem que retornaremos em breve."
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-slate-300 text-sm font-medium mb-2">Horário de Início</label>
-                      <input
-                        type="time"
-                        value={formData.options.workingHours.start}
-                        onChange={(e) => setFormData({ 
-                          ...formData, 
-                          options: { 
-                            ...formData.options, 
-                            workingHours: { 
-                              ...formData.options.workingHours, 
-                              start: e.target.value 
-                            } 
-                          } 
-                        })}
-                        className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 custom-input transition-colors"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-300 text-sm font-medium mb-2">Horário de Fim</label>
-                      <input
-                        type="time"
-                        value={formData.options.workingHours.end}
-                        onChange={(e) => setFormData({ 
-                          ...formData, 
-                          options: { 
-                            ...formData.options, 
-                            workingHours: { 
-                              ...formData.options.workingHours, 
-                              end: e.target.value 
-                            } 
-                          } 
-                        })}
-                        className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 custom-input transition-colors"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Tipos de Arquivo Permitidos */}
-                <div className="space-y-4">
-                  <h3 className="text-white text-lg font-medium flex items-center">
-                    <DocumentTextIcon className="w-5 h-5 mr-2 text-yellow-500" />
-                    Tipos de Arquivo Permitidos
-                  </h3>
-
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {allowedFileTypes.map(fileType => (
-                      <div key={fileType} className="flex items-center">
-                        <input
-                          type="checkbox"
-                          id={`fileType-${fileType}`}
-                          checked={formData.fileList.includes(fileType)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setFormData({ 
-                                ...formData, 
-                                fileList: [...formData.fileList, fileType] 
-                              });
-                            } else {
-                              setFormData({ 
-                                ...formData, 
-                                fileList: formData.fileList.filter(type => type !== fileType) 
-                              });
-                            }
-                          }}
-                          className="custom-checkbox mr-2"
-                        />
-                        <label htmlFor={`fileType-${fileType}`} className="text-slate-300 text-sm uppercase font-medium">
-                          {fileType}
-                        </label>
+                        <div className="p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                              formData.autoAssignment ? 'bg-blue-500' : 'bg-slate-600'
+                            }`}>
+                              <UserGroupIcon className="w-4 h-4 text-white" />
+                            </div>
+                            <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                              formData.autoAssignment 
+                                ? 'border-blue-500 bg-blue-500' 
+                                : 'border-slate-400 bg-transparent'
+                            }`}>
+                              {formData.autoAssignment && <CheckIcon className="w-3 h-3 text-white" />}
+                            </div>
+                          </div>
+                          <h4 className="text-white font-medium mb-1 text-sm">Atribuição Auto</h4>
+                          <p className="text-slate-400 text-xs">
+                            Tickets atribuídos automaticamente
+                          </p>
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
 
-                <div className="flex items-center justify-end space-x-3 pt-6 border-t border-slate-700">
-                  <button
-                    type="button"
-                    onClick={handleCloseModal}
-                    className="px-6 py-2 text-slate-400 hover:text-white transition-colors hover:bg-slate-700 rounded-lg"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-6 py-2 bg-yellow-500 text-slate-900 rounded-lg hover:bg-yellow-400 transition-colors font-medium"
-                  >
-                    {editingQueue ? 'Salvar Alterações' : 'Criar Fila'}
-                  </button>
-                </div>
-              </form>
+                      {/* Resposta Automática */}
+                      <div className={`relative overflow-hidden rounded-lg border-2 transition-all duration-200 cursor-pointer ${
+                        formData.autoReply 
+                          ? 'border-purple-500/50 bg-purple-500/10' 
+                          : 'border-slate-600/50 bg-slate-700/30 hover:border-slate-500/50'
+                      }`}
+                      onClick={() => {
+                        console.log('Clicando em autoReply, valor atual:', formData.autoReply);
+                        const newValue = !formData.autoReply;
+                        console.log('Novo valor será:', newValue);
+                        setFormData({ ...formData, autoReply: newValue });
+                      }}
+                      >
+                        <div className="p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                              formData.autoReply ? 'bg-purple-500' : 'bg-slate-600'
+                            }`}>
+                              <ChatBubbleLeftRightIcon className="w-4 h-4 text-white" />
+                            </div>
+                            <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                              formData.autoReply 
+                                ? 'border-purple-500 bg-purple-500' 
+                                : 'border-slate-400 bg-transparent'
+                            }`}>
+                              {formData.autoReply && <CheckIcon className="w-3 h-3 text-white" />}
+                            </div>
+                          </div>
+                          <h4 className="text-white font-medium mb-1 text-sm">Resposta Auto</h4>
+                          <p className="text-slate-400 text-xs">
+                            Mensagem de saudação automática
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Fechamento Automático */}
+                      <div className={`relative overflow-hidden rounded-lg border-2 transition-all duration-200 cursor-pointer ${
+                        formData.autoClose 
+                          ? 'border-orange-500/50 bg-orange-500/10' 
+                          : 'border-slate-600/50 bg-slate-700/30 hover:border-slate-500/50'
+                      }`}
+                      onClick={() => {
+                        console.log('Clicando em autoClose, valor atual:', formData.autoClose);
+                        const newValue = !formData.autoClose;
+                        console.log('Novo valor será:', newValue);
+                        setFormData({ ...formData, autoClose: newValue });
+                      }}
+                      >
+                        <div className="p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                              formData.autoClose ? 'bg-orange-500' : 'bg-slate-600'
+                            }`}>
+                              <ClockIcon className="w-4 h-4 text-white" />
+                            </div>
+                            <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                              formData.autoClose 
+                                ? 'border-orange-500 bg-orange-500' 
+                                : 'border-slate-400 bg-transparent'
+                            }`}>
+                              {formData.autoClose && <CheckIcon className="w-3 h-3 text-white" />}
+                            </div>
+                          </div>
+                          <h4 className="text-white font-medium mb-1 text-sm">Fechar Auto</h4>
+                          <p className="text-slate-400 text-xs">
+                            Fecha por inatividade
+                          </p>
+                          {formData.autoClose && (
+                            <div className="mt-2 pt-2 border-t border-orange-500/20">
+                              <input
+                                type="number"
+                                value={formData.autoCloseTime || 60}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  setFormData({ ...formData, autoCloseTime: parseInt(e.target.value) || 60 });
+                                }}
+                                className="w-full bg-orange-500/20 text-white px-2 py-1 rounded text-xs"
+                                min="5"
+                                max="1440"
+                                placeholder="60 min"
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Coletar Feedback */}
+                      <div className={`relative overflow-hidden rounded-lg border-2 transition-all duration-200 cursor-pointer ${
+                        formData.feedbackCollection 
+                          ? 'border-yellow-500/50 bg-yellow-500/10' 
+                          : 'border-slate-600/50 bg-slate-700/30 hover:border-slate-500/50'
+                      }`}
+                      onClick={() => setFormData({ ...formData, feedbackCollection: !formData.feedbackCollection })}
+                      >
+                        <div className="p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                              formData.feedbackCollection ? 'bg-yellow-500' : 'bg-slate-600'
+                            }`}>
+                              <StarIcon className="w-4 h-4 text-white" />
+                            </div>
+                            <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                              formData.feedbackCollection 
+                                ? 'border-yellow-500 bg-yellow-500' 
+                                : 'border-slate-400 bg-transparent'
+                            }`}>
+                              {formData.feedbackCollection && <CheckIcon className="w-3 h-3 text-white" />}
+                            </div>
+                          </div>
+                          <h4 className="text-white font-medium mb-1 text-sm">Feedback</h4>
+                          <p className="text-slate-400 text-xs">
+                            Coleta avaliação do cliente
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Receber Mensagens */}
+                      <div className={`relative overflow-hidden rounded-lg border-2 transition-all duration-200 cursor-pointer ${
+                        formData.autoReceiveMessages 
+                          ? 'border-cyan-500/50 bg-cyan-500/10' 
+                          : 'border-slate-600/50 bg-slate-700/30 hover:border-slate-500/50'
+                      }`}
+                      onClick={() => {
+                        console.log('Clicando em autoReceiveMessages, valor atual:', formData.autoReceiveMessages);
+                        const newValue = !formData.autoReceiveMessages;
+                        console.log('Novo valor será:', newValue);
+                        setFormData({ ...formData, autoReceiveMessages: newValue });
+                      }}
+                      >
+                        <div className="p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                              formData.autoReceiveMessages ? 'bg-cyan-500' : 'bg-slate-600'
+                            }`}>
+                              <InboxIcon className="w-4 h-4 text-white" />
+                            </div>
+                            <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                              formData.autoReceiveMessages 
+                                ? 'border-cyan-500 bg-cyan-500' 
+                                : 'border-slate-400 bg-transparent'
+                            }`}>
+                              {formData.autoReceiveMessages && <CheckIcon className="w-3 h-3 text-white" />}
+                            </div>
+                          </div>
+                          <h4 className="text-white font-medium mb-1 text-sm">Receber Auto</h4>
+                          <p className="text-slate-400 text-xs">
+                            Mensagens diretas para fila
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Fechar Ticket */}
+                      <div className={`relative overflow-hidden rounded-lg border-2 transition-all duration-200 cursor-pointer ${
+                        formData.closeTicket 
+                          ? 'border-red-500/50 bg-red-500/10' 
+                          : 'border-slate-600/50 bg-slate-700/30 hover:border-slate-500/50'
+                      }`}
+                      onClick={() => setFormData({ ...formData, closeTicket: !formData.closeTicket })}
+                      >
+                        <div className="p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                              formData.closeTicket ? 'bg-red-500' : 'bg-slate-600'
+                            }`}>
+                              <XMarkIcon className="w-4 h-4 text-white" />
+                            </div>
+                            <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                              formData.closeTicket 
+                                ? 'border-red-500 bg-red-500' 
+                                : 'border-slate-400 bg-transparent'
+                            }`}>
+                              {formData.closeTicket && <CheckIcon className="w-3 h-3 text-white" />}
+                            </div>
+                          </div>
+                          <h4 className="text-white font-medium mb-1 text-sm">Fechar Ticket</h4>
+                          <p className="text-slate-400 text-xs">
+                            Permite fechamento automático
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Transferir para Humano */}
+                      <div className={`relative overflow-hidden rounded-lg border-2 transition-all duration-200 cursor-pointer ${
+                        formData.options.transferToHuman 
+                          ? 'border-indigo-500/50 bg-indigo-500/10' 
+                          : 'border-slate-600/50 bg-slate-700/30 hover:border-slate-500/50'
+                      }`}
+                      onClick={() => setFormData({ 
+                        ...formData, 
+                        options: { 
+                          ...formData.options, 
+                          transferToHuman: !formData.options.transferToHuman 
+                        } 
+                      })}
+                      >
+                        <div className="p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                              formData.options.transferToHuman ? 'bg-indigo-500' : 'bg-slate-600'
+                            }`}>
+                              <ArrowRightIcon className="w-4 h-4 text-white" />
+                            </div>
+                            <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                              formData.options.transferToHuman 
+                                ? 'border-indigo-500 bg-indigo-500' 
+                                : 'border-slate-400 bg-transparent'
+                            }`}>
+                              {formData.options.transferToHuman && <CheckIcon className="w-3 h-3 text-white" />}
+                            </div>
+                          </div>
+                          <h4 className="text-white font-medium mb-1 text-sm">Transfer Humano</h4>
+                          <p className="text-slate-400 text-xs">
+                            Permite transferir para humano
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Mensagens e Horários */}
+                  <div className="bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-xl p-4">
+                    <div className="text-center mb-4">
+                      <div className="inline-flex items-center justify-center p-2 bg-gradient-to-r from-green-500 to-green-600 rounded-xl mb-3">
+                        <ChatBubbleLeftRightIcon className="w-5 h-5 text-white" />
+                      </div>
+                      <h3 className="text-lg font-bold bg-gradient-to-r from-green-400 to-green-600 bg-clip-text text-transparent">
+                        Mensagens e Horários
+                      </h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-slate-300 text-sm font-medium mb-2">
+                          Mensagem de Saudação
+                        </label>
+                        <textarea
+                          value={formData.greetingMessage}
+                          onChange={(e) => setFormData({ ...formData, greetingMessage: e.target.value })}
+                          className="w-full bg-slate-700/70 text-white px-3 py-2 rounded-lg border border-slate-700/50 focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all duration-200 resize-none"
+                          rows="3"
+                          placeholder="Olá! Bem-vindo ao nosso atendimento."
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-300 text-sm font-medium mb-2">
+                          Mensagem Fora do Horário
+                        </label>
+                        <textarea
+                          value={formData.outOfHoursMessage}
+                          onChange={(e) => setFormData({ ...formData, outOfHoursMessage: e.target.value })}
+                          className="w-full bg-slate-700/70 text-white px-3 py-2 rounded-lg border border-slate-700/50 focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all duration-200 resize-none"
+                          rows="3"
+                          placeholder="Estamos fora do horário de atendimento."
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                      <div>
+                        <label className="block text-slate-300 text-sm font-medium mb-2">Horário de Início</label>
+                        <input
+                          type="time"
+                          value={formData.options.workingHours.start}
+                          onChange={(e) => setFormData({ 
+                            ...formData, 
+                            options: { 
+                              ...formData.options, 
+                              workingHours: { 
+                                ...formData.options.workingHours, 
+                                start: e.target.value 
+                              } 
+                            } 
+                          })}
+                          className="w-full bg-slate-700/70 text-white px-3 py-2 rounded-lg border border-slate-700/50 focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all duration-200"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-300 text-sm font-medium mb-2">Horário de Fim</label>
+                        <input
+                          type="time"
+                          value={formData.options.workingHours.end}
+                          onChange={(e) => setFormData({ 
+                            ...formData, 
+                            options: { 
+                              ...formData.options, 
+                              workingHours: { 
+                                ...formData.options.workingHours, 
+                                end: e.target.value 
+                              } 
+                            } 
+                          })}
+                          className="w-full bg-slate-700/70 text-white px-3 py-2 rounded-lg border border-slate-700/50 focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all duration-200"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Tipos de Arquivo */}
+                  <div className="bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-xl p-4">
+                    <div className="text-center mb-4">
+                      <div className="inline-flex items-center justify-center p-2 bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl mb-3">
+                        <DocumentTextIcon className="w-5 h-5 text-white" />
+                      </div>
+                      <h3 className="text-lg font-bold bg-gradient-to-r from-blue-400 to-blue-600 bg-clip-text text-transparent">
+                        Tipos de Arquivo Permitidos
+                      </h3>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      {allowedFileTypes.map(fileType => (
+                        <div key={fileType} className="flex items-center">
+                          <input
+                            type="checkbox"
+                            id={`fileType-${fileType}`}
+                            checked={formData.fileList.includes(fileType)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setFormData({ 
+                                  ...formData, 
+                                  fileList: [...formData.fileList, fileType] 
+                                });
+                              } else {
+                                setFormData({ 
+                                  ...formData, 
+                                  fileList: formData.fileList.filter(type => type !== fileType) 
+                                });
+                              }
+                            }}
+                            className="custom-checkbox mr-2"
+                          />
+                          <label htmlFor={`fileType-${fileType}`} className="text-slate-300 text-xs uppercase font-medium">
+                            {fileType}
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end space-x-3 pt-4 border-t border-slate-700/50">
+                    <button
+                      type="button"
+                      onClick={handleCloseModal}
+                      className="px-4 py-2 bg-slate-700/70 text-slate-300 rounded-lg hover:bg-slate-600/70 transition-all duration-200 font-medium border border-slate-600/50"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-4 py-2 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-lg hover:from-yellow-600 hover:to-orange-600 transition-all duration-200 font-semibold"
+                    >
+                      {editingQueue ? 'Salvar Alterações' : 'Criar Fila'}
+                    </button>
+                  </div>
+                </form>
+              </div>
             </div>
           </div>
         )}
