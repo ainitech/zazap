@@ -1,6 +1,6 @@
 import express from 'express';
 import { Op } from 'sequelize';
-import { authenticateToken } from '../middleware/auth.js';
+import authMiddleware from '../middleware/authMiddleware.js';
 import { Session, Ticket, TicketMessage, Contact } from '../models/index.js';
 import { getContactInfoBaileys, getChatMediaBaileys } from '../services/baileysService.js';
 import { emitToAll } from '../services/socket.js';
@@ -8,7 +8,7 @@ import { emitToAll } from '../services/socket.js';
 const router = express.Router();
 
 // GET /api/contacts - Listar contatos (com busca e filtros opcionais)
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
   try {
   const { search = '', sessionId, limit = 50 } = req.query;
     const includeGroups = (req.query.includeGroups === 'true' || req.query.includeGroups === true);
@@ -66,7 +66,7 @@ router.get('/', authenticateToken, async (req, res) => {
 });
 
 // GET /api/contacts/:ticketId/info - Buscar informações do contato
-router.get('/:ticketId/info', authenticateToken, async (req, res) => {
+router.get('/:ticketId/info', authMiddleware, async (req, res) => {
   try {
     const { ticketId } = req.params;
     
@@ -90,7 +90,7 @@ router.get('/:ticketId/info', authenticateToken, async (req, res) => {
 });
 
 // GET /api/contacts/:ticketId/media - Buscar mídias do chat
-router.get('/:ticketId/media', authenticateToken, async (req, res) => {
+router.get('/:ticketId/media', authMiddleware, async (req, res) => {
   try {
     const { ticketId } = req.params;
     const { limit = 50 } = req.query;
@@ -115,7 +115,7 @@ router.get('/:ticketId/media', authenticateToken, async (req, res) => {
 });
 
 // GET /api/contacts/:ticketId/attachments - Buscar anexos/documentos do ticket
-router.get('/:ticketId/attachments', authenticateToken, async (req, res) => {
+router.get('/:ticketId/attachments', authMiddleware, async (req, res) => {
   try {
     const { ticketId } = req.params;
     
@@ -152,7 +152,7 @@ router.get('/:ticketId/attachments', authenticateToken, async (req, res) => {
 });
 
 // DELETE /api/contacts/contact/:contactId - Deletar contato e todos os dados relacionados
-router.delete('/contact/:contactId', authenticateToken, async (req, res) => {
+router.delete('/contact/:contactId', authMiddleware, async (req, res) => {
   try {
     const { contactId } = req.params;
     
@@ -216,7 +216,7 @@ router.delete('/contact/:contactId', authenticateToken, async (req, res) => {
 });
 
 // POST /api/contacts/contact - Criar um novo contato
-router.post('/contact', authenticateToken, async (req, res) => {
+router.post('/contact', authMiddleware, async (req, res) => {
   try {
     const { name, pushname, number, whatsappId, sessionId, isGroup, formattedNumber, profilePicUrl } = req.body || {};
 
@@ -269,7 +269,7 @@ router.post('/contact', authenticateToken, async (req, res) => {
 });
 
 // PUT /api/contacts/contact/:contactId - Atualizar dados do contato (ex.: nome)
-router.put('/contact/:contactId', authenticateToken, async (req, res) => {
+router.put('/contact/:contactId', authMiddleware, async (req, res) => {
   try {
     const { contactId } = req.params;
     const { name, pushname, formattedNumber, profilePicUrl } = req.body || {};
@@ -298,7 +298,7 @@ router.put('/contact/:contactId', authenticateToken, async (req, res) => {
 });
 
 // Alias: PUT /api/contacts/:contactId (mesma funcionalidade de atualizar contato)
-router.put('/:contactId', authenticateToken, async (req, res) => {
+router.put('/:contactId', authMiddleware, async (req, res) => {
   try {
     const { contactId } = req.params;
     const { name, pushname, formattedNumber, profilePicUrl } = req.body || {};
@@ -319,7 +319,7 @@ router.put('/:contactId', authenticateToken, async (req, res) => {
 });
 
 // DELETE /api/contacts/ticket/:ticketId - Deletar ticket e dados relacionados
-router.delete('/ticket/:ticketId', authenticateToken, async (req, res) => {
+router.delete('/ticket/:ticketId', authMiddleware, async (req, res) => {
   try {
     const { ticketId } = req.params;
     
@@ -350,7 +350,7 @@ router.delete('/ticket/:ticketId', authenticateToken, async (req, res) => {
 });
 
 // GET /api/contacts/:contactId - Buscar dados do contato por ID
-router.get('/:contactId', authenticateToken, async (req, res) => {
+router.get('/:contactId', authMiddleware, async (req, res) => {
   try {
     const { contactId } = req.params;
     const contact = await Contact.findByPk(contactId);
@@ -366,7 +366,7 @@ router.get('/:contactId', authenticateToken, async (req, res) => {
 
 
 // GET /api/contacts/:contactId/media - Buscar todas as mídias de todos os tickets do contato
-router.get('/contact/:contactId/media', authenticateToken, async (req, res) => {
+router.get('/contact/:contactId/media', authMiddleware, async (req, res) => {
   try {
     const { contactId } = req.params;
     // Busca todos os tickets desse contato
@@ -402,7 +402,7 @@ router.get('/contact/:contactId/media', authenticateToken, async (req, res) => {
 });
 
 // POST /api/contacts/contact/:contactId/message - Salvar uma nota/mensagem vinculada ao contato
-router.post('/contact/:contactId/message', authenticateToken, async (req, res) => {
+router.post('/contact/:contactId/message', authMiddleware, async (req, res) => {
   try {
     const { contactId } = req.params;
     const { content, sessionId } = req.body || {};
@@ -451,7 +451,7 @@ router.post('/contact/:contactId/message', authenticateToken, async (req, res) =
 });
 
 // Alias: POST /api/contacts/:contactId/message
-router.post('/:contactId/message', authenticateToken, async (req, res) => {
+router.post('/:contactId/message', authMiddleware, async (req, res) => {
   try {
     const { contactId } = req.params;
     const { content, sessionId } = req.body || {};
@@ -492,7 +492,7 @@ router.post('/:contactId/message', authenticateToken, async (req, res) => {
 });
 
 // Alias: DELETE /api/contacts/:contactId
-router.delete('/:contactId', authenticateToken, async (req, res) => {
+router.delete('/:contactId', authMiddleware, async (req, res) => {
   try {
     const { contactId } = req.params;
     const contact = await Contact.findByPk(contactId);

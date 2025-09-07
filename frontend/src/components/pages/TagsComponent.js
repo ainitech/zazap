@@ -72,7 +72,8 @@ export default function TagsComponent() {
     setLoading(true);
     try {
   const res = await fetch(apiUrl('/api/tags'), {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token') || token}` },
+  credentials: 'include',
+  headers: { 'Content-Type': 'application/json' },
       });
       console.log('🏷️ TagsComponent: Resposta da API:', res.status, res.statusText);
       if (!res.ok) throw new Error('Erro ao carregar tags');
@@ -134,7 +135,7 @@ export default function TagsComponent() {
         method,
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token') || token}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(formData)
       });
@@ -172,7 +173,8 @@ export default function TagsComponent() {
     try {
   const res = await fetch(apiUrl(`/api/tags/${tagId}`), {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${localStorage.getItem('token') || token}` }
+  credentials: 'include',
+  headers: { 'Content-Type': 'application/json' }
       });
 
       if (!res.ok) throw new Error('Erro ao excluir tag');
@@ -190,7 +192,7 @@ export default function TagsComponent() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token') || token}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           name: predefinedTag.name,

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, Plus, Trash2, Send, BarChart3 } from 'lucide-react';
+import AuthService from '../../services/authService.js';
 
 const PollModal = ({ isOpen, onClose, ticketId, onSendSuccess }) => {
   const [question, setQuestion] = useState('');
@@ -43,18 +44,11 @@ const PollModal = ({ isOpen, onClose, ticketId, onSendSuccess }) => {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/buttons/poll', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          ticketId,
-          question: question.trim(),
-          options: validOptions,
-          allowMultipleAnswers
-        })
+      const response = await AuthService.post('/api/buttons/poll', {
+        ticketId,
+        question: question.trim(),
+        options: validOptions,
+        allowMultipleAnswers
       });
 
       const result = await response.json();

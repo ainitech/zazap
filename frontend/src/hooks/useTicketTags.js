@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-
+import AuthService from '../services/authService.js';
 import { apiUrl } from '../utils/apiClient';
 
 export function useTicketTags(ticketId) {
@@ -22,11 +22,7 @@ export function useTicketTags(ticketId) {
     setError(null);
     
     try {
-      const response = await fetch(apiUrl(`/api/tags/ticket/${ticketId}`), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+      const response = await AuthService.get(apiUrl(`/api/tags/ticket/${ticketId}`));
       
       if (response.ok) {
         const data = await response.json();
@@ -47,12 +43,7 @@ export function useTicketTags(ticketId) {
     if (!ticketId) return false;
     
     try {
-      const response = await fetch(apiUrl(`/api/tags/ticket/${ticketId}/tag/${tagId}`), {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+      const response = await AuthService.post(apiUrl(`/api/tags/ticket/${ticketId}/tag/${tagId}`));
 
       if (response.ok) {
         await fetchTags(); // Refresh tags
@@ -72,12 +63,7 @@ export function useTicketTags(ticketId) {
     if (!ticketId) return false;
     
     try {
-      const response = await fetch(apiUrl(`/api/tags/ticket/${ticketId}/tag/${tagId}`), {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+      const response = await AuthService.delete(apiUrl(`/api/tags/ticket/${ticketId}/tag/${tagId}`));
 
       if (response.ok) {
         await fetchTags(); // Refresh tags

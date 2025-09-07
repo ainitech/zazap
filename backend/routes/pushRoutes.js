@@ -1,11 +1,11 @@
 import express from 'express';
-import { authenticateToken } from '../middleware/auth.js';
+import authMiddleware from '../middleware/authMiddleware.js';
 import { saveSubscription, broadcastPush } from '../services/push.js';
 
 const router = express.Router();
 
 // Salvar subscription
-router.post('/subscribe', authenticateToken, async (req, res) => {
+router.post('/subscribe', authMiddleware, async (req, res) => {
   try {
     const userId = req.user?.id || null;
     const subscription = req.body;
@@ -20,7 +20,7 @@ router.post('/subscribe', authenticateToken, async (req, res) => {
 });
 
 // Endpoint de teste para enviar um push para todas as subscriptions
-router.post('/send-test', authenticateToken, async (req, res) => {
+router.post('/send-test', authMiddleware, async (req, res) => {
   try {
     const payload = req.body || { title: 'Teste', body: 'Mensagem de teste' };
     await broadcastPush(payload);

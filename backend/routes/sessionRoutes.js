@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticateToken } from '../middleware/auth.js';
+import authMiddleware from '../middleware/authMiddleware.js';
 import { Session } from '../models/index.js';
 import { emitToAll } from '../services/socket.js';
 import { syncAllSessions } from '../services/sessionManager.js';
@@ -40,7 +40,7 @@ const emitSessionsUpdate = async () => {
 };
 
 // GET /api/sessions - Listar todas as sessões
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
   try {
     const sessions = await Session.findAll({
       where: { userId: req.user.id },
@@ -62,9 +62,9 @@ router.get('/', authenticateToken, async (req, res) => {
 });
 
 // POST /api/sessions - Criar nova sessão
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authMiddleware, async (req, res) => {
   try {
-    const { whatsappId, library } = req.body;
+  const { whatsappId, library, name } = req.body;
 
     if (!whatsappId || !library) {
       return res.status(400).json({ error: 'whatsappId e library são obrigatórios' });
@@ -83,6 +83,7 @@ router.post('/', authenticateToken, async (req, res) => {
     const session = await Session.create({
       userId: req.user.id,
       whatsappId,
+      name: name || null,
       library,
       status: 'disconnected'
     });
@@ -98,7 +99,7 @@ router.post('/', authenticateToken, async (req, res) => {
 });
 
 // PUT /api/sessions/:id - Atualizar sessão (ex: defaultQueueId)
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const { defaultQueueId, status } = req.body;
@@ -127,7 +128,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
 });
 
 // POST /api/sessions/:id/start - Iniciar sessão
-router.post('/:id/start', authenticateToken, async (req, res) => {
+router.post('/:id/start', authMiddleware, async (req, res) => {
   try {
     const session = await Session.findOne({
       where: { id: req.params.id, userId: req.user.id }
@@ -164,15 +165,36 @@ router.post('/:id/start', authenticateToken, async (req, res) => {
           session.whatsappId,
           async (qr) => {
             try {
-              // Converter QR para base64 data URL
-              const QRCode = await import('qrcode');
-              const qrDataURL = await QRCode.toDataURL(qr);
+              let qrDataURL = qr;
+              // Se já vier como data URL (baileysService já gerou) não reprocessar
+              if (!qr.startsWith('data:image')) {
+                if (qr.startsWith('RAW:')) {
+                  // Fallback RAW recebido; tentar gerar imagem a partir do conteúdo original
+                  const raw = Buffer.from(qr.slice(4), 'base64').toString('utf-8');
+                  try {
+                    const QRCode = await import('qrcode');
+                    qrDataURL = await QRCode.toDataURL(raw, { errorCorrectionLevel: 'L', margin: 1, scale: 4 });
+                  } catch (innerErr) {
+                    console.warn('⚠️ Falha ao converter RAW QR em imagem, mantendo RAW:', innerErr.message);
+                    qrDataURL = qr; // Mantém RAW
+                  }
+                } else {
+                  // String aparentemente crua; tentar gerar data URL
+                  try {
+                    const QRCode = await import('qrcode');
+                    qrDataURL = await QRCode.toDataURL(qr, { errorCorrectionLevel: 'L', margin: 1, scale: 4 });
+                  } catch (convErr) {
+                    console.warn('⚠️ Falha ao gerar imagem QR (provável já processado ou muito grande). Usando string direta.', convErr.message);
+                    qrDataURL = qr.startsWith('data:image') ? qr : `RAW:${Buffer.from(qr).toString('base64')}`;
+                  }
+                }
+              }
               sessionQRs.set(session.whatsappId, qrDataURL);
               sessionStatus.set(session.whatsappId, 'qr_ready');
-              console.log(`📱 QR Code gerado para sessão Baileys ${session.whatsappId}`);
+              console.log(`📱 QR pronto para sessão Baileys ${session.whatsappId} (length=${qrDataURL.length})`);
             } catch (error) {
-              console.error('Erro ao gerar QR Code:', error);
-              sessionQRs.set(session.whatsappId, qr); // Fallback para string original
+              console.error('Erro ao preparar QR Code:', error);
+              sessionQRs.set(session.whatsappId, qr);
               sessionStatus.set(session.whatsappId, 'qr_ready');
             }
           },
@@ -211,7 +233,7 @@ router.post('/:id/start', authenticateToken, async (req, res) => {
 });
 
 // GET /api/sessions/:id/qr - Obter QR code da sessão
-router.get('/:id/qr', authenticateToken, async (req, res) => {
+router.get('/:id/qr', authMiddleware, async (req, res) => {
   try {
     const session = await Session.findOne({
       where: { id: req.params.id, userId: req.user.id }
@@ -236,7 +258,7 @@ router.get('/:id/qr', authenticateToken, async (req, res) => {
 });
 
 // DELETE /api/sessions/:id - Deletar sessão
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', authMiddleware, async (req, res) => {
   try {
     const session = await Session.findOne({
       where: { id: req.params.id, userId: req.user.id }
@@ -280,7 +302,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 });
 
 // POST /api/sessions/:id/restart - Reiniciar sessão completamente
-router.post('/:id/restart', authenticateToken, async (req, res) => {
+router.post('/:id/restart', authMiddleware, async (req, res) => {
   try {
     const session = await Session.findOne({
       where: { id: req.params.id, userId: req.user.id }
@@ -316,13 +338,30 @@ router.post('/:id/restart', authenticateToken, async (req, res) => {
           session.whatsappId,
           async (qr) => {
             try {
-              const QRCode = await import('qrcode');
-              const qrDataURL = await QRCode.toDataURL(qr);
+              let qrDataURL = qr;
+              if (!qr.startsWith('data:image')) {
+                if (qr.startsWith('RAW:')) {
+                  const raw = Buffer.from(qr.slice(4), 'base64').toString('utf-8');
+                  try {
+                    const QRCode = await import('qrcode');
+                    qrDataURL = await QRCode.toDataURL(raw, { errorCorrectionLevel: 'L', margin: 1, scale: 4 });
+                  } catch (innerErr) {
+                    console.warn('⚠️ Falha ao converter RAW QR em imagem, mantendo RAW:', innerErr.message);
+                    qrDataURL = qr;
+                  }
+                } else {
+                  try {
+                    const QRCode = await import('qrcode');
+                    qrDataURL = await QRCode.toDataURL(qr, { errorCorrectionLevel: 'L', margin: 1, scale: 4 });
+                  } catch (convErr) {
+                    console.warn('⚠️ Falha ao gerar imagem QR, usando fallback RAW:', convErr.message);
+                    qrDataURL = `RAW:${Buffer.from(qr).toString('base64')}`;
+                  }
+                }
+              }
               sessionQRs.set(session.whatsappId, qrDataURL);
               sessionStatus.set(session.whatsappId, 'qr_ready');
-              console.log(`📱 QR Code gerado para sessão Baileys ${session.whatsappId}`);
-              
-              // Emitir QR code via WebSocket
+              console.log(`📱 QR pronto (restart) para sessão Baileys ${session.whatsappId} (length=${qrDataURL.length})`);
               emitToAll('session-qr-update', { 
                 sessionId: session.id, 
                 qrCode: qrDataURL,
@@ -330,7 +369,7 @@ router.post('/:id/restart', authenticateToken, async (req, res) => {
               });
               emitSessionsUpdate();
             } catch (error) {
-              console.error('❌ Erro ao gerar QR Code:', error);
+              console.error('❌ Erro ao preparar QR Code:', error);
               sessionQRs.set(session.whatsappId, qr);
               sessionStatus.set(session.whatsappId, 'qr_ready');
             }
@@ -383,7 +422,7 @@ router.post('/:id/restart', authenticateToken, async (req, res) => {
 });
 
 // POST /api/sessions/:id/shutdown - Parar e limpar sessão completamente
-router.post('/:id/shutdown', authenticateToken, async (req, res) => {
+router.post('/:id/shutdown', authMiddleware, async (req, res) => {
   try {
     const session = await Session.findOne({
       where: { id: req.params.id, userId: req.user.id }
@@ -439,7 +478,7 @@ router.post('/:id/shutdown', authenticateToken, async (req, res) => {
 });
 
 // POST /api/sessions/:id/qrcode - Gerar novo QR Code
-router.post('/:id/qrcode', authenticateToken, async (req, res) => {
+router.post('/:id/qrcode', authMiddleware, async (req, res) => {
   try {
     const session = await Session.findOne({
       where: { id: req.params.id, userId: req.user.id }
@@ -528,7 +567,7 @@ router.post('/:id/qrcode', authenticateToken, async (req, res) => {
 });
 
 // GET /api/sessions/active - Listar sessões ativas
-router.get('/active', authenticateToken, async (req, res) => {
+router.get('/active', authMiddleware, async (req, res) => {
   try {
     const baileysSessions = listBaileysSessions();
 
@@ -552,10 +591,10 @@ router.get('/active', authenticateToken, async (req, res) => {
 // Removed duplicate GET '/' route for sessions list
 
 // GET /api/sessions/status - Verificar status de todas as sessões
-router.get('/status', authenticateToken, getSessionsStatus);
+router.get('/status', authMiddleware, getSessionsStatus);
 
 // POST /api/sessions/sync - Sincronizar todas as sessões
-router.post('/sync', authenticateToken, async (req, res) => {
+router.post('/sync', authMiddleware, async (req, res) => {
   try {
     console.log('🔄 Sincronização manual solicitada...');
     await syncAllSessions();
@@ -567,6 +606,6 @@ router.post('/sync', authenticateToken, async (req, res) => {
 });
 
 // POST /api/sessions/:sessionId/reactivate - Reativar uma sessão
-router.post('/:sessionId/reactivate', authenticateToken, reactivateSession);
+router.post('/:sessionId/reactivate', authMiddleware, reactivateSession);
 
 export default router;

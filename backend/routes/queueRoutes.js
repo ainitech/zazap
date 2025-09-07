@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticateToken } from '../middleware/auth.js';
+import authMiddleware from '../middleware/authMiddleware.js';
 import {
   createQueue,
   listQueues,
@@ -24,35 +24,35 @@ import {
 const router = express.Router();
 
 // Rotas básicas
-router.post('/', authenticateToken, createQueue);
-router.get('/', authenticateToken, listQueues);
-router.put('/:queueId', authenticateToken, updateQueue);
-router.delete('/:queueId', authenticateToken, deleteQueue);
+router.post('/', authMiddleware, createQueue);
+router.get('/', authMiddleware, listQueues);
+router.put('/:queueId', authMiddleware, updateQueue);
+router.delete('/:queueId', authMiddleware, deleteQueue);
 
 // Rotas de busca
-router.get('/name/:queueName', authenticateToken, getQueueByName);
-router.get('/:queueId/stats', authenticateToken, getQueueStats);
-router.get('/:queueId/performance', authenticateToken, getQueuePerformance);
+router.get('/name/:queueName', authMiddleware, getQueueByName);
+router.get('/:queueId/stats', authMiddleware, getQueueStats);
+router.get('/:queueId/performance', authMiddleware, getQueuePerformance);
 
 // Rotas de gestão de usuários
-router.post('/assign', authenticateToken, assignUserToQueue);
-router.post('/remove-user', authenticateToken, removeUserFromQueue);
-router.get('/user', authenticateToken, getUserQueues);
+router.post('/assign', authMiddleware, assignUserToQueue);
+router.post('/remove-user', authMiddleware, removeUserFromQueue);
+router.get('/user', authMiddleware, getUserQueues);
 
 // Rotas de tickets
-router.get('/:queueId/tickets', authenticateToken, getQueueTickets);
-router.post('/:queueId/transfer-ticket', authenticateToken, transferTicketToQueue);
+router.get('/:queueId/tickets', authMiddleware, getQueueTickets);
+router.post('/:queueId/transfer-ticket', authMiddleware, transferTicketToQueue);
 
 // Rotas de ações avançadas
-router.post('/bulk', authenticateToken, bulkActions);
-router.post('/:queueId/archive', authenticateToken, archiveQueue);
-router.post('/:queueId/duplicate', authenticateToken, duplicateQueue);
+router.post('/bulk', authMiddleware, bulkActions);
+router.post('/:queueId/archive', authMiddleware, archiveQueue);
+router.post('/:queueId/duplicate', authMiddleware, duplicateQueue);
 
 // Configurações avançadas da fila
-router.get('/:queueId/advanced-settings', authenticateToken, getAdvancedSettings);
-router.put('/:queueId/advanced-settings', authenticateToken, updateAdvancedSettings);
+router.get('/:queueId/advanced-settings', authMiddleware, getAdvancedSettings);
+router.put('/:queueId/advanced-settings', authMiddleware, updateAdvancedSettings);
 
 // Atividades recentes das filas
-router.get('/activities', authenticateToken, getQueueActivities);
+router.get('/activities', authMiddleware, getQueueActivities);
 
 export default router;

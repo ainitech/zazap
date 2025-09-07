@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 
-import { apiUrl, API_BASE_URL } from '../../utils/apiClient';
+import { apiUrl, API_BASE_URL, apiFetch } from '../../utils/apiClient';
 
 export default function QuickRepliesComponent() {
   const { token, user } = useAuth();
@@ -28,9 +28,7 @@ export default function QuickRepliesComponent() {
     console.log('🔧 QuickRepliesComponent: Buscando respostas rápidas...');
     setLoading(true);
     try {
-  const res = await fetch(apiUrl('/api/quick-replies'), {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token') || token}` },
-      });
+  const res = await apiFetch('/api/quick-replies');
       console.log('🔧 QuickRepliesComponent: Resposta da API:', res.status, res.statusText);
       
       if (!res.ok) {
@@ -226,30 +224,13 @@ export default function QuickRepliesComponent() {
                       fd.append('mediaType', 'text');
                       if (variables) fd.append('variables', JSON.stringify(variables));
                       fd.append('media', file);
-                      const res = await fetch(apiUrl('/api/quick-replies'), {
-                        method: 'POST',
-                        headers: { Authorization: `Bearer ${localStorage.getItem('token') || token}` },
-                        body: fd
-                      });
+                      const res = await apiFetch('/api/quick-replies', { method: 'POST', body: fd });
                       if (!res.ok) {
                         const e = await res.json().catch(()=>({ error:'Erro ao criar'}));
                         throw new Error(e.error || 'Erro ao criar');
                       }
                     } else {
-                      const res = await fetch(apiUrl('/api/quick-replies'), {
-                        method: 'POST',
-                        headers: { 
-                          Authorization: `Bearer ${localStorage.getItem('token') || token}`,
-                          'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                          title: title.trim(),
-                          shortcut: shortcut.trim(),
-                          content,
-                          mediaType: 'text',
-                          ...(variables ? { variables } : {})
-                        })
-                      });
+                      const res = await apiFetch('/api/quick-replies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: title.trim(), shortcut: shortcut.trim(), content, mediaType: 'text', ...(variables ? { variables } : {}) }) });
                       if (!res.ok) {
                         const e = await res.json().catch(()=>({ error:'Erro ao criar'}));
                         throw new Error(e.error || 'Erro ao criar');

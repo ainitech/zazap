@@ -1,11 +1,11 @@
 import express from 'express';
 import tagController from '../controllers/tagController.js';
-import { authenticateToken } from '../middleware/auth.js';
+import authMiddleware from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
 // Apply authentication middleware to all routes
-router.use(authenticateToken);
+router.use(authMiddleware);
 
 // Tag management routes
 router.get('/', tagController.getTags);

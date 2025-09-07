@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticateToken } from '../middleware/auth.js';
+import authMiddleware from '../middleware/authMiddleware.js';
 import { 
   listMessages, 
   sendMessage, 
@@ -13,21 +13,21 @@ import upload, { compressImageMiddleware } from '../middleware/upload.js';
 const router = express.Router();
 
 // Listar mensagens de um ticket
-router.get('/:ticketId', authenticateToken, listMessages);
+router.get('/:ticketId', authMiddleware, listMessages);
 
 // Enviar mensagem em um ticket
-router.post('/:ticketId', authenticateToken, sendMessage);
+router.post('/:ticketId', authMiddleware, sendMessage);
 
 // Upload de mídia em mensagem
-router.post('/:ticketId/media', authenticateToken, upload.single('file'), compressImageMiddleware, sendMediaMessage);
+router.post('/:ticketId/media', authMiddleware, upload.single('file'), compressImageMiddleware, sendMediaMessage);
 
 // Listar mídias/anexos de um ticket
-router.get('/:ticketId/media', authenticateToken, listTicketMedia);
+router.get('/:ticketId/media', authMiddleware, listTicketMedia);
 
 // Deletar mensagem
-router.delete('/:messageId', authenticateToken, deleteMessage);
+router.delete('/:messageId', authMiddleware, deleteMessage);
 
 // Reagir a mensagem
-router.post('/:messageId/react', authenticateToken, reactToMessage);
+router.post('/:messageId/react', authMiddleware, reactToMessage);
 
 export default router;

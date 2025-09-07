@@ -32,9 +32,7 @@ export default function SchedulesComponent() {
   const [viewMode, setViewMode] = useState('list'); // 'list' or 'calendar'
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [calendarDate, setCalendarDate] = useState(new Date());
-  const token = localStorage.getItem('token');
-
-  console.log('📅 SchedulesComponent: Inicializando, token:', !!token);
+  // Removido uso de token/localStorage
 
   const load = async () => {
     console.log('📅 SchedulesComponent: Carregando agendamentos...');

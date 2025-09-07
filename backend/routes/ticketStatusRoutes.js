@@ -1,9 +1,9 @@
 import express from 'express';
-import { authenticateToken } from '../middleware/auth.js';
+import authMiddleware from '../middleware/authMiddleware.js';
 import { updateTicketStatus } from '../controllers/ticketStatusController.js';
 
 const router = express.Router();
 
-router.post('/update', authenticateToken, updateTicketStatus);
+router.post('/update', authMiddleware, updateTicketStatus);
 
 export default router;

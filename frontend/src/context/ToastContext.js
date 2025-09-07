@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { apiUrl } from '../utils/apiClient';
+import AuthService from '../services/authService.js';
 
 const ToastContext = createContext();
 
@@ -143,17 +144,26 @@ export const ToastProvider = ({ children }) => {
 
   // Helper to create a ticket-action toast with common ticket operations.
   const addTicketActionToast = useCallback((ticketId, message = `Ação no ticket ${ticketId}`, { duration = 15000, type = 'info' } = {}) => {
-    const token = () => localStorage.getItem('token');
-
     const doRequest = async (path, method = 'POST', body = null) => {
-  const headers = { 'Authorization': `Bearer ${token()}` };
-      if (body) headers['Content-Type'] = 'application/json';
-  const resp = await fetch(apiUrl(path), { method, headers, body: body ? JSON.stringify(body) : undefined });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.error || 'request_failed');
+      try {
+        let response;
+        if (method === 'POST') {
+          response = await AuthService.post(apiUrl(path), body);
+        } else if (method === 'PUT') {
+          response = await AuthService.put(apiUrl(path), body);
+        } else {
+          response = await AuthService.get(apiUrl(path));
+        }
+        
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          throw new Error(err.error || 'request_failed');
+        }
+        
+        return response.json().catch(() => ({}));
+      } catch (error) {
+        throw error;
       }
-      return resp.json().catch(() => ({}));
     };
 
     const actions = [

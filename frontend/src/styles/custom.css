@@ -1,9 +1,45 @@
 /* Estilos personalizados para componentes específicos */
 
+/* Correção para layout de página completa */
+.page-layout-fix {
+  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.main-content-fix {
+  flex: 1;
+  min-height: 0;
+  background-color: rgb(249 250 251); /* gray-50 */
+}
+
+.content-area-fix {
+  min-height: 100%;
+  height: 100%;
+}
+
+/* Z-index fixes for overlays and dropdowns */
+.dropdown-overlay {
+  z-index: 9998;
+}
+
+.menu-dropdown {
+  z-index: 9999;
+}
+
+.modal-overlay {
+  z-index: 10000;
+}
+
+.tooltip-overlay {
+  z-index: 10001;
+}
+
 /* Line clamp utility para texto truncado */
 .line-clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -11,6 +47,7 @@
 .line-clamp-1 {
   display: -webkit-box;
   -webkit-line-clamp: 1;
+  line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }

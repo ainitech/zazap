@@ -5,7 +5,7 @@ import ConversationList from '../chat/ConversationList';
 import ChatArea from '../chat/ChatArea';
 import ContactInfo from '../chat/ContactInfo';
 import { useSocket } from '../../context/SocketContext';
-import { apiUrl } from '../../utils/apiClient';
+import { apiUrl, apiFetch, safeJson } from '../../utils/apiClient';
 
 // Use centralized apiUrl for backend requests
 
@@ -26,8 +26,8 @@ export default function ChatComponent() {
 
   // Função para limpar o estado salvo do ticket
   const clearSavedTicket = () => {
-    localStorage.removeItem('selectedTicket');
-    console.log('🧹 Estado do ticket limpo do localStorage');
+    // Antes: removia de localStorage. Agora não persistimos mais.
+    console.log('🧹 Persistência em localStorage removida – nada para limpar');
   };
 
   useEffect(() => {
@@ -46,37 +46,8 @@ export default function ChatComponent() {
           await fetchTicketById(ticketIdentifier);
         }
       } else {
-        // Se não há parâmetros na URL, tentar restaurar do localStorage
-        const savedTicket = localStorage.getItem('selectedTicket');
-        
-        if (savedTicket) {
-          try {
-            const ticketData = JSON.parse(savedTicket);
-            
-            // Verificar se o ticket salvo não é muito antigo (menos de 24 horas)
-            const isRecent = Date.now() - ticketData.timestamp < 24 * 60 * 60 * 1000;
-            
-            if (isRecent) {
-              console.log('🔄 Restaurando ticket selecionado do localStorage:', ticketData);
-              
-              // Se temos um UID, buscar por UID, senão buscar por ID
-              if (ticketData.uid) {
-                await fetchTicketByUid(ticketData.uid);
-              } else if (ticketData.id) {
-                await fetchTicketById(ticketData.id);
-              }
-            } else {
-              // Limpar dados antigos
-              localStorage.removeItem('selectedTicket');
-              console.log('🧹 Limpando dados antigos do localStorage');
-            }
-          } catch (error) {
-            console.error('❌ Erro ao restaurar ticket do localStorage:', error);
-            localStorage.removeItem('selectedTicket');
-          }
-        } else {
-          console.log(`🚀 [INIT] Nenhum parâmetro encontrado, nenhum ticket salvo`);
-        }
+  // Persistência via localStorage removida; nada a restaurar
+  console.log('🚀 [INIT] Nenhum parâmetro encontrado e persistência local desativada');
       }
     };
 
@@ -289,12 +260,9 @@ useEffect(() => {
     try {
       console.log(`🎫 Aceitando ticket #${ticketId}...`);
       
-      const response = await fetch(apiUrl(`/api/tickets/${ticketId}/accept`), {
+      const response = await apiFetch(`/api/tickets/${ticketId}/accept`, {
         method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        }
+        headers: { 'Content-Type': 'application/json' }
       });
       
       if (response.ok) {
@@ -321,6 +289,17 @@ useEffect(() => {
     }
   };
 
+  // Função de refresh para pull-to-refresh
+  const handleRefreshTickets = async () => {
+    console.log('🔄 Pull-to-refresh iniciado');
+    try {
+      await fetchTickets(true);
+      console.log('✅ Pull-to-refresh concluído');
+    } catch (error) {
+      console.error('❌ Erro no pull-to-refresh:', error);
+    }
+  };
+
   const fetchTickets = async (silent = false) => {
     try {
       if (!silent) {
@@ -328,11 +307,7 @@ useEffect(() => {
         console.trace('Stack trace da chamada fetchTickets:');
       }
       
-  const response = await fetch(apiUrl('/api/tickets'), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch('/api/tickets');
       
       if (response.ok) {
         const data = await response.json();
@@ -350,11 +325,7 @@ useEffect(() => {
     try {
       console.log(`🔍 [FETCH BY UID] Buscando ticket por UID: ${uid}`);
       
-  const response = await fetch(apiUrl(`/api/tickets/uid/${uid}`), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch(`/api/tickets/uid/${uid}`);
       
       if (response.ok) {
         const ticket = await response.json();
@@ -376,11 +347,7 @@ useEffect(() => {
     try {
       console.log(`🔍 [FETCH BY ID] Buscando ticket por ID: ${id}`);
       
-  const response = await fetch(apiUrl(`/api/tickets?ticketId=${id}`), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch(`/api/tickets?ticketId=${id}`);
       
       if (response.ok) {
         const tickets = await response.json();
@@ -406,11 +373,7 @@ useEffect(() => {
       console.log(`🔄 [FETCH ONCE] Buscando mensagens iniciais para ticket ${ticketId}...`);
       console.trace('Stack trace da chamada fetchMessagesOnce:');
       
-  const response = await fetch(apiUrl(`/api/ticket-messages/${ticketId}`), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch(`/api/ticket-messages/${ticketId}`);
       
       if (response.ok) {
         const data = await response.json();
@@ -437,12 +400,7 @@ useEffect(() => {
     setMessages([]); // Limpar mensagens anteriores
     currentTicketIdRef.current = ticket.id;
     
-    // Persistir o ticket selecionado no localStorage
-    localStorage.setItem('selectedTicket', JSON.stringify({
-      id: ticket.id,
-      uid: ticket.uid,
-      timestamp: Date.now()
-    }));
+  // Persistência removida (antes salvava no localStorage)
     
     console.log('📋 Estado atualizado:', {
       selectedTicketId: ticket.id,
@@ -491,16 +449,10 @@ useEffect(() => {
       console.log(`📤 Enviando mensagem para ticket ${selectedTicket.id}...`);
       console.log(`🔗 WebSocket conectado: ${isConnected}, Socket: ${socket ? 'OK' : 'NULL'}`);
       
-  const response = await fetch(apiUrl(`/api/ticket-messages/${selectedTicket.id}`), {
+      const response = await apiFetch(`/api/ticket-messages/${selectedTicket.id}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          sender: 'user',
-          content: newMessage
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sender: 'user', content: newMessage })
       });
 
       if (response.ok) {
@@ -523,32 +475,59 @@ useEffect(() => {
 
   return (
     <div className="flex h-screen bg-gray-50 relative">
-      <ConversationList
-        tickets={tickets}
-        selectedTicket={selectedTicket}
-        onTicketSelect={handleTicketSelect}
-        searchTerm={searchTerm}
-        onSearchChange={setSearchTerm}
-        unreadCount={unreadCount}
-        isRealTime={isConnected}
-        currentUser={null} // TODO: Adicionar usuário atual quando necessário
-        onAcceptTicket={acceptTicket}
-      />
-      <ChatArea
-        selectedTicket={selectedTicket}
-        messages={messages}
-        newMessage={newMessage}
-        onNewMessageChange={setNewMessage}
-        onSendMessage={sendMessage}
-        showContactInfo={showContactInfo}
-        onToggleContactInfo={() => setShowContactInfo(!showContactInfo)}
-        isRealTime={isConnected}
-        isSendingMessage={isSendingMessage}
-      />
-      <ContactInfo
-        selectedTicket={selectedTicket}
-        showContactInfo={showContactInfo}
-      />
+      {/* Mobile: ConversationList as overlay when no ticket selected */}
+      <div className={`
+        ${selectedTicket ? 'hidden lg:block' : 'block'} 
+        ${selectedTicket ? 'lg:w-80' : 'w-full lg:w-80'} 
+        relative z-10
+      `}>
+        <ConversationList
+          tickets={tickets}
+          selectedTicket={selectedTicket}
+          onTicketSelect={handleTicketSelect}
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
+          unreadCount={unreadCount}
+          isRealTime={isConnected}
+          currentUser={null} // TODO: Adicionar usuário atual quando necessário
+          onAcceptTicket={acceptTicket}
+          onRefresh={handleRefreshTickets}
+        />
+      </div>
+      
+      {/* Mobile: ChatArea takes full width when ticket selected */}
+      <div className={`
+        ${selectedTicket ? 'block' : 'hidden lg:block'} 
+        ${selectedTicket ? 'w-full lg:flex-1' : 'lg:flex-1'} 
+        relative
+      `}>
+        <ChatArea
+          selectedTicket={selectedTicket}
+          messages={messages}
+          newMessage={newMessage}
+          onNewMessageChange={setNewMessage}
+          onSendMessage={sendMessage}
+          showContactInfo={showContactInfo}
+          onToggleContactInfo={() => setShowContactInfo(!showContactInfo)}
+          isRealTime={isConnected}
+          isSendingMessage={isSendingMessage}
+          onBackToList={() => setSelectedTicket(null)} // Add back button for mobile
+        />
+      </div>
+      
+      {/* ContactInfo as overlay on mobile */}
+      <div className={`
+        ${showContactInfo ? 'block' : 'hidden'} 
+        lg:block lg:relative
+        ${showContactInfo ? 'fixed inset-0 z-50 lg:relative lg:inset-auto lg:z-auto' : ''}
+        ${showContactInfo ? 'lg:w-80' : 'lg:w-0 lg:overflow-hidden'}
+      `}>
+        <ContactInfo
+          selectedTicket={selectedTicket}
+          showContactInfo={showContactInfo}
+          onClose={() => setShowContactInfo(false)} // Add close function for mobile
+        />
+      </div>
     </div>
   );
 }

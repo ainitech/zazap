@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticateToken } from '../middleware/auth.js';
+import authMiddleware from '../middleware/authMiddleware.js';
 import {
   listIntegrations, createIntegration, updateIntegration, deleteIntegration,
   linkIntegrationTicket, unlinkIntegrationTicket, getIntegrationsByTicket,
@@ -9,21 +9,21 @@ import {
 
 const router = express.Router();
 
-router.get('/', authenticateToken, listIntegrations);
-router.post('/', authenticateToken, createIntegration);
-router.put('/:id', authenticateToken, updateIntegration);
-router.delete('/:id', authenticateToken, deleteIntegration);
+router.get('/', authMiddleware, listIntegrations);
+router.post('/', authMiddleware, createIntegration);
+router.put('/:id', authMiddleware, updateIntegration);
+router.delete('/:id', authMiddleware, deleteIntegration);
 
-router.post('/link-ticket', authenticateToken, linkIntegrationTicket);
-router.post('/unlink-ticket', authenticateToken, unlinkIntegrationTicket);
-router.get('/by-ticket/:ticketId', authenticateToken, getIntegrationsByTicket);
+router.post('/link-ticket', authMiddleware, linkIntegrationTicket);
+router.post('/unlink-ticket', authMiddleware, unlinkIntegrationTicket);
+router.get('/by-ticket/:ticketId', authMiddleware, getIntegrationsByTicket);
 
-router.post('/link-queue', authenticateToken, linkIntegrationQueue);
-router.post('/unlink-queue', authenticateToken, unlinkIntegrationQueue);
-router.get('/by-queue/:queueId', authenticateToken, getIntegrationsByQueue);
+router.post('/link-queue', authMiddleware, linkIntegrationQueue);
+router.post('/unlink-queue', authMiddleware, unlinkIntegrationQueue);
+router.get('/by-queue/:queueId', authMiddleware, getIntegrationsByQueue);
 
 // Execução e teste de integrações
-router.post('/:integrationId/execute', authenticateToken, executeIntegration);
-router.post('/:integrationId/test', authenticateToken, testIntegration);
+router.post('/:integrationId/execute', authMiddleware, executeIntegration);
+router.post('/:integrationId/test', authMiddleware, testIntegration);
 
 export default router;

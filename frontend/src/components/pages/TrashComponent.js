@@ -6,7 +6,7 @@ import {
   ArrowUturnLeftIcon,
   ExclamationTriangleIcon
 } from '@heroicons/react/24/outline';
-import { apiUrl } from '../../utils/apiClient';
+import { apiUrl, apiFetch } from '../../utils/apiClient';
 
 // const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
@@ -21,11 +21,7 @@ export default function TrashComponent() {
 
   const fetchDeletedTickets = async () => {
     try {
-  const response = await fetch(apiUrl('/api/tickets?status=deleted'), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch('/api/tickets?status=deleted');
       if (response.ok) {
         const data = await response.json();
         setDeletedTickets(data);
@@ -39,12 +35,7 @@ export default function TrashComponent() {
 
   const restoreTicket = async (ticketId) => {
     try {
-  const response = await fetch(apiUrl(`/api/tickets/${ticketId}/restore`), {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch(`/api/tickets/${ticketId}/restore`, { method: 'POST' });
 
       if (response.ok) {
         setDeletedTickets(prev => prev.filter(ticket => ticket.id !== ticketId));

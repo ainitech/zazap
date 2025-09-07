@@ -1,50 +1,50 @@
 import express from 'express';
-import { authenticateToken } from '../middleware/auth.js';
+import authMiddleware from '../middleware/authMiddleware.js';
 import { moveTicket, listTickets, acceptTicket, resolveTicket, closeTicket, updateTicket, deleteTicket, restoreTicket, permanentDeleteTicket, getTicketByUid, createTicket, updateTicketPriority } from '../controllers/ticketController.js';
 import { transferTicketToQueue } from '../controllers/queueController.js';
 const router = express.Router();
 
 // Listar tickets com filtros e busca avançada
-router.get('/', authenticateToken, listTickets);
+router.get('/', authMiddleware, listTickets);
 
 // Buscar ticket por UID (para links diretos)
-router.get('/uid/:uid', authenticateToken, getTicketByUid);
+router.get('/uid/:uid', authMiddleware, getTicketByUid);
 
 // Criar ticket
-router.post('/', authenticateToken, createTicket);
+router.post('/', authMiddleware, createTicket);
 
 // Aceitar ticket
-router.put('/:ticketId/accept', authenticateToken, acceptTicket);
+router.put('/:ticketId/accept', authMiddleware, acceptTicket);
 
 // Resolver ticket
-router.put('/:ticketId/resolve', authenticateToken, resolveTicket);
+router.put('/:ticketId/resolve', authMiddleware, resolveTicket);
 
 // Fechar ticket
-router.put('/:ticketId/close', authenticateToken, closeTicket);
+router.put('/:ticketId/close', authMiddleware, closeTicket);
 
 // Mover ticket para outra fila
-router.post('/move', authenticateToken, moveTicket);
+router.post('/move', authMiddleware, moveTicket);
 
 // Transferir ticket para outra fila (ou agente)
-router.post('/:ticketId/transfer', authenticateToken, transferTicketToQueue);
+router.post('/:ticketId/transfer', authMiddleware, transferTicketToQueue);
 
 // Atualizar ticket (campos permitidos)
-router.put('/:ticketId', authenticateToken, updateTicket);
+router.put('/:ticketId', authMiddleware, updateTicket);
 
 // Deletar (soft-delete) ticket
-router.delete('/:ticketId', authenticateToken, deleteTicket);
+router.delete('/:ticketId', authMiddleware, deleteTicket);
 
 // Deletar ticket permanentemente (remove tudo sobre o contato)
-router.delete('/:ticketId/permanent', authenticateToken, permanentDeleteTicket);
+router.delete('/:ticketId/permanent', authMiddleware, permanentDeleteTicket);
 
 // Restaurar ticket da lixeira
-router.post('/:ticketId/restore', authenticateToken, restoreTicket);
+router.post('/:ticketId/restore', authMiddleware, restoreTicket);
 
 // Atualizar prioridade do ticket
-router.put('/:ticketId/priority', authenticateToken, updateTicketPriority);
+router.put('/:ticketId/priority', authMiddleware, updateTicketPriority);
 
 // Notificar status de gravação de áudio
-router.post('/:id/recording-status', authenticateToken, async (req, res) => {
+router.post('/:id/recording-status', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const { isRecording } = req.body;
@@ -112,7 +112,7 @@ router.post('/:id/recording-status', authenticateToken, async (req, res) => {
 });
 
 // Notificar status de digitação
-router.post('/:id/typing-status', authenticateToken, async (req, res) => {
+router.post('/:id/typing-status', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const { isTyping } = req.body;

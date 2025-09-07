@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiFetch, safeJson } from '../../utils/apiClient';
 import {
   PlusIcon,
   MagnifyingGlassIcon,
@@ -58,14 +59,9 @@ const CampaignsComponent = () => {
         ...(statusFilter !== 'all' && { status: statusFilter })
       });
 
-      const response = await fetch(`/api/campaigns?${params}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-
+      const response = await apiFetch(`/api/campaigns?${params}`);
       if (response.ok) {
-        const data = await response.json();
+        const data = await safeJson(response);
         setCampaigns(data.campaigns);
         setPagination(data.pagination);
       }
@@ -136,12 +132,7 @@ const CampaignsComponent = () => {
 
   const handleStartCampaign = async (campaignId) => {
     try {
-      const response = await fetch(`/api/campaigns/${campaignId}/start`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch(`/api/campaigns/${campaignId}/start`, { method: 'POST' });
 
       if (response.ok) {
         fetchCampaigns();
@@ -153,12 +144,7 @@ const CampaignsComponent = () => {
 
   const handlePauseCampaign = async (campaignId) => {
     try {
-      const response = await fetch(`/api/campaigns/${campaignId}/pause`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch(`/api/campaigns/${campaignId}/pause`, { method: 'POST' });
 
       if (response.ok) {
         fetchCampaigns();
@@ -170,12 +156,7 @@ const CampaignsComponent = () => {
 
   const handleResumeCampaign = async (campaignId) => {
     try {
-      const response = await fetch(`/api/campaigns/${campaignId}/resume`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch(`/api/campaigns/${campaignId}/resume`, { method: 'POST' });
 
       if (response.ok) {
         fetchCampaigns();
@@ -187,12 +168,7 @@ const CampaignsComponent = () => {
 
   const handleDuplicateCampaign = async (campaignId) => {
     try {
-      const response = await fetch(`/api/campaigns/${campaignId}/duplicate`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch(`/api/campaigns/${campaignId}/duplicate`, { method: 'POST' });
 
       if (response.ok) {
         fetchCampaigns();
@@ -265,13 +241,7 @@ const CampaignsComponent = () => {
   const handleDeleteCampaign = async (campaignId) => {
     if (window.confirm('Tem certeza que deseja excluir esta campanha?')) {
       try {
-        const response = await fetch(`/api/campaigns/${campaignId}`, {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        });
-
+        const response = await apiFetch(`/api/campaigns/${campaignId}`, { method: 'DELETE' });
         if (response.ok) {
           fetchCampaigns();
         }
@@ -283,14 +253,9 @@ const CampaignsComponent = () => {
 
   const showStats = async (campaign) => {
     try {
-      const response = await fetch(`/api/campaigns/${campaign.id}/stats`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-
+      const response = await apiFetch(`/api/campaigns/${campaign.id}/stats`);
       if (response.ok) {
-        const stats = await response.json();
+        const stats = await safeJson(response);
         setSelectedCampaign({ ...campaign, stats });
         setShowStatsModal(true);
       }

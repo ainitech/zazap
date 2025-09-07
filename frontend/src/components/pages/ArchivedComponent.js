@@ -7,7 +7,7 @@ import {
   TrashIcon
 } from '@heroicons/react/24/outline';
 
-import { apiUrl } from '../../utils/apiClient';
+import { apiUrl, apiFetch, safeJson } from '../../utils/apiClient';
 
 export default function ArchivedComponent() {
   const [archivedTickets, setArchivedTickets] = useState([]);
@@ -20,13 +20,9 @@ export default function ArchivedComponent() {
 
   const fetchArchivedTickets = async () => {
     try {
-  const response = await fetch(apiUrl('/api/tickets?status=archived'), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+      const response = await apiFetch('/api/tickets?status=archived');
       if (response.ok) {
-        const data = await response.json();
+        const data = await safeJson(response);
         setArchivedTickets(data);
       }
     } catch (error) {
@@ -38,12 +34,7 @@ export default function ArchivedComponent() {
 
   const restoreTicket = async (ticketId) => {
     try {
-  const response = await fetch(apiUrl(`/api/tickets/${ticketId}/restore`), {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch(`/api/tickets/${ticketId}/restore`, { method: 'POST' });
 
       if (response.ok) {
         setArchivedTickets(prev => prev.filter(ticket => ticket.id !== ticketId));

@@ -36,17 +36,14 @@ const findSessionIndex = (sessionId) => {
   });
 };
 
-// Função para limpar e recriar pasta de autenticação
-const cleanAndRecreateAuthDir = (sessionId) => {
+// Função para limpar e recriar pasta de autenticação (async, usando fs/promises)
+const cleanAndRecreateAuthDir = async (sessionId) => {
   const authDir = getAuthDir(sessionId);
   try {
-    // Remover pasta existente se existir
-    if (fs.existsSync(authDir)) {
-      fs.rmSync(authDir, { recursive: true, force: true });
-      console.log(`🧹 Pasta de auth limpa: ${authDir}`);
-    }
-    // Recriar pasta
-    fs.mkdirSync(authDir, { recursive: true });
+    // Remover (force=true ignora inexistente)
+    await fs.rm(authDir, { recursive: true, force: true });
+    console.log(`🧹 Pasta de auth removida (se existia): ${authDir}`);
+    await fs.mkdir(authDir, { recursive: true });
     console.log(`📁 Pasta de auth recriada: ${authDir}`);
   } catch (error) {
     console.error(`❌ Erro ao limpar/recriar pasta de auth:`, error);
@@ -59,11 +56,15 @@ class BaileysSession {
     this.socket = socket;
     this.sessionId = sessionId;
     this.status = 'connecting';
+  this.reconnectAttempts = 0;
+  this.reconnectTimer = null;
   }
 }
 
 // Armazenar sessões ativas
 const sessions = [];
+// Map para rastrear tentativas de reconexão por número base (sessionId normalizado)
+const reconnectAttemptsMap = new Map();
 
 // Função para criar ou atualizar contato no Baileys
 // IMPORTANTE: Não sobrescrever name/pushname existentes com valores nulos ou vazios
@@ -154,12 +155,14 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
     const existingSessionIndex = findSessionIndex(sessionId);
     if (existingSessionIndex !== -1) {
       console.log(`Removendo sessão existente: ${sessions[existingSessionIndex].sessionId} (busca: ${sessionId})`);
-      await sessions[existingSessionIndex].socket.end();
+      if (sessions[existingSessionIndex].socket) {
+        await sessions[existingSessionIndex].socket.end();
+      }
       sessions.splice(existingSessionIndex, 1);
     }
 
-    // Limpar e recriar pasta de autenticação para evitar conflitos
-    cleanAndRecreateAuthDir(sessionId);
+    // Garantir diretórios de autenticação será feito logo abaixo junto com authRoot/authDir
+    // (removido check duplicado para evitar redeclaração de variável)
     
     // Garantir que diretórios existam
     const authRoot = getAuthRoot();
@@ -180,24 +183,30 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
       printQRInTerminal: false,
       generateHighQualityLinkPreview: true,
       syncFullHistory: false,
-      markOnlineOnConnect: false, // Reduzir carga inicial
-      connectTimeoutMs: 90_000, // Aumentar timeout
+      markOnlineOnConnect: false,
+      connectTimeoutMs: 90_000,
       defaultQueryTimeoutMs: 0,
-      keepAliveIntervalMs: 30_000, // Reduzir frequência de keep-alive
+      keepAliveIntervalMs: 30_000,
       emitOwnEvents: true,
-      fireInitQueries: false, // Reduzir queries iniciais
+      fireInitQueries: false,
       browser: ['ZaZap', 'Desktop', '1.0.0'],
       retryRequestDelayMs: 250,
       maxMsgRetryCount: 5,
+      // Adicionar configurações para melhor reconexão
+      qrTimeout: 60_000, // 60 segundos para QR
+      getMessage: async () => null, // Evitar erros de mensagem não encontrada
       appStateMacVerification: {
         patch: false,
         snapshot: false
       }
     });
 
-    // Criar instância da sessão
-    const session = new BaileysSession(sock, sessionId);
-    sessions.push(session);
+  // Criar instância da sessão (preservar tentativas de reconexão se existirem)
+  const baseNumber = sessionId.split(':')[0];
+  const previousAttempts = reconnectAttemptsMap.get(baseNumber) || 0;
+  const session = new BaileysSession(sock, sessionId);
+  session.reconnectAttempts = previousAttempts; // manter histórico para backoff
+  sessions.push(session);
 
     // LOG DO SOCKET CRIADO PARA ANÁLISE
     // Logs detalhados do socket (reduzidos para evitar ruído em produção)
@@ -209,12 +218,132 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
     sock.ev.on('creds.update', saveCreds);
     
     // Evento de atualização de conexão
+  const scheduleReconnect = async (sessionId, onQR, onReady, onMessage, reasonCode) => {
+      try {
+        const existingIndex = findSessionIndex(sessionId);
+        if (existingIndex === -1) {
+          console.log(`⚠️ Não foi possível agendar reconexão: sessão ${sessionId} não encontrada`);
+          return;
+        }
+        const s = sessions[existingIndex];
+        if (s.reconnectTimer) {
+          clearTimeout(s.reconnectTimer);
+          s.reconnectTimer = null;
+        }
+
+        // Para erro 515 (Stream Error), NÃO limpar auth na primeira tentativa
+        // Só limpar se já tentamos reconectar antes
+        if (reasonCode === 515 && s.reconnectAttempts >= 2) {
+          console.log(`🔧 Código 515 detectado após ${s.reconnectAttempts} tentativas - limpando autenticação`);
+          try {
+            // Fechar socket existente
+            if (s.socket && typeof s.socket.end === 'function') {
+              await s.socket.end();
+            }
+            // Limpar pasta de auth apenas após múltiplas falhas
+            await cleanAndRecreateAuthDir(sessionId);
+            // Resetar tentativas após limpar auth
+            s.reconnectAttempts = 0;
+            reconnectAttemptsMap.set(sessionId.split(':')[0], 0);
+          } catch (cleanupError) {
+            console.error(`⚠️ Erro ao limpar antes de reconectar (515):`, cleanupError);
+          }
+        } else if (reasonCode === 515) {
+          console.log(`🔧 Código 515 detectado - tentativa #${s.reconnectAttempts + 1} - mantendo autenticação`);
+          try {
+            // Apenas fechar socket, sem limpar auth
+            if (s.socket && typeof s.socket.end === 'function') {
+              await s.socket.end();
+            }
+          } catch (closeError) {
+            console.error(`⚠️ Erro ao fechar socket:`, closeError);
+          }
+        }
+
+        // Incrementar tentativas e calcular delay exponencial
+  s.reconnectAttempts += 1;
+  reconnectAttemptsMap.set(sessionId.split(':')[0], s.reconnectAttempts);
+        const base = reasonCode === 515 ? 3000 : 5000; // Delay um pouco maior para 515
+        const maxDelay = 60000; // 60s
+        const delay = Math.min(base * Math.pow(2, Math.min(s.reconnectAttempts - 1, 3)), maxDelay);
+        const maxAttempts = reasonCode === 515 ? 5 : 8; // Mais tentativas para erro 515
+
+        // Emitir status de reconexão
+        try {
+          const { emitToAll } = await import('./socket.js');
+          const sessionRecord = await Session.findOne({ where: { whatsappId: sessionId } });
+          if (sessionRecord) {
+            emitToAll('session-status-update', {
+              sessionId: sessionRecord.id,
+              status: 'reconnecting',
+              attempt: s.reconnectAttempts,
+              nextDelayMs: delay,
+              reasonCode
+            });
+          }
+        } catch (e) {
+          console.log('⚠️ Falha ao emitir status reconnecting:', e.message);
+        }
+
+        if (s.reconnectAttempts > maxAttempts) {
+          console.log(`❌ Máximo de tentativas de reconexão atingido para ${sessionId}`);
+            s.status = 'failed';
+          try {
+            const { emitToAll } = await import('./socket.js');
+            const sessionRecord = await Session.findOne({ where: { whatsappId: sessionId } });
+            if (sessionRecord) {
+              emitToAll('session-status-update', {
+                sessionId: sessionRecord.id,
+                status: 'failed',
+                attempts: s.reconnectAttempts,
+                reasonCode
+              });
+            }
+          } catch (_) {}
+          return;
+        }
+
+        console.log(`🔄 Agendando reconexão (#${s.reconnectAttempts}) para sessão ${sessionId} em ${(delay/1000).toFixed(1)}s (código: ${reasonCode})`);
+        s.reconnectTimer = setTimeout(async () => {
+          s.reconnectTimer = null;
+          try {
+            // Remover sessão antiga antes de criar nova
+            const oldIndex = findSessionIndex(sessionId);
+            if (oldIndex !== -1) {
+              sessions.splice(oldIndex, 1);
+            }
+            await createBaileysSession(sessionId, onQR, onReady, onMessage);
+          } catch (reErr) {
+            console.error(`❌ Erro ao tentar reconectar sessão ${sessionId}:`, reErr);
+            // Se falhar, agendar outra tentativa
+            const newIndex = findSessionIndex(sessionId);
+            if (newIndex === -1) {
+              // Recriar objeto de sessão para continuar tentando
+              const tempSession = new BaileysSession(null, sessionId);
+              tempSession.reconnectAttempts = s.reconnectAttempts;
+              sessions.push(tempSession);
+            }
+            scheduleReconnect(sessionId, onQR, onReady, onMessage, reasonCode);
+          }
+        }, delay);
+      } catch (err) {
+        console.error('Erro no scheduleReconnect:', err);
+      }
+    };
+
     sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
       if (qr && onQR) {
         try {
           console.log(`QR Code gerado para sessão Baileys ${sessionId}`);
-          // Gerar QR Code como base64
-          const qrCodeDataURL = await qrcode.toDataURL(qr);
+          let qrCodeDataURL;
+          try {
+            // Tentar gerar com menor nível de correção para caber mais dados
+            qrCodeDataURL = await qrcode.toDataURL(qr, { errorCorrectionLevel: 'L', margin: 1, scale: 4 });
+          } catch (genErr) {
+            console.warn('⚠️ Falha ao gerar imagem QR (tamanho grande). Enviando fallback RAW codificado em base64:', genErr.message);
+            // Fallback: enviar string RAW base64 para o frontend converter
+            qrCodeDataURL = `RAW:${Buffer.from(qr, 'utf-8').toString('base64')}`;
+          }
           session.status = 'qr';
           onQR(qrCodeDataURL);
           
@@ -242,27 +371,31 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
       if (connection === 'open') {
         console.log(`🟢 Sessão Baileys ${sessionId} conectada e pronta`);
         session.status = 'connected';
+        // Resetar tentativas de reconexão
+        const baseNumber = sessionId.split(':')[0];
+        reconnectAttemptsMap.set(baseNumber, 0);
+        session.reconnectAttempts = 0;
+        if (session.reconnectTimer) {
+          clearTimeout(session.reconnectTimer);
+          session.reconnectTimer = null;
+        }
 
-        // Atualizar whatsappId no banco se disponível
+        // Capturar número real da conta sem sobrescrever o identificador customizado fornecido pelo usuário
         if (sock.user && sock.user.id) {
           const actualWhatsAppId = sock.user.id.split('@')[0];
-          console.log(`📱 Atualizando whatsappId no banco: ${sessionId} -> ${actualWhatsAppId}`);
-
+          console.log(`📱 Número real detectado para sessão ${sessionId}: ${actualWhatsAppId} (preservando ID customizado)`);
           try {
+            // Buscar por whatsappId (ID customizado) ou fallback por realNumber existente
             const sessionRecord = await Session.findOne({ where: { whatsappId: sessionId } });
             if (sessionRecord) {
               await sessionRecord.update({
                 status: 'CONNECTED',
-                whatsappId: actualWhatsAppId,
-                number: actualWhatsAppId
+                realNumber: actualWhatsAppId
               });
-
-              // Atualizar sessionId na sessão ativa para manter consistência
-              session.sessionId = actualWhatsAppId;
-              console.log(`🔄 SessionId Baileys atualizado na memória: ${session.sessionId}`);
+              console.log(`🔒 whatsappId preservado (${sessionRecord.whatsappId}), realNumber armazenado (${actualWhatsAppId})`);
             }
           } catch (updateError) {
-            console.error('❌ Erro ao atualizar whatsappId no banco:', updateError);
+            console.error('❌ Erro ao salvar realNumber da sessão:', updateError);
           }
         }
         
@@ -290,49 +423,49 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
       }
       
       if (connection === 'close') {
-        const shouldReconnect = lastDisconnect?.error instanceof Boom &&
-          lastDisconnect.error.output?.statusCode !== DisconnectReason.loggedOut;
-          
-        console.log(`🔴 Sessão Baileys ${sessionId} fechada:`, lastDisconnect?.error, ', deveria reconectar:', shouldReconnect);
+        const rawError = lastDisconnect?.error;
+        const statusCode = rawError?.output?.statusCode;
+        const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+        const isStreamError = statusCode === 515; // Stream error específico
+        const isBadSession = statusCode === 401; // Unauthorized/bad session
+        const shouldReconnect = (rawError instanceof Boom && !isLoggedOut && !isBadSession) || isStreamError;
+
+        console.log(`🔴 Sessão Baileys ${sessionId} fechada (statusCode=${statusCode}) shouldReconnect=${shouldReconnect}`);
         
+        // Log adicional para erro 515
+        if (isStreamError) {
+          console.log(`⚠️ Erro de stream detectado (515) - reconexão será tentada mantendo autenticação`);
+        }
+        
+        if (isBadSession) {
+          console.log(`⚠️ Sessão inválida (401) - limpando autenticação`);
+          await cleanAndRecreateAuthDir(sessionId);
+        }
+
         session.status = 'disconnected';
-        
-        // Emitir status de desconexão via WebSocket
+
+        // Emitir status de desconexão
         try {
           const { emitToAll } = await import('./socket.js');
           const sessionRecord = await Session.findOne({ where: { whatsappId: sessionId } });
           if (sessionRecord) {
-            emitToAll("session-status-update", {
+            emitToAll('session-status-update', {
               sessionId: sessionRecord.id,
-              status: 'disconnected'
+              status: 'disconnected',
+              code: statusCode
             });
           }
-        } catch (socketError) {
-          console.log('Socket não disponível para emitir desconexão Baileys');
-        }
-        
-        // Remover da lista de sessões
-        const sessionIndex = findSessionIndex(sessionId);
-        if (sessionIndex !== -1) {
-          console.log(`🗑️ Removendo sessão: ${sessions[sessionIndex].sessionId} (busca: ${sessionId})`);
-          sessions.splice(sessionIndex, 1);
-        }
-        
-        // Para erro 515 (stream error), tentar reconectar automaticamente
-        if (lastDisconnect?.error?.output?.statusCode === 515) {
-          console.log(`🔄 Erro de stream detectado, tentando reconectar sessão ${sessionId} em 5 segundos...`);
-          setTimeout(async () => {
-            try {
-              console.log(`🔄 Reconectando sessão Baileys ${sessionId}...`);
-              await createBaileysSession(sessionId, onQR, onReady, onMessage);
-            } catch (reconnectError) {
-              console.error(`❌ Erro ao reconectar sessão ${sessionId}:`, reconnectError);
-            }
-          }, 5000);
-        } else if (!shouldReconnect) {
-          console.log(`Limpando sessão Baileys ${sessionId}`);
+        } catch (e) {}
+
+        // Se não deve reconectar (logout), limpar completamente
+        if (!shouldReconnect) {
+          console.log(`ℹ️ Não haverá reconexão para sessão ${sessionId} (logout ou erro irreversível)`);
           await cleanupBaileysSession(sessionId);
+          return;
         }
+
+        // Agendar reconexão com backoff
+        scheduleReconnect(sessionId, onQR, onReady, onMessage, statusCode);
       }
       
       if (connection === 'connecting') {
@@ -362,6 +495,16 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
     // Evento de presença
     sock.ev.on('presence.update', ({ id, presences }) => {
       console.log(`Presença atualizada para ${id}:`, presences);
+    });
+
+    // Adicionar handler de erro global para o socket
+    sock.ev.on('error', (error) => {
+      console.error(`❌ Erro no socket Baileys ${sessionId}:`, error);
+      // Se for erro crítico, forçar reconexão
+      if (error.message?.includes('Stream Errored')) {
+        console.log(`🔧 Erro de stream detectado - forçando reconexão`);
+        sock.end();
+      }
     });
 
     return sock;
@@ -416,14 +559,75 @@ export const sendText = async (sessionId, to, text) => {
     throw new Error(`Sessão "${sessionId}" não encontrada no Baileys`);
   }
   
-  console.log(`✅ Sessão "${sessionId}" encontrada, enviando mensagem...`);
-  const result = await sock.sendMessage(to, { text });
+  // Normalizar destino para JID válido
+  let jid = to;
+  if (typeof jid === 'string' && !jid.includes('@')) {
+    // Remover caracteres não numéricos
+    const onlyDigits = jid.replace(/[^0-9]/g, '');
+    // Adicionar domínio padrão
+    jid = `${onlyDigits}@s.whatsapp.net`;
+  }
+  console.log(`✅ Sessão "${sessionId}" encontrada, enviando mensagem para ${jid} (input original: ${to})...`);
+  const result = await sock.sendMessage(jid, { text });
   
   // Após enviar, tentar atualizar informações do contato
   try {
     const session = await Session.findOne({ where: { whatsappId: sessionId } });
     if (session) {
-      await createOrUpdateContactBaileys(to, session.id, sock);
+      await createOrUpdateContactBaileys(jid, session.id, sock);
+
+      // Criar ou localizar ticket e salvar mensagem enviada para refletir no frontend
+      try {
+        const { Ticket, TicketMessage } = await import('../models/index.js');
+        let ticket = await Ticket.findOne({ where: { sessionId: session.id, contact: jid } });
+        if (!ticket) {
+          ticket = await Ticket.create({
+            sessionId: session.id,
+            contact: jid,
+            lastMessage: text,
+            unreadCount: 0,
+            status: 'open'
+          });
+        } else {
+          await ticket.update({ lastMessage: text, updatedAt: new Date() });
+        }
+
+        const saved = await TicketMessage.create({
+          ticketId: ticket.id,
+          sender: 'user',
+          content: text,
+          messageId: result?.key?.id || null,
+          timestamp: new Date(),
+          messageType: 'text'
+        });
+
+        // Emitir eventos para atualizar frontend
+        try {
+          emitToAll('new-message', {
+            id: saved.id,
+            ticketId: ticket.id,
+            sender: 'user',
+            content: text,
+            timestamp: saved.createdAt,
+            messageType: 'text',
+            messageId: saved.messageId
+          });
+          const { emitToTicket } = await import('./socket.js');
+          emitToTicket(ticket.id, 'new-message', {
+            id: saved.id,
+            ticketId: ticket.id,
+            sender: 'user',
+            content: text,
+            timestamp: saved.createdAt,
+            messageType: 'text',
+            messageId: saved.messageId
+          });
+        } catch (emitErr) {
+          console.log('⚠️ Falha ao emitir evento de mensagem enviada:', emitErr.message);
+        }
+      } catch (ticketErr) {
+        console.log('⚠️ Erro ao registrar mensagem enviada localmente:', ticketErr.message);
+      }
     }
   } catch (updateError) {
     console.log(`⚠️ Erro ao atualizar contato após envio: ${updateError.message}`);
@@ -773,7 +977,9 @@ export const disconnectBaileysSession = async (sessionId) => {
  * Listar todas as sessões Baileys
  */
 export const listBaileysSessions = () => {
-  return sessions.map(session => session.sessionId);
+  return sessions
+    .filter(s => s && typeof s.sessionId === 'string' && s.sessionId.trim() !== '')
+    .map(session => session.sessionId);
 };
 
 /**

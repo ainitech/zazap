@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { apiUrl, API_BASE_URL } from '../../utils/apiClient';
+import { apiUrl, API_BASE_URL, apiFetch, safeJson } from '../../utils/apiClient';
 import { 
   PlusIcon,
   QueueListIcon,
@@ -145,16 +145,12 @@ export default function QueuesComponent() {
 
   const fetchSessions = async () => {
     try {
-  const response = await fetch(apiUrl('/api/sessions'), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      if (response.ok) {
-        const data = await response.json();
+      const res = await apiFetch('/api/sessions');
+      if (res.ok) {
+        const data = await safeJson(res);
         setSessions(Array.isArray(data) ? data : []);
       } else {
-        console.error('Erro na resposta da API de sessões:', response.status);
+        console.error('Erro na resposta da API de sessões:', res.status);
         setSessions([]);
       }
     } catch (error) {
@@ -166,16 +162,12 @@ export default function QueuesComponent() {
   const fetchQueues = async () => {
     try {
       setLoading(true);
-  const response = await fetch(apiUrl('/api/queues'), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      if (response.ok) {
-        const data = await response.json();
+      const res = await apiFetch('/api/queues');
+      if (res.ok) {
+        const data = await safeJson(res);
         setQueues(Array.isArray(data) ? data : []);
       } else {
-        console.error('Erro na resposta da API de filas:', response.status);
+        console.error('Erro na resposta da API de filas:', res.status);
         setQueues([]);
       }
     } catch (error) {
@@ -188,21 +180,16 @@ export default function QueuesComponent() {
 
   const fetchUsers = async () => {
     try {
-  const response = await fetch(apiUrl('/api/users'), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        // Verificar se a resposta é um array ou um objeto com users
+      const res = await apiFetch('/api/users');
+      if (res.ok) {
+        const data = await safeJson(res);
         const usersArray = Array.isArray(data) ? data : (data.users || []);
         setUsers(usersArray);
-      } else if (response.status === 403) {
+      } else if (res.status === 403) {
         console.warn('Usuário não tem permissão para listar usuários');
         setUsers([]);
       } else {
-        console.error('Erro na resposta da API de usuários:', response.status);
+        console.error('Erro na resposta da API de usuários:', res.status);
         setUsers([]);
       }
     } catch (error) {
@@ -214,13 +201,9 @@ export default function QueuesComponent() {
   // Novas funções de gerenciamento avançado
   const fetchQueueStats = async (queueId) => {
     try {
-  const response = await fetch(apiUrl(`/api/queues/${queueId}/stats`), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      if (response.ok) {
-        const data = await response.json();
+      const res = await apiFetch(`/api/queues/${queueId}/stats`);
+      if (res.ok) {
+        const data = await safeJson(res);
         setQueueStats(data);
       }
     } catch (error) {
@@ -237,17 +220,12 @@ export default function QueuesComponent() {
         createdAt: undefined,
         updatedAt: undefined
       };
-      
-  const response = await fetch(apiUrl('/api/queues'), {
+      const res = await apiFetch('/api/queues', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(duplicatedData)
       });
-      
-      if (response.ok) {
+      if (res.ok) {
         await fetchQueues();
         alert('Fila duplicada com sucesso!');
       }
@@ -259,18 +237,12 @@ export default function QueuesComponent() {
 
   const toggleQueueStatus = async (queueId, currentStatus) => {
     try {
-  const response = await fetch(apiUrl(`/api/queues/${queueId}`), {
+      const res = await apiFetch(`/api/queues/${queueId}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isActive: !currentStatus })
       });
-      
-      if (response.ok) {
-        await fetchQueues();
-      }
+      if (res.ok) await fetchQueues();
     } catch (error) {
       console.error('Erro ao alterar status da fila:', error);
     }
@@ -280,14 +252,9 @@ export default function QueuesComponent() {
     if (!window.confirm('Tem certeza que deseja arquivar esta fila? Ela ficará inativa e oculta da lista principal.')) return;
     
     try {
-      const response = await fetch(apiUrl(`/api/queues/${queueId}/archive`), {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const res = await apiFetch(`/api/queues/${queueId}/archive`, { method: 'POST' });
       
-      if (response.ok) {
+  if (res.ok) {
         await fetchQueues();
         alert('Fila arquivada com sucesso!');
       }
@@ -313,19 +280,13 @@ export default function QueuesComponent() {
     if (!window.confirm(confirmMessage[action])) return;
 
     try {
-      const response = await fetch(apiUrl('/api/queues/bulk'), {
+      const res = await apiFetch('/api/queues/bulk', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          action,
-          queueIds: selectedQueues
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, queueIds: selectedQueues })
       });
 
-      if (response.ok) {
+      if (res.ok) {
         await fetchQueues();
         setSelectedQueues([]);
         alert(`Ação executada com sucesso em ${selectedQueues.length} fila(s)!`);
@@ -398,19 +359,15 @@ export default function QueuesComponent() {
       
       console.log(`Enviando ${method} para ${url}`);
       
-      const response = await fetch(url, {
+      const res = await apiFetch(url.replace(API_BASE_URL, ''), { // apiFetch já aplica base
         method,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
       });
-      
-      const responseData = await response.json();
+      const responseData = await safeJson(res).catch(() => ({}));
       console.log('Resposta do servidor:', responseData);
       
-      if (response.ok) {
+      if (res.ok) {
         await fetchQueues();
         handleCloseModal();
         console.log('Fila salva com sucesso!');
@@ -428,14 +385,8 @@ export default function QueuesComponent() {
     if (!window.confirm('Tem certeza que deseja excluir esta fila?')) return;
     
     try {
-      const response = await fetch(apiUrl(`/api/queues/${queueId}`), {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-
-      if (response.ok) {
+  const res = await apiFetch(`/api/queues/${queueId}`, { method: 'DELETE' });
+  if (res.ok) {
         await fetchQueues();
       }
     } catch (error) {
@@ -516,16 +467,12 @@ export default function QueuesComponent() {
 
   const assignUserToQueue = async (queueId, userId) => {
     try {
-      const response = await fetch(apiUrl('/api/queues/assign'), {
+      const res = await apiFetch('/api/queues/assign', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ queueId, userId })
       });
-
-      if (response.ok) {
+      if (res.ok) {
         await fetchQueues();
       }
     } catch (error) {
@@ -535,16 +482,12 @@ export default function QueuesComponent() {
 
   const removeUserFromQueue = async (queueId, userId) => {
     try {
-      const response = await fetch(apiUrl('/api/queues/remove-user'), {
+      const res = await apiFetch('/api/queues/remove-user', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ queueId, userId })
       });
-
-      if (response.ok) {
+      if (res.ok) {
         await fetchQueues();
       }
     } catch (error) {
@@ -568,19 +511,12 @@ export default function QueuesComponent() {
     if (!editQueueName.trim() || !selectedQueue) return;
 
     try {
-      const response = await fetch(apiUrl(`/api/queues/${selectedQueue.id}`), {
+      const res = await apiFetch(`/api/queues/${selectedQueue.id}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          name: editQueueName.trim(),
-          sessionId: editSessionId || null
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: editQueueName.trim(), sessionId: editSessionId || null })
       });
-
-      if (response.ok) {
+      if (res.ok) {
         setShowEditModal(false);
         setSelectedQueue(null);
         setEditQueueName('');
@@ -595,21 +531,17 @@ export default function QueuesComponent() {
   // Novas funções para funcionalidades avançadas
   const handleTransferTicket = async (data) => {
     try {
-      const response = await fetch(apiUrl(`/api/queues/${selectedQueueForAction.id}/transfer-ticket`), {
+  const res = await apiFetch(`/api/queues/${selectedQueueForAction.id}/transfer-ticket`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
       });
-
-      if (response.ok) {
+      if (res.ok) {
         alert('Ticket transferido com sucesso!');
         setShowTransferModal(false);
         setSelectedQueueForAction(null);
       } else {
-        const error = await response.json();
+        const error = await safeJson(res).catch(() => ({}));
         alert(`Erro: ${error.error}`);
       }
     } catch (error) {
@@ -620,22 +552,18 @@ export default function QueuesComponent() {
 
   const handleDuplicateQueue = async (data) => {
     try {
-      const response = await fetch(apiUrl(`/api/queues/${selectedQueueForAction.id}/duplicate`), {
+      const res = await apiFetch(`/api/queues/${selectedQueueForAction.id}/duplicate`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
       });
-
-      if (response.ok) {
+      if (res.ok) {
         alert('Fila duplicada com sucesso!');
         setShowDuplicateModal(false);
         setSelectedQueueForAction(null);
         fetchQueues();
       } else {
-        const error = await response.json();
+        const error = await safeJson(res).catch(() => ({}));
         alert(`Erro: ${error.error}`);
       }
     } catch (error) {
@@ -666,22 +594,18 @@ export default function QueuesComponent() {
 
   const handleAdvancedSettingsSave = async (settings) => {
     try {
-      const response = await fetch(apiUrl(`/api/queues/${selectedQueueForAction.id}/advanced-settings`), {
+      const res = await apiFetch(`/api/queues/${selectedQueueForAction.id}/advanced-settings`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings)
       });
-
-      if (response.ok) {
+      if (res.ok) {
         alert('Configurações salvas com sucesso!');
         setShowAdvancedSettingsModal(false);
         setSelectedQueueForAction(null);
         fetchQueues();
       } else {
-        const error = await response.json();
+        const error = await safeJson(res).catch(() => ({}));
         alert(`Erro: ${error.error}`);
       }
     } catch (error) {

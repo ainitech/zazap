@@ -39,9 +39,7 @@ export default function IntegrationsComponent() {
   const fetchIntegrations = async () => {
     try {
   const response = await fetch(apiUrl('/api/integrations'), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
+        credentials: 'include'
       });
       if (response.ok) {
         const data = await response.json();
@@ -61,10 +59,7 @@ export default function IntegrationsComponent() {
     try {
   const response = await fetch(apiUrl('/api/integrations'), {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newIntegration)
       });
 
@@ -88,9 +83,7 @@ export default function IntegrationsComponent() {
     try {
   const response = await fetch(apiUrl(`/api/integrations/${integrationId}`), {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
+        credentials: 'include'
       });
 
       if (response.ok) {
@@ -108,10 +101,7 @@ export default function IntegrationsComponent() {
     try {
   const response = await fetch(apiUrl(`/api/integrations/${integrationId}`), {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_active: !isActive })
       });
 

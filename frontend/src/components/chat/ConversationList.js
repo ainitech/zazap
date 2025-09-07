@@ -11,7 +11,7 @@ import {
   LinkIcon
 } from '@heroicons/react/24/outline';
 import { useSocket } from '../../context/SocketContext';
-import { apiUrl } from '../../utils/apiClient';
+import { apiUrl, apiFetch, safeJson } from '../../utils/apiClient';
 
 const predefinedColors = [
   { name: 'Azul', value: 'bg-blue-500', text: 'text-blue-400', bg: 'bg-blue-900/20', border: 'border-blue-500/30' },
@@ -35,7 +35,8 @@ export default function ConversationList({
   unreadCount,
   isRealTime = true,
   currentUser,
-  onAcceptTicket
+  onAcceptTicket,
+  onRefresh // Função de refresh fornecida pelo componente pai
 }) {
   const { socket } = useSocket();
   const [activeTab, setActiveTab] = useState('waiting'); // 'waiting', 'accepted', 'resolved', 'groups'
@@ -44,15 +45,61 @@ export default function ConversationList({
   const [previewMessages, setPreviewMessages] = useState([]); // mensagens do preview
   const [loadingPreview, setLoadingPreview] = useState(false); // carregando preview
   const [groupsEnabled, setGroupsEnabled] = useState(false); // controla se grupos estão habilitados
+  
+  // Estados para pull-to-refresh
+  const [isPulling, setIsPulling] = useState(false);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [touchStartY, setTouchStartY] = useState(0);
 
-  // Carregar configuração de grupos do localStorage
+  // Persistência removida: grupos desabilitados por padrão salvo evento externo
   useEffect(() => {
-    const savedSettings = localStorage.getItem('groupSettings');
-    if (savedSettings) {
-      const settings = JSON.parse(savedSettings);
-      setGroupsEnabled(settings.showGroups || false);
-    }
+    setGroupsEnabled(false);
   }, []);
+
+  // Funções para pull-to-refresh
+  const handleTouchStart = (e) => {
+    setTouchStartY(e.touches[0].clientY);
+  };
+
+  const handleTouchMove = (e) => {
+    const touchY = e.touches[0].clientY;
+    const scrollContainer = e.currentTarget;
+    
+    // Só permitir pull-to-refresh se estiver no topo
+    if (scrollContainer.scrollTop === 0) {
+      const distance = touchY - touchStartY;
+      if (distance > 0) {
+        setPullDistance(Math.min(distance, 120));
+        setIsPulling(distance > 80);
+        e.preventDefault();
+      }
+    }
+  };
+
+  const handleTouchEnd = async () => {
+    if (isPulling && !isRefreshing) {
+      setIsRefreshing(true);
+      // Haptic feedback
+      if (navigator.vibrate) {
+        navigator.vibrate([50, 10, 50]);
+      }
+      
+      // Chamar função de refresh
+      if (onRefresh) {
+        await onRefresh();
+      }
+      
+      setTimeout(() => {
+        setIsRefreshing(false);
+        setIsPulling(false);
+        setPullDistance(0);
+      }, 1000);
+    } else {
+      setIsPulling(false);
+      setPullDistance(0);
+    }
+  };
 
   // Escutar mudanças nas configurações de grupos
   useEffect(() => {
@@ -208,13 +255,7 @@ export default function ConversationList({
   const fetchPreviewMessages = async (ticketId) => {
     try {
       setLoadingPreview(true);
-      const token = localStorage.getItem('token');
-      
-      const response = await fetch(apiUrl(`/api/ticket-messages/${ticketId}`), {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+  const response = await apiFetch(`/api/ticket-messages/${ticketId}`);
       
       if (response.ok) {
         const messages = await response.json();
@@ -476,20 +517,20 @@ export default function ConversationList({
   };
 
   return (
-    <div className="w-full sm:w-80 bg-slate-800 flex flex-col border-r border-slate-700 h-full">
+    <div className="w-full lg:w-80 bg-slate-800 flex flex-col border-r border-slate-700 h-full">
       {/* Header */}
-      <div className="p-3 sm:p-4 border-b border-slate-700 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="p-3 sm:p-4 border-b border-slate-700 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0">
+        <div className="flex items-center gap-3 w-full sm:w-auto">
           <button
-            className="sm:hidden p-2 rounded-md bg-slate-700 text-slate-200"
+            className="sm:hidden p-2 rounded-md bg-slate-700 text-slate-200 touch-manipulation"
             onClick={() => setCollapsed(!collapsed)}
             aria-expanded={!collapsed}
             aria-controls="conversation-list"
           >
             {collapsed ? 'Abrir' : 'Fechar'}
           </button>
-          <div>
-            <h1 className="text-white text-lg sm:text-xl font-semibold">Atendimentos</h1>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-white text-lg sm:text-xl font-semibold truncate">Atendimentos</h1>
             {unreadCount > 0 && (
               <div className="mt-1 bg-yellow-500 text-slate-900 text-xs font-medium px-2 py-0.5 rounded-full inline-block">
                 {unreadCount}
@@ -514,7 +555,7 @@ export default function ConversationList({
             placeholder="Buscar conversas..."
             value={searchTerm}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full bg-slate-700 text-white text-sm placeholder-slate-400 pl-9 pr-3 py-2 rounded-lg border border-slate-600 focus:outline-none focus:border-yellow-500 focus:ring-1 focus:ring-yellow-500"
+            className="w-full bg-slate-700 text-white text-sm placeholder-slate-400 pl-9 pr-3 py-2.5 sm:py-2 rounded-lg border border-slate-600 focus:outline-none focus:border-yellow-500 focus:ring-1 focus:ring-yellow-500 min-h-[44px] sm:min-h-[auto]"
           />
         </div>
       </div>
@@ -522,19 +563,19 @@ export default function ConversationList({
       {/* Tabs Navigation */}
       <div className="border-b border-slate-700">
         {/* Versão com ícones (mais compacta) */}
-        <div className="flex sm:hidden">
+        <div className="flex sm:hidden bg-slate-800/50">
           <button
             onClick={() => setActiveTab('waiting')}
-            className={`flex-1 px-2 py-3 flex flex-col items-center justify-center space-y-1 transition-colors ${
+            className={`flex-1 px-2 py-3 flex flex-col items-center justify-center space-y-1 transition-all duration-200 touch-manipulation ${
               activeTab === 'waiting'
-                ? 'text-yellow-400 border-b-2 border-yellow-400 bg-slate-700'
-                : 'text-slate-400 hover:text-white hover:bg-slate-700'
+                ? 'text-yellow-400 border-b-2 border-yellow-400 bg-slate-700/70 shadow-lg'
+                : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
             }`}
           >
-            <div className="relative">
+            <div className="relative transform transition-transform duration-200 hover:scale-110">
               <ClockIcon className="w-5 h-5" />
               {waitingTickets.length > 0 && (
-                <div className="absolute -top-1 -right-1 bg-yellow-500 text-slate-900 text-[10px] font-bold px-1 rounded-full min-w-[16px] text-center">
+                <div className="absolute -top-1 -right-1 bg-yellow-500 text-slate-900 text-[10px] font-bold px-1 rounded-full min-w-[16px] text-center animate-pulse">
                   {waitingTickets.length > 9 ? '9+' : waitingTickets.length}
                 </div>
               )}
@@ -544,16 +585,16 @@ export default function ConversationList({
           
           <button
             onClick={() => setActiveTab('accepted')}
-            className={`flex-1 px-2 py-3 flex flex-col items-center justify-center space-y-1 transition-colors ${
+            className={`flex-1 px-2 py-3 flex flex-col items-center justify-center space-y-1 transition-all duration-200 touch-manipulation ${
               activeTab === 'accepted'
-                ? 'text-green-400 border-b-2 border-green-400 bg-slate-700'
-                : 'text-slate-400 hover:text-white hover:bg-slate-700'
+                ? 'text-green-400 border-b-2 border-green-400 bg-slate-700/70 shadow-lg'
+                : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
             }`}
           >
-            <div className="relative">
+            <div className="relative transform transition-transform duration-200 hover:scale-110">
               <ChatBubbleLeftRightIcon className="w-5 h-5" />
               {acceptedTickets.length > 0 && (
-                <div className="absolute -top-1 -right-1 bg-green-500 text-white text-[10px] font-bold px-1 rounded-full min-w-[16px] text-center">
+                <div className="absolute -top-1 -right-1 bg-green-500 text-white text-[10px] font-bold px-1 rounded-full min-w-[16px] text-center animate-pulse">
                   {acceptedTickets.length > 9 ? '9+' : acceptedTickets.length}
                 </div>
               )}
@@ -682,33 +723,73 @@ export default function ConversationList({
   <div id="conversation-list" className={`${collapsed ? 'hidden' : 'flex'} flex-1 flex-col overflow-hidden` }>
         {/* Aguardando Tab */}
         {activeTab === 'waiting' && (
-          <div className="flex-1 overflow-y-auto">
-            {waitingTickets.length > 0 ? (
-              <>
-                <div className="px-4 py-3 bg-slate-750 border-b border-slate-700">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-yellow-400 font-medium text-sm flex items-center">
-                      <div className="w-2 h-2 bg-yellow-400 rounded-full mr-2"></div>
-                      Tickets Aguardando Atendimento
-                    </h3>
-                    {isRealTime && (
-                      <div className="flex items-center space-x-1">
-                        <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
-                        <span className="text-xs text-green-400 font-medium">Live</span>
-                      </div>
-                    )}
+          <div 
+            className="flex-1 overflow-y-auto scrollbar-thin scrollbar-track-slate-800 scrollbar-thumb-slate-600 relative" 
+            style={{scrollBehavior: 'smooth'}}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+          >
+            {/* Pull-to-refresh indicator */}
+            {(isPulling || isRefreshing) && (
+              <div 
+                className="absolute top-0 left-0 right-0 z-10 bg-gradient-to-b from-blue-500/20 to-transparent flex items-center justify-center text-blue-400 transition-all duration-300"
+                style={{ 
+                  height: `${Math.max(pullDistance, isRefreshing ? 60 : 0)}px`,
+                  transform: `translateY(${isRefreshing ? 0 : -20}px)`
+                }}
+              >
+                {isRefreshing ? (
+                  <div className="flex items-center space-x-2">
+                    <div className="animate-spin">
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                    </div>
+                    <span className="text-sm font-medium">Atualizando...</span>
                   </div>
-                </div>
-                {waitingTickets.map(ticket => renderTicket(ticket, true, true))}
-              </>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
-                <ClockIcon className="w-16 h-16 text-slate-600 mb-4" />
-                <p className="text-slate-400 text-sm">
-                  {searchTerm ? 'Nenhum ticket aguardando encontrado' : 'Nenhum ticket aguardando atendimento'}
-                </p>
+                ) : (
+                  <div className="flex items-center space-x-2">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                    </svg>
+                    <span className="text-sm font-medium">
+                      {isPulling ? 'Solte para atualizar' : 'Puxe para atualizar'}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
+            
+            <div style={{ paddingTop: isRefreshing ? '60px' : '0px', transition: 'padding-top 0.3s ease' }}>
+              {waitingTickets.length > 0 ? (
+                <>
+                  <div className="px-4 py-3 bg-slate-750 border-b border-slate-700">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-yellow-400 font-medium text-sm flex items-center">
+                        <div className="w-2 h-2 bg-yellow-400 rounded-full mr-2"></div>
+                        Tickets Aguardando Atendimento
+                      </h3>
+                      {isRealTime && (
+                        <div className="flex items-center space-x-1">
+                          <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
+                          <span className="text-xs text-green-400 font-medium">Live</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {waitingTickets.map(ticket => renderTicket(ticket, true, true))}
+                </>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
+                  <ClockIcon className="w-16 h-16 text-slate-600 mb-4" />
+                  <p className="text-slate-400 text-sm">
+                    {searchTerm ? 'Nenhum ticket aguardando encontrado' : 'Nenhum ticket aguardando atendimento'}
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

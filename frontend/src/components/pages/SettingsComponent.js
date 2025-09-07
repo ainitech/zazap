@@ -28,28 +28,19 @@ export default function SettingsComponent() {
     groupAdminOnly: false
   });
 
-  // Carregar configurações salvas do localStorage
+  // Persistência em localStorage removida por motivos de segurança / política
   useEffect(() => {
-    const savedSettings = localStorage.getItem('groupSettings');
-    if (savedSettings) {
-      setGroupSettings(JSON.parse(savedSettings));
-    }
+    // Poderia buscar do backend futuramente
   }, []);
 
-  // Salvar configurações no localStorage
+  // Salvar configurações (apenas em memória agora)
   const saveGroupSettings = (newSettings) => {
     const oldShowGroups = groupSettings.showGroups;
     setGroupSettings(newSettings);
-    localStorage.setItem('groupSettings', JSON.stringify(newSettings));
-    
-    // Emitir evento quando a configuração de mostrar grupos mudar
     if (oldShowGroups !== newSettings.showGroups) {
-      window.dispatchEvent(new CustomEvent('groupSettingsChanged', { 
-        detail: { showGroups: newSettings.showGroups } 
-      }));
+      window.dispatchEvent(new CustomEvent('groupSettingsChanged', { detail: { showGroups: newSettings.showGroups } }));
     }
-    
-    showMessage('Configurações de grupos salvas com sucesso!');
+    showMessage('Configurações de grupos atualizadas (não persistidas).');
   };
 
   const tabs = [

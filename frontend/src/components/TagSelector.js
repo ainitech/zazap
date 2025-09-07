@@ -7,6 +7,7 @@ import {
   ChevronDownIcon
 } from '@heroicons/react/24/outline';
 import { apiFetch } from '../utils/apiClient';
+import AuthService from '../services/authService.js';
 
 const predefinedColors = [
   { name: 'Azul', value: 'bg-blue-500', text: 'text-blue-500', bg: 'bg-blue-100', border: 'border-blue-200' },
@@ -72,11 +73,7 @@ export default function TagSelector({
   const fetchAvailableTags = async () => {
     try {
       setLoading(true);
-  const response = await fetch(apiUrl('/api/tags?limit=100'), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+      const response = await AuthService.get(apiUrl('/api/tags?limit=100'));
       
       if (response.ok) {
         const data = await response.json();
@@ -98,12 +95,7 @@ export default function TagSelector({
     if (!ticketId) return;
 
     try {
-  const response = await fetch(apiUrl(`/api/tags/ticket/${ticketId}/tag/${tag.id}`), {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+      const response = await AuthService.post(apiUrl(`/api/tags/ticket/${ticketId}/tag/${tag.id}`));
 
       if (response.ok) {
         const updatedTags = [...selectedTags, tag];
@@ -122,12 +114,7 @@ export default function TagSelector({
     if (!ticketId) return;
 
     try {
-  const response = await fetch(apiUrl(`/api/tags/ticket/${ticketId}/tag/${tag.id}`), {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+      const response = await AuthService.delete(apiUrl(`/api/tags/ticket/${ticketId}/tag/${tag.id}`));
 
       if (response.ok) {
         const updatedTags = selectedTags.filter(t => t.id !== tag.id);
@@ -145,14 +132,7 @@ export default function TagSelector({
     if (!newTagForm.name.trim()) return;
 
     try {
-  const response = await fetch(apiUrl('/api/tags'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify(newTagForm)
-      });
+      const response = await AuthService.post(apiUrl('/api/tags'), newTagForm);
 
       if (response.ok) {
         const newTag = await response.json();

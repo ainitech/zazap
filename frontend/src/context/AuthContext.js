@@ -1,8 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import authService from '../services/authService';
 
 const AuthContext = createContext();
-
-import { apiUrl } from '../utils/apiClient';
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
@@ -14,78 +13,40 @@ export const useAuth = () => {
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem('token'));
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    console.log('🔐 AuthContext: Inicializando, token presente:', !!token);
-    if (token) {
-      // Verificar se o token é válido e buscar dados do usuário
-      verifyToken();
-    } else {
-      console.log('🔐 AuthContext: Nenhum token encontrado, finalizando loading');
-      setLoading(false);
-    }
-  }, [token]);
+    console.log('🔐 AuthContext: Inicializando autenticação segura...');
+    initializeAuth();
+  }, []);
 
-  const verifyToken = async () => {
+  const initializeAuth = async () => {
     try {
-      console.log('🔐 AuthContext: Verificando token...');
-  const response = await fetch(apiUrl('/api/auth/me'), {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      console.log('🔐 AuthContext: Resposta da verificação:', response.status, response.statusText);
-
-      if (response.ok) {
-        const userData = await response.json();
-        console.log('🔐 AuthContext: Dados do usuário recebidos:', userData);
+      console.log('🔐 AuthContext: Inicializando autenticação segura...');
+      
+  // Não apagar sessão existente; apenas tentar validar/renovar
+  const userData = await authService.checkSession();
+      if (userData) {
+        console.log('🔐 AuthContext: Usuário autenticado:', userData);
         setUser(userData);
-        console.log('🔐 AuthContext: Usuário definido com sucesso');
-      } else {
-        // Token inválido
-        console.log('🔐 AuthContext: Token inválido, fazendo logout');
-        logout();
       }
     } catch (error) {
-      console.error('🔐 AuthContext: Erro ao verificar token:', error);
-      logout();
+      console.log('🔐 AuthContext: Falha na inicialização da autenticação:', error.message);
+      // Usuário não autenticado - isso é normal
     } finally {
-      console.log('🔐 AuthContext: Finalizando loading');
+      console.log('🔐 AuthContext: Inicialização completa');
       setLoading(false);
     }
   };
 
   const login = async (email, password) => {
     try {
-      console.log('🔐 AuthContext: Iniciando login para:', email);
-  const response = await fetch(apiUrl('/api/auth/login'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
-      });
-
-      console.log('🔐 AuthContext: Resposta do login:', response.status, response.statusText);
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.log('🔐 AuthContext: Erro no login:', errorData);
-        throw new Error(errorData.error || 'Erro ao fazer login');
-      }
-
-      const data = await response.json();
-      const { token, user } = data;
-
-      console.log('🔐 AuthContext: Login bem-sucedido, salvando token e usuário');
-      localStorage.setItem('token', token);
-      setToken(token);
-      setUser(user);
-
-      console.log('🔐 AuthContext: Login completo, usuário:', user);
+      console.log('🔐 AuthContext: Iniciando login seguro para:', email);
+      const data = await authService.login(email, password);
+      
+      console.log('🔐 AuthContext: Login bem-sucedido');
+      setUser(data.user);
+      
       return data;
     } catch (error) {
       console.error('🔐 AuthContext: Erro no login:', error);
@@ -93,25 +54,54 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = () => {
-    console.log('🔐 AuthContext: Fazendo logout');
-    localStorage.removeItem('token');
-    setToken(null);
-    setUser(null);
+  const logout = async () => {
+    try {
+      console.log('🔐 AuthContext: Fazendo logout seguro');
+      await authService.logout();
+    } catch (error) {
+      console.error('🔐 AuthContext: Erro no logout:', error);
+    } finally {
+      setUser(null);
+    }
+  };
+
+  const logoutAll = async () => {
+    try {
+      console.log('🔐 AuthContext: Fazendo logout de todos os dispositivos');
+      await authService.logoutAll();
+    } catch (error) {
+      console.error('🔐 AuthContext: Erro no logout geral:', error);
+    } finally {
+      setUser(null);
+    }
+  };
+
+  // Função para obter dispositivos ativos
+  const getActiveDevices = async () => {
+    try {
+      const response = await authService.request('/api/auth/devices');
+      return await response.json();
+    } catch (error) {
+      console.error('Erro ao buscar dispositivos ativos:', error);
+      return [];
+    }
   };
 
   // Propriedade computada para verificar se está autenticado
-  const isAuthenticated = !!user && !!token;
+  const isAuthenticated = !!user && authService.isAuthenticated();
 
-  console.log('🔐 AuthContext: Estado atual - user:', !!user, 'token:', !!token, 'isAuthenticated:', isAuthenticated, 'loading:', loading);
+  console.log('🔐 AuthContext: Estado atual - user:', !!user, 'isAuthenticated:', isAuthenticated, 'loading:', loading);
 
   const value = {
     user,
-    token,
     login,
     logout,
+    logoutAll,
+    getActiveDevices,
     loading,
-    isAuthenticated
+    isAuthenticated,
+    // Expor métodos do authService para uso direto
+    request: authService.request.bind(authService)
   };
 
   return (

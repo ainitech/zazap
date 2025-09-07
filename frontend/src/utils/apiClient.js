@@ -24,14 +24,18 @@ export const apiUrl = (path) => {
 };
 
 export const apiFetch = (path, options = {}) => {
-  const token = (typeof localStorage !== 'undefined') ? localStorage.getItem('token') : null;
+  // Não usar localStorage - a autenticação é gerenciada pelo authService
   const headers = { ...(options.headers || {}) };
-  if (token && !headers.Authorization) headers.Authorization = `Bearer ${token}`;
-
+  
   const url = apiUrl(path);
   const noTs = options.noTs === true;
   const tsParam = noTs ? '' : `${url.includes('?') ? '&' : '?'}_ts=${Date.now()}`;
-  return fetch(`${url}${tsParam}`, { ...options, headers, cache: options.cache || 'no-store' });
+  return fetch(`${url}${tsParam}`, { 
+    ...options, 
+    headers, 
+    cache: options.cache || 'no-store',
+    credentials: 'include' // Importante para enviar cookies httpOnly
+  });
 };
 
 export const safeJson = async (res) => {

@@ -1,10 +1,10 @@
 import express from 'express';
-import { authenticateToken } from '../middleware/auth.js';
+import authMiddleware from '../middleware/authMiddleware.js';
 import { addComment, getComments } from '../controllers/ticketCommentController.js';
 
 const router = express.Router();
 
-router.post('/', authenticateToken, addComment);
-router.get('/:ticketId', authenticateToken, getComments);
+router.post('/', authMiddleware, addComment);
+router.get('/:ticketId', authMiddleware, getComments);
 
 export default router;

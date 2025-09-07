@@ -9,6 +9,7 @@ import {
   ArrowTrendingDownIcon
 } from '@heroicons/react/24/outline';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
+import AuthService from '../../services/authService.js';
 
 const QueuePerformanceModal = ({ isOpen, onClose, queueId, queueName }) => {
   const [performanceData, setPerformanceData] = useState(null);
@@ -24,12 +25,7 @@ const QueuePerformanceModal = ({ isOpen, onClose, queueId, queueName }) => {
   const fetchPerformanceData = async () => {
     setIsLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`/api/queues/${queueId}/performance?period=${period}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await AuthService.get(`/api/queues/${queueId}/performance?period=${period}`);
 
       if (response.ok) {
         const data = await response.json();

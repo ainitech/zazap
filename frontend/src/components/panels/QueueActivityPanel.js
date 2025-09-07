@@ -13,6 +13,7 @@ import {
   ArrowPathIcon
 } from '@heroicons/react/24/outline';
 import { apiUrl } from '../../utils/apiClient';
+import AuthService from '../../services/authService.js';
 
 const QueueActivityPanel = ({ isOpen, onClose }) => {
   const [activities, setActivities] = useState([]);
@@ -42,12 +43,7 @@ const QueueActivityPanel = ({ isOpen, onClose }) => {
   const fetchRecentActivities = async () => {
     setIsLoading(true);
     try {
-      const token = localStorage.getItem('token');
-  const response = await fetch(apiUrl('/api/queues/activities'), {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await AuthService.get(apiUrl('/api/queues/activities'));
 
       if (response.ok) {
         const data = await response.json();

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { XMarkIcon, PhotoIcon, UserGroupIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
+import AuthService from '../../services/authService.js';
 
 const CampaignModal = ({ isOpen, onClose, campaign = null, onSave }) => {
   const [formData, setFormData] = useState({
@@ -63,15 +64,9 @@ const CampaignModal = ({ isOpen, onClose, campaign = null, onSave }) => {
   const fetchData = async () => {
     try {
       const [tagsRes, contactsRes, sessionsRes] = await Promise.all([
-        fetch('/api/tags', {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-        }),
-        fetch('/api/contacts', {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-        }),
-        fetch('/api/sessions', {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-        })
+        AuthService.get('/api/tags'),
+        AuthService.get('/api/contacts'),
+        AuthService.get('/api/sessions')
       ]);
 
       if (tagsRes.ok) {
@@ -154,19 +149,14 @@ const CampaignModal = ({ isOpen, onClose, campaign = null, onSave }) => {
     setLoading(true);
     try {
       const url = campaign ? `/api/campaigns/${campaign.id}` : '/api/campaigns';
-      const method = campaign ? 'PUT' : 'POST';
+      const data = {
+        ...formData,
+        scheduledAt: formData.scheduledAt || null
+      };
 
-      const response = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          ...formData,
-          scheduledAt: formData.scheduledAt || null
-        })
-      });
+      const response = campaign 
+        ? await AuthService.put(url, data)
+        : await AuthService.post(url, data);
 
       if (response.ok) {
         onSave();

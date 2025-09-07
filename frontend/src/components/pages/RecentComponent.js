@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { apiUrl } from '../../utils/apiClient';
+import { apiUrl, apiFetch, safeJson } from '../../utils/apiClient';
 import { 
   ClockIcon,
   MagnifyingGlassIcon,
@@ -20,13 +20,9 @@ export default function RecentComponent() {
 
   const fetchRecentTickets = async () => {
     try {
-  const response = await fetch(apiUrl('/api/tickets?recent=true&limit=50'), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+      const response = await apiFetch('/api/tickets?recent=true&limit=50');
       if (response.ok) {
-        const data = await response.json();
+        const data = await safeJson(response);
         setRecentTickets(data);
       }
     } catch (error) {

@@ -1,9 +1,11 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import { createServer } from 'http';
 import { initializeSocket } from './services/socket.js';
 import { autoReconnectSessions, startSessionHealthCheck } from './services/sessionManager.js';
+import RedisService from './services/redisService.js';
 // Removed whatsappjs and selection routes; using only Baileys
 import baileysRoutes from './routes/baileysRoutes.js';
 import authRoutes from './routes/authRoutes.js';
@@ -67,6 +69,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -134,6 +137,10 @@ server.listen(PORT, HOST, async () => {
   console.log(`   - Network: http://192.168.1.100:${PORT} (replace with your IP)`);
   console.log(`   - All interfaces: http://${HOST}:${PORT}`);
   console.log(`Socket.IO server initialized`);
+  
+  // Inicializar Redis para sistema ultra leve
+  console.log('🔥 Inicializando Redis para sistema ultra leve...');
+  await RedisService.initialize();
   
   // Aguardar um pouco para o servidor estabilizar
   setTimeout(async () => {

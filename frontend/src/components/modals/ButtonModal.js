@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, Plus, Trash2, Send } from 'lucide-react';
+import AuthService from '../../services/authService.js';
 
 const ButtonModal = ({ isOpen, onClose, ticketId, onSendSuccess }) => {
   const [messageType, setMessageType] = useState('poll'); // Apenas 'poll' (enquete)
@@ -44,8 +45,7 @@ const ButtonModal = ({ isOpen, onClose, ticketId, onSendSuccess }) => {
     setLoading(true);
 
     try {
-  const { apiUrl } = await import('../../utils/apiClient');
-      const token = localStorage.getItem('token');
+      const { apiUrl } = await import('../../utils/apiClient');
 
       const payload = {
         ticketId,
@@ -54,14 +54,7 @@ const ButtonModal = ({ isOpen, onClose, ticketId, onSendSuccess }) => {
         allowMultipleAnswers: false
       };
 
-  const response = await fetch(apiUrl('/api/buttons/poll'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(payload)
-      });
+      const response = await AuthService.post(apiUrl('/api/buttons/poll'), payload);
 
       if (response.ok) {
         const result = await response.json();

@@ -21,7 +21,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { useSocket } from '../../context/SocketContext';
 import { useToast } from '../../context/ToastContext';
-import { apiUrl } from '../../utils/apiClient';
+import { apiUrl, apiFetch } from '../../utils/apiClient';
 import { useNavigate } from 'react-router-dom';
 
 // Backend base comes from env via apiClient; requests should use apiUrl helper
@@ -154,6 +154,15 @@ export default function SessionsComponent() {
       if (showQRModal && selectedSession?.id === sessionId) {
         setQrCode(qrCode || '');
         setQrStatus(status || '');
+
+        // Novo: Fechar modal imediatamente quando status chegar como 'connected'
+        // (alguns ambientes podem emitir o "connected" no evento de QR antes do session-status-update)
+        if (status === 'connected') {
+          console.log('🎉 Sessão conectada (via QR update) - fechando modal QR');
+          setShowQRModal(false);
+          setSuccessMessage(`Sessão ${selectedSession.whatsappId || selectedSession.name || sessionId} conectada com sucesso!`);
+          setTimeout(() => setSuccessMessage(''), 5000);
+        }
         
         // Não fechar modal aqui - aguardar o evento session-status-update com 'connected'
         // para garantir que a sessão está realmente conectada
@@ -188,11 +197,7 @@ export default function SessionsComponent() {
     try {
       if (!silent) setLoading(true);
       
-  const response = await fetch(apiUrl('/api/sessions'), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch('/api/sessions');
       
       if (response.ok) {
         const data = await response.json();
@@ -229,9 +234,7 @@ export default function SessionsComponent() {
   const fetchQueues = async () => {
     try {
       setLoadingQueues(true);
-      const resp = await fetch(apiUrl('/api/queues'), {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      });
+  const resp = await apiFetch('/api/queues');
       if (resp.ok) {
         const data = await resp.json();
         setQueues(Array.isArray(data) ? data : data.queues || []);
@@ -247,12 +250,9 @@ export default function SessionsComponent() {
     if (!editSession) return;
     try {
       setSavingEdit(true);
-      const resp = await fetch(apiUrl(`/api/sessions/${editSession.id}`), {
+      const resp = await apiFetch(`/api/sessions/${editSession.id}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ defaultQueueId: editSession.defaultQueueId || null })
       });
       if (resp.ok) {
@@ -321,12 +321,7 @@ export default function SessionsComponent() {
     try {
       setActionLoading(prev => ({ ...prev, sync: true }));
       
-  const response = await fetch(apiUrl('/api/sessions/sync'), {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch('/api/sessions/sync', { method: 'POST' });
 
       if (response.ok) {
         setSuccessMessage('Sessões sincronizadas com sucesso! Sessões desconectadas foram reconectadas automaticamente.');
@@ -353,16 +348,10 @@ export default function SessionsComponent() {
     try {
       setActionLoading(prev => ({ ...prev, create: true }));
       
-  const response = await fetch(apiUrl('/api/sessions'), {
+  const response = await apiFetch('/api/sessions', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          whatsappId: newSession.whatsappId.trim(),
-          library: 'baileys'
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ whatsappId: newSession.whatsappId.trim(), library: 'baileys', name: newSession.name?.trim() || undefined })
       });
 
       if (response.ok) {
@@ -386,12 +375,7 @@ export default function SessionsComponent() {
     try {
       setActionLoading(prev => ({ ...prev, [sessionId]: 'starting' }));
       
-  const response = await fetch(apiUrl(`/api/sessions/${sessionId}/start`), {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch(`/api/sessions/${sessionId}/start`, { method: 'POST' });
 
       if (response.ok) {
         const data = await response.json();
@@ -421,12 +405,7 @@ export default function SessionsComponent() {
     try {
       setActionLoading(prev => ({ ...prev, [sessionId]: 'stopping' }));
       
-  const response = await fetch(apiUrl(`/api/sessions/${sessionId}/shutdown`), {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch(`/api/sessions/${sessionId}/shutdown`, { method: 'POST' });
 
       if (response.ok) {
         setRealTimeStatus(prev => ({ 
@@ -451,12 +430,7 @@ export default function SessionsComponent() {
     try {
       setActionLoading(prev => ({ ...prev, [sessionId]: 'restarting' }));
       
-  const response = await fetch(apiUrl(`/api/sessions/${sessionId}/restart`), {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch(`/api/sessions/${sessionId}/restart`, { method: 'POST' });
 
       if (response.ok) {
         setRealTimeStatus(prev => ({ 
@@ -489,12 +463,7 @@ export default function SessionsComponent() {
     try {
       setActionLoading(prev => ({ ...prev, [sessionId]: 'deleting' }));
       
-  const response = await fetch(apiUrl(`/api/sessions/${sessionId}`), {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
 
       if (response.ok) {
         setError('');
@@ -527,12 +496,7 @@ export default function SessionsComponent() {
 
   const getQRCode = async (sessionId, silent = false) => {
     try {
-  const response = await fetch(apiUrl(`/api/sessions/${sessionId}/qr`), {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch(`/api/sessions/${sessionId}/qr`);
 
       if (response.ok) {
         const data = await response.json();
@@ -723,7 +687,7 @@ export default function SessionsComponent() {
           currentStatus === 'starting') && (
           <button
             onClick={() => showQRCode(session)}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center space-x-1"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white px-3 py-2.5 sm:py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center space-x-2 touch-manipulation"
           >
             <QrCodeIcon className="h-4 w-4" />
             <span>QR Code</span>
@@ -735,26 +699,26 @@ export default function SessionsComponent() {
           <button
             onClick={() => restartSession(session.id)}
             disabled={isLoading}
-            className="bg-slate-600 hover:bg-slate-700 disabled:bg-gray-700 text-white px-2 py-2 rounded-lg text-xs font-medium transition-colors disabled:cursor-not-allowed flex items-center justify-center"
+            className="bg-slate-600 hover:bg-slate-700 disabled:bg-gray-700 text-white px-2 py-2.5 sm:py-2 rounded-lg text-xs font-medium transition-colors disabled:cursor-not-allowed flex items-center justify-center touch-manipulation min-h-[36px] sm:min-h-[auto]"
             title="Reiniciar"
           >
             {isLoading === 'restarting' ? (
-              <ClockIcon className="h-3 w-3 animate-spin" />
+              <ClockIcon className="h-4 w-4 sm:h-3 sm:w-3 animate-spin" />
             ) : (
-              <ArrowPathIcon className="h-3 w-3" />
+              <ArrowPathIcon className="h-4 w-4 sm:h-3 sm:w-3" />
             )}
           </button>
 
           <button
             onClick={() => deleteSession(session.id)}
             disabled={isLoading}
-            className="bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-white px-2 py-2 rounded-lg text-xs font-medium transition-colors disabled:cursor-not-allowed flex items-center justify-center"
+            className="bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-white px-2 py-2.5 sm:py-2 rounded-lg text-xs font-medium transition-colors disabled:cursor-not-allowed flex items-center justify-center touch-manipulation min-h-[36px] sm:min-h-[auto]"
             title="Remover"
           >
             {isLoading === 'deleting' ? (
-              <ClockIcon className="h-3 w-3 animate-spin" />
+              <ClockIcon className="h-4 w-4 sm:h-3 sm:w-3 animate-spin" />
             ) : (
-              <TrashIcon className="h-3 w-3" />
+              <TrashIcon className="h-4 w-4 sm:h-3 sm:w-3" />
             )}
           </button>
         </div>
@@ -773,7 +737,7 @@ export default function SessionsComponent() {
   }
 
   return (
-    <div className="p-6 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 min-h-screen relative">
+    <div className="p-4 md:p-6 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 min-h-screen relative">
       {renderEditModal()}
       {/* Header */}
       <div className="mb-6">
@@ -784,7 +748,7 @@ export default function SessionsComponent() {
               <PhoneIcon className="h-6 w-6 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-yellow-400 to-orange-500 bg-clip-text text-transparent">
+              <h1 className="text-xl md:text-2xl font-bold bg-gradient-to-r from-yellow-400 to-orange-500 bg-clip-text text-transparent">
                 Sessões WhatsApp
               </h1>
               <div className="flex items-center space-x-2 mt-1">
@@ -956,32 +920,32 @@ export default function SessionsComponent() {
       {/* Create Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl max-w-md w-full p-8 border border-slate-700/50 shadow-2xl backdrop-blur-sm">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center space-x-3">
-                <div className="p-3 bg-gradient-to-r from-yellow-500/20 to-orange-500/20 rounded-xl border border-yellow-500/30">
-                  <PlusIcon className="h-6 w-6 text-yellow-400" />
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl max-w-md w-full p-4 sm:p-8 border border-slate-700/50 shadow-2xl backdrop-blur-sm max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4 sm:mb-6">
+              <div className="flex items-center space-x-2 sm:space-x-3">
+                <div className="p-2 sm:p-3 bg-gradient-to-r from-yellow-500/20 to-orange-500/20 rounded-xl border border-yellow-500/30">
+                  <PlusIcon className="h-5 w-5 sm:h-6 sm:w-6 text-yellow-400" />
                 </div>
-                <h2 className="text-2xl font-bold text-white">Nova Sessão</h2>
+                <h2 className="text-lg sm:text-2xl font-bold text-white">Nova Sessão</h2>
               </div>
               <button
                 onClick={() => setShowCreateModal(false)}
                 className="text-gray-400 hover:text-white transition-colors p-2 hover:bg-slate-700/50 rounded-lg"
               >
-                <XCircleIcon className="h-6 w-6" />
+                <XCircleIcon className="h-5 w-5 sm:h-6 sm:w-6" />
               </button>
             </div>
             
-            <div className="space-y-6">
+            <div className="space-y-4 sm:space-y-6">
               <div>
-                <label className="block text-sm font-semibold text-gray-300 mb-3">
+                <label className="block text-sm font-semibold text-gray-300 mb-2 sm:mb-3">
                   ID da Sessão *
                 </label>
                 <input
                   type="text"
                   value={newSession.whatsappId}
                   onChange={(e) => setNewSession({...newSession, whatsappId: e.target.value})}
-                  className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600/50 text-white rounded-xl focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500/50 transition-all duration-300 backdrop-blur-sm"
+                  className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-slate-700/50 border border-slate-600/50 text-white rounded-xl focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500/50 transition-all duration-300 backdrop-blur-sm text-sm sm:text-base"
                   placeholder="Ex: atendimento_01"
                 />
                 <p className="text-xs text-gray-400 mt-2">
@@ -990,10 +954,10 @@ export default function SessionsComponent() {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-300 mb-3">
+                <label className="block text-sm font-semibold text-gray-300 mb-2 sm:mb-3">
                   Biblioteca WhatsApp
                 </label>
-                <div className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600/50 text-white rounded-xl">
+                <div className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-slate-700/50 border border-slate-600/50 text-white rounded-xl text-sm sm:text-base">
                   Baileys (única suportada)
                 </div>
                 <div className="mt-3 p-3 bg-slate-700/30 rounded-lg border border-slate-600/30">
@@ -1004,14 +968,14 @@ export default function SessionsComponent() {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-300 mb-3">
+                <label className="block text-sm font-semibold text-gray-300 mb-2 sm:mb-3">
                   Nome da Sessão (opcional)
                 </label>
                 <input
                   type="text"
                   value={newSession.name}
                   onChange={(e) => setNewSession({...newSession, name: e.target.value})}
-                  className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600/50 text-white rounded-xl focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500/50 transition-all duration-300 backdrop-blur-sm"
+                  className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-slate-700/50 border border-slate-600/50 text-white rounded-xl focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500/50 transition-all duration-300 backdrop-blur-sm text-sm sm:text-base"
                   placeholder="Ex: Atendimento Principal"
                 />
                 <p className="text-xs text-gray-400 mt-2">
@@ -1020,17 +984,17 @@ export default function SessionsComponent() {
               </div>
             </div>
 
-            <div className="flex space-x-3 mt-8">
+            <div className="flex flex-col sm:flex-row sm:space-x-3 space-y-3 sm:space-y-0 mt-6 sm:mt-8">
               <button
                 onClick={() => setShowCreateModal(false)}
-                className="flex-1 px-6 py-3 border border-slate-600/50 text-gray-300 rounded-xl hover:bg-slate-700/50 transition-all duration-300 font-medium backdrop-blur-sm"
+                className="w-full sm:flex-1 px-4 sm:px-6 py-2 sm:py-3 border border-slate-600/50 text-gray-300 rounded-xl hover:bg-slate-700/50 transition-all duration-300 font-medium backdrop-blur-sm text-sm sm:text-base"
               >
                 Cancelar
               </button>
               <button
                 onClick={createSession}
                 disabled={!newSession.whatsappId.trim() || actionLoading.create}
-                className="flex-1 px-6 py-3 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl hover:from-yellow-600 hover:to-orange-600 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed font-semibold shadow-lg hover:shadow-yellow-500/25"
+                className="w-full sm:flex-1 px-4 sm:px-6 py-2 sm:py-3 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl hover:from-yellow-600 hover:to-orange-600 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed font-semibold shadow-lg hover:shadow-yellow-500/25 text-sm sm:text-base"
               >
                 {actionLoading.create ? (
                   <div className="flex items-center justify-center">
@@ -1052,32 +1016,32 @@ export default function SessionsComponent() {
       {/* QR Code Modal */}
       {showQRModal && selectedSession && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl max-w-md w-full p-8 border border-slate-700/50 shadow-2xl backdrop-blur-sm">
-            <div className="flex justify-between items-center mb-6">
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl max-w-md w-full p-4 md:p-8 border border-slate-700/50 shadow-2xl backdrop-blur-sm max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4 md:mb-6">
               <div className="flex items-center space-x-3">
-                <div className="p-3 bg-gradient-to-r from-blue-500/20 to-blue-600/20 rounded-xl border border-blue-500/30">
-                  <QrCodeIcon className="h-6 w-6 text-blue-400" />
+                <div className="p-2 md:p-3 bg-gradient-to-r from-blue-500/20 to-blue-600/20 rounded-xl border border-blue-500/30">
+                  <QrCodeIcon className="h-5 w-5 md:h-6 md:w-6 text-blue-400" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-white">QR Code</h2>
-                  <p className="text-sm text-gray-400">{selectedSession.whatsappId}</p>
+                  <h2 className="text-lg md:text-xl font-bold text-white">QR Code</h2>
+                  <p className="text-xs md:text-sm text-gray-400 truncate max-w-[150px] md:max-w-none">{selectedSession.whatsappId}</p>
                 </div>
               </div>
               <button
                 onClick={closeQRModal}
-                className="text-gray-400 hover:text-white transition-colors p-2 hover:bg-slate-700/50 rounded-lg"
+                className="text-gray-400 hover:text-white transition-colors p-1 md:p-2 hover:bg-slate-700/50 rounded-lg"
               >
-                <XCircleIcon className="h-6 w-6" />
+                <XCircleIcon className="h-5 w-5 md:h-6 md:w-6" />
               </button>
             </div>
             
             {qrCode ? (
-              <div className="space-y-6">
-                <div className="flex justify-center bg-white p-6 rounded-2xl shadow-inner">
+              <div className="space-y-4 md:space-y-6">
+                <div className="flex justify-center bg-white p-4 md:p-6 rounded-2xl shadow-inner">
                   <img 
                     src={qrCode.startsWith('data:') ? qrCode : `data:image/png;base64,${qrCode}`} 
                     alt="QR Code" 
-                    className="max-w-full h-64 w-64 object-contain"
+                    className="max-w-full h-48 w-48 md:h-64 md:w-64 object-contain"
                     onError={(e) => {
                       console.error('Erro ao carregar QR Code:', e);
                       setError('Erro ao carregar QR Code');
@@ -1085,25 +1049,25 @@ export default function SessionsComponent() {
                   />
                 </div>
                 
-                <div className="text-center space-y-4">
+                <div className="text-center space-y-3 md:space-y-4">
                   <div className="flex items-center justify-center space-x-3">
                     {qrStatus === 'qr_ready' || qrStatus === 'qr' ? (
                       <>
                         <div className="p-2 bg-blue-500/20 rounded-lg">
-                          <QrCodeIcon className="h-5 w-5 text-blue-400 animate-pulse" />
+                          <QrCodeIcon className="h-4 w-4 md:h-5 md:w-5 text-blue-400 animate-pulse" />
                         </div>
                         <div>
-                          <p className="text-sm font-semibold text-blue-400">Aguardando leitura</p>
-                          <p className="text-xs text-blue-300">Escaneie o código com seu WhatsApp</p>
+                          <p className="text-xs md:text-sm font-semibold text-blue-400">Aguardando leitura</p>
+                          <p className="text-[10px] md:text-xs text-blue-300">Escaneie o código com seu WhatsApp</p>
                         </div>
                       </>
                     ) : qrStatus === 'connecting' ? (
                       <>
                         <div className="p-2 bg-yellow-500/20 rounded-lg">
-                          <ClockIcon className="h-5 w-5 text-yellow-400 animate-spin" />
+                          <ClockIcon className="h-4 w-4 md:h-5 md:w-5 text-yellow-400 animate-spin" />
                         </div>
                         <div>
-                          <p className="text-sm font-semibold text-yellow-400">Conectando...</p>
+                          <p className="text-xs md:text-sm font-semibold text-yellow-400">Conectando...</p>
                           <p className="text-xs text-yellow-300">Estabelecendo conexão</p>
                         </div>
                       </>

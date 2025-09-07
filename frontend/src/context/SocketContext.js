@@ -23,16 +23,15 @@ export const SocketProvider = ({ children }) => {
   const API_URL = API_BASE_URL || '';
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
+    // Sempre conectar, mesmo sem token
     try {
       console.log('🔗 Conectando ao WebSocket...');
       
-  const newSocket = io(API_URL || undefined, {
+      const newSocket = io(API_URL || undefined, {
         auth: {
-          token: token
+          token: null // Sem JWT inicial; autenticação via cookie após connect
         },
+        withCredentials: true, // Enviar cookies httpOnly no handshake (necessário para refreshToken)
         transports: ['websocket', 'polling']
       });
 
@@ -40,6 +39,14 @@ export const SocketProvider = ({ children }) => {
         console.log('✅ WebSocket conectado:', newSocket.id);
         setIsConnected(true);
         setError(null);
+        
+        // Tentar autenticar automaticamente se há um usuário (via cookie httpOnly)
+        const user = JSON.parse(sessionStorage.getItem('user') || 'null');
+        if (user) {
+          console.log('🔐 Solicitando autenticação de socket via cookie');
+          newSocket.emit('authenticate', { via: 'cookie' });
+        }
+        
         // Proativamente solicitar permissão de Notificações no navegador (developer friendly)
         try {
           if (typeof window !== 'undefined' && 'Notification' in window) {
@@ -117,10 +124,10 @@ export const SocketProvider = ({ children }) => {
               });
 
               // Enviar ao backend
-              const token = localStorage.getItem('token');
               const resp = await fetch((API_URL || '') + '/api/push/subscribe', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify(sub)
               });
               if (!resp.ok) throw new Error('Falha ao registrar subscription no backend');
@@ -139,6 +146,61 @@ export const SocketProvider = ({ children }) => {
       newSocket.on('disconnect', (reason) => {
         console.log('❌ WebSocket desconectado:', reason);
         setIsConnected(false);
+      });
+
+      // Novo: Listener para requerimento de autenticação
+      newSocket.on('auth-required', (data) => {
+        console.log('🔐 Autenticação necessária (socket)');
+        const user = JSON.parse(sessionStorage.getItem('user') || 'null');
+        if (user) {
+          console.log('🔄 Requisitando autenticação via cookie novamente...');
+            newSocket.emit('authenticate', { via: 'cookie' });
+        } else {
+          setError('Autenticação necessária');
+          if (toast && toast.addToast) {
+            toast.addToast('Sessão expirada. Faça login novamente.', { 
+              type: 'warning', 
+              duration: 10000,
+              actions: [
+                { label: 'Login', onClick: () => window.location.href = '/login' }
+              ]
+            });
+          }
+        }
+      });
+
+      // Novo: Listener para sucesso na autenticação
+      newSocket.on('auth-success', (data) => {
+        console.log('✅ Autenticação bem-sucedida:', data);
+        setError(null);
+        if (toast && toast.addToast) {
+          toast.addToast('Conectado com sucesso!', { type: 'success', duration: 3000 });
+        }
+      });
+
+      // Novo: Listener para erro na autenticação
+      newSocket.on('auth-error', (data) => {
+        console.log('❌ Erro na autenticação:', data);
+        setError(data.error);
+        
+        // Limpar dados de autenticação
+        sessionStorage.removeItem('user');
+  // Access token não é mais usado/local
+        
+        if (toast && toast.addToast) {
+          toast.addToast('Sessão inválida. Redirecionando para login...', { 
+            type: 'error', 
+            duration: 5000,
+            actions: [
+              { label: 'Login', onClick: () => window.location.href = '/login' }
+            ]
+          });
+        }
+        
+        // Redirecionar para login após um tempo
+        setTimeout(() => {
+          window.location.href = '/login';
+        }, 3000);
       });
 
       newSocket.on('connect_error', (err) => {
@@ -181,12 +243,9 @@ export const SocketProvider = ({ children }) => {
         // Return a promise so the toast action can show loading state
         return new Promise(async (resolve, reject) => {
           try {
-            const token = localStorage.getItem('token');
             const resp = await fetch(`${API_URL}/api/sessions/${id}/start`, {
               method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${token}`
-              }
+              credentials: 'include'
             });
             if (resp.ok) {
               if (toast && toast.addToast) toast.addToast(`Tentativa de reconexão iniciada para sessão ${id}`, { type: 'success', duration: 5000 });
@@ -292,6 +351,35 @@ export const SocketProvider = ({ children }) => {
     return outputArray;
   }
 
+  // Função para reautenticação manual
+  const reauthenticate = () => {
+    const user = JSON.parse(sessionStorage.getItem('user') || 'null');
+    if (socket && user) {
+      console.log('🔄 Tentando reautenticação manual via cookie...');
+      socket.emit('authenticate', { via: 'cookie' });
+    } else if (!user) {
+      if (toast && toast.addToast) {
+        toast.addToast('Sessão não encontrada. Faça login novamente.', { 
+          type: 'error', 
+          duration: 5000,
+          actions: [
+            { label: 'Login', onClick: () => window.location.href = '/login' }
+          ]
+        });
+      }
+    }
+  };
+
+  // Função para reconectar com novo token
+  const reconnectWithToken = () => {
+    if (socket) {
+      const user = JSON.parse(sessionStorage.getItem('user') || 'null');
+      if (user) {
+        socket.emit('authenticate', { via: 'cookie' });
+      }
+    }
+  };
+
   // Função para entrar em um ticket específico
   const joinTicket = (ticketId) => {
     if (socket && isConnected) {
@@ -345,7 +433,9 @@ export const SocketProvider = ({ children }) => {
     joinTicket,
     leaveTicket,
     joinSession,
-    leaveSession
+    leaveSession,
+    reauthenticate,
+    reconnectWithToken
   };
 
   return (

@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticateToken } from '../middleware/auth.js';
+import authMiddleware from '../middleware/authMiddleware.js';
 import {
   getProfile,
   updateProfile,
@@ -13,14 +13,14 @@ import {
 const router = express.Router();
 
 // Rotas para o perfil do usuário logado
-router.get('/me', authenticateToken, getProfile);
-router.put('/me', authenticateToken, updateProfile);
+router.get('/me', authMiddleware, getProfile);
+router.put('/me', authMiddleware, updateProfile);
 
 // Rotas para gerenciamento de usuários (apenas administradores)
-router.get('/', authenticateToken, getUsers);
-router.post('/', authenticateToken, createUser);
-router.get('/:id', authenticateToken, getUserById);
-router.put('/:id', authenticateToken, updateUser);
-router.delete('/:id', authenticateToken, deleteUser);
+router.get('/', authMiddleware, getUsers);
+router.post('/', authMiddleware, createUser);
+router.get('/:id', authMiddleware, getUserById);
+router.put('/:id', authMiddleware, updateUser);
+router.delete('/:id', authMiddleware, deleteUser);
 
 export default router;

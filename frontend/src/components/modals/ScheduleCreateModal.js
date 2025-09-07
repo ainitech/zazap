@@ -17,6 +17,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import { apiFetch, safeJson } from '../../utils/apiClient';
+import AuthService from '../../services/authService.js';
 
 export default function ScheduleCreateModal({ isOpen, onClose, onCreated }) {
   const [form, setForm] = useState({
@@ -42,8 +43,6 @@ export default function ScheduleCreateModal({ isOpen, onClose, onCreated }) {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
-
-  const token = localStorage.getItem('token');
 
   // Load contacts for a specific session (shared helper)
   const loadContactsForSession = useCallback(async (_sessionId, search = '') => {

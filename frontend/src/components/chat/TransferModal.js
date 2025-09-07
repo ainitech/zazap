@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { apiUrl } from '../../utils/apiClient';
+import { apiUrl, apiFetch, safeJson } from '../../utils/apiClient';
 import { 
   ArrowRightIcon,
   UserIcon,
@@ -34,13 +34,9 @@ export default function TransferModal({
 
   const fetchUsers = async () => {
     try {
-  const response = await fetch(apiUrl('/api/users'), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+      const response = await apiFetch('/api/users');
       if (response.ok) {
-        const data = await response.json();
+        const data = await safeJson(response);
         setUsers(data);
       }
     } catch (error) {
@@ -50,13 +46,9 @@ export default function TransferModal({
 
   const fetchQueues = async () => {
     try {
-  const response = await fetch(apiUrl('/api/queues'), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+      const response = await apiFetch('/api/queues');
       if (response.ok) {
-        const data = await response.json();
+        const data = await safeJson(response);
         setQueues(data);
       }
     } catch (error) {
@@ -70,12 +62,9 @@ export default function TransferModal({
 
     setLoading(true);
     try {
-  const response = await fetch(apiUrl(`/api/tickets/${ticket.id}/transfer`), {
+      const response = await apiFetch(`/api/tickets/${ticket.id}/transfer`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           transferType,
           userId: transferType === 'user' ? parseInt(selectedUser) : null,

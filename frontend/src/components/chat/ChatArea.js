@@ -3,7 +3,7 @@ import AudioPlayer from 'react-h5-audio-player';
 import 'react-h5-audio-player/lib/styles.css';
 import { useAuth } from '../../context/AuthContext';
 import io from 'socket.io-client';
-import { apiUrl, API_BASE_URL } from '../../utils/apiClient';
+import { apiUrl, API_BASE_URL, apiFetch, safeJson } from '../../utils/apiClient';
 import TransferModal from './TransferModal';
 import { FileText } from 'lucide-react';
 import PriorityModal from './PriorityModal';
@@ -30,112 +30,6 @@ import { UserPlusIcon } from '@heroicons/react/24/outline';
 
 // API base is resolved via apiUrl helper
 
-// Adicionando estilos CSS customizados
-const styles = `
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  
-  @keyframes slideIn {
-    from { opacity: 0; transform: translateX(-20px); }
-    to { opacity: 1; transform: translateX(0); }
-  }
-  
-  @keyframes pulse {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.05); }
-  }
-  
-  @keyframes audioWave {
-    0%, 100% { height: 8px; }
-    25% { height: 16px; }
-    50% { height: 24px; }
-    75% { height: 12px; }
-  }
-  
-  @keyframes audioWave2 {
-    0%, 100% { height: 12px; }
-    25% { height: 20px; }
-    50% { height: 8px; }
-    75% { height: 16px; }
-  }
-  
-  @keyframes audioWave3 {
-    0%, 100% { height: 16px; }
-    25% { height: 8px; }
-    50% { height: 20px; }
-    75% { height: 24px; }
-  }
-  
-  @keyframes audioWave4 {
-    0%, 100% { height: 10px; }
-    25% { height: 18px; }
-    50% { height: 14px; }
-    75% { height: 22px; }
-  }
-  
-  @keyframes audioWave5 {
-    0%, 100% { height: 14px; }
-    25% { height: 10px; }
-    50% { height: 18px; }
-    75% { height: 8px; }
-  }
-  
-  .animate-fadeIn {
-    animation: fadeIn 0.5s ease-out;
-  }
-  
-  .animate-slideIn {
-    animation: slideIn 0.3s ease-out;
-  }
-  
-  .animate-audio-wave-1 {
-    animation: audioWave 1.2s ease-in-out infinite;
-  }
-  
-  .animate-audio-wave-2 {
-    animation: audioWave2 1.0s ease-in-out infinite;
-  }
-  
-  .animate-audio-wave-3 {
-    animation: audioWave3 1.4s ease-in-out infinite;
-  }
-  
-  .animate-audio-wave-4 {
-    animation: audioWave4 1.1s ease-in-out infinite;
-  }
-  
-  .animate-audio-wave-5 {
-    animation: audioWave5 1.3s ease-in-out infinite;
-  }
-  
-  .scrollbar-thin::-webkit-scrollbar {
-    width: 6px;
-  }
-  
-  .scrollbar-thumb-slate-500::-webkit-scrollbar-thumb {
-    background-color: #64748b;
-    border-radius: 3px;
-  }
-  
-  .scrollbar-track-slate-700::-webkit-scrollbar-track {
-    background-color: #334155;
-  }
-  
-  .message-bubble {
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-  }
-`;
-
-// Injetar estilos
-if (typeof document !== 'undefined') {
-  const styleSheet = document.createElement('style');
-  styleSheet.textContent = styles;
-  document.head.appendChild(styleSheet);
-}
-
 export default function ChatArea({ 
   selectedTicket, 
   messages, 
@@ -146,11 +40,189 @@ export default function ChatArea({
   onToggleContactInfo,
   isRealTime = true,
   isSendingMessage = false,
-  onTicketUpdate
+  onTicketUpdate,
+  onBackToList
 }) {
   const { user } = useAuth();
   const messagesEndRef = useRef(null);
   const socketRef = useRef(null);
+  
+  // Adicionar CSS customizado no cabeçalho
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.textContent = `
+      /* Animações para mobile */
+      @keyframes fadeInUp {
+        from {
+          opacity: 0;
+          transform: translate3d(0, 30px, 0);
+        }
+        to {
+          opacity: 1;
+          transform: translate3d(0, 0, 0);
+        }
+      }
+      
+      @keyframes slideInRight {
+        from {
+          opacity: 0;
+          transform: translate3d(30px, 0, 0);
+        }
+        to {
+          opacity: 1;
+          transform: translate3d(0, 0, 0);
+        }
+      }
+      
+      @keyframes slideInLeft {
+        from {
+          opacity: 0;
+          transform: translate3d(-30px, 0, 0);
+        }
+        to {
+          opacity: 1;
+          transform: translate3d(0, 0, 0);
+        }
+      }
+      
+      @keyframes pulse {
+        0%, 100% {
+          transform: scale(1);
+        }
+        50% {
+          transform: scale(1.05);
+        }
+      }
+      
+      @keyframes ripple {
+        to {
+          transform: scale(4);
+          opacity: 0;
+        }
+      }
+      
+      /* Scroll personalizado para mobile */
+      .custom-scrollbar::-webkit-scrollbar {
+        width: 4px;
+      }
+      
+      .custom-scrollbar::-webkit-scrollbar-track {
+        background: rgba(0, 0, 0, 0.1);
+        border-radius: 2px;
+      }
+      
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 2px;
+        transition: background 0.2s ease;
+      }
+      
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: rgba(0, 0, 0, 0.5);
+      }
+      
+      /* Smooth scroll para toda a aplicação */
+      * {
+        scroll-behavior: smooth;
+      }
+      
+      /* Melhorar touch targets */
+      .touch-target {
+        min-height: 44px;
+        min-width: 44px;
+      }
+      
+      /* Remover highlight azul no touch */
+      .no-highlight {
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        -khtml-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+      }
+      
+      /* Animações para mensagens */
+      .message-enter {
+        animation: fadeInUp 0.3s ease-out;
+      }
+      
+      .message-my {
+        animation: slideInRight 0.3s ease-out;
+      }
+      
+      .message-other {
+        animation: slideInLeft 0.3s ease-out;
+      }
+      
+      /* Efeito ripple para botões */
+      .ripple-effect {
+        position: relative;
+        overflow: hidden;
+      }
+      
+      .ripple-effect::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 0;
+        height: 0;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.5);
+        transform: translate(-50%, -50%);
+        transition: width 0.6s, height 0.6s;
+      }
+      
+      .ripple-effect:active::before {
+        width: 300px;
+        height: 300px;
+      }
+      
+      /* Melhorias para textarea */
+      .auto-resize-textarea {
+        resize: none;
+        overflow: hidden;
+        transition: height 0.2s ease;
+      }
+      
+      .auto-resize-textarea:focus {
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+      }
+      
+      /* Loading dots animation */
+      @keyframes loadingDots {
+        0%, 20% {
+          opacity: 0;
+          transform: scale(0.6);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1);
+        }
+        80%, 100% {
+          opacity: 0;
+          transform: scale(0.6);
+        }
+      }
+      
+      .loading-dot:nth-child(1) { animation-delay: 0s; }
+      .loading-dot:nth-child(2) { animation-delay: 0.2s; }
+      .loading-dot:nth-child(3) { animation-delay: 0.4s; }
+      
+      .loading-dot {
+        animation: loadingDots 1.4s infinite;
+      }
+    `;
+    
+    document.head.appendChild(style);
+    
+    return () => {
+      document.head.removeChild(style);
+    };
+  }, []);
   
   // Estados para informações do contato
   const [contactInfo, setContactInfo] = useState(null);
@@ -206,11 +278,7 @@ export default function ChatArea({
   // Conectar ao WebSocket
   useEffect(() => {
     if (!socketRef.current) {
-  socketRef.current = io(apiUrl('/').replace(/\/$/, ''), {
-        auth: {
-          token: localStorage.getItem('token')
-        }
-      });
+  socketRef.current = io(apiUrl('/').replace(/\/$/, ''), { withCredentials: true });
 
       // Escutar atualizações de contatos
       socketRef.current.on('contact-updated', (updatedContact) => {
@@ -277,11 +345,7 @@ export default function ChatArea({
     if (!selectedTicket?.id) return;
     
     try {
-  const response = await fetch(apiUrl(`/api/tags/ticket/${selectedTicket.id}`), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch(`/api/tags/ticket/${selectedTicket.id}`);
       
       if (response.ok) {
         const data = await response.json();
@@ -305,11 +369,7 @@ export default function ChatArea({
       if (!contactInfo) {
         setLoadingContact(true);
       }
-  const response = await fetch(apiUrl(`/api/contacts/${selectedTicket.contactId}`), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch(`/api/contacts/${selectedTicket.contactId}`);
       
       if (response.ok) {
         const data = await response.json();
@@ -348,12 +408,7 @@ export default function ChatArea({
     if (!selectedTicket) return;
     
     try {
-  const response = await fetch(apiUrl(`/api/tickets/${selectedTicket.id}/resolve`), {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch(`/api/tickets/${selectedTicket.id}/resolve`, { method: 'PUT' });
 
       if (response.ok) {
         setShowActionsMenu(false);
@@ -373,12 +428,7 @@ export default function ChatArea({
     if (!window.confirm('Tem certeza que deseja fechar este ticket?')) return;
     
     try {
-  const response = await fetch(apiUrl(`/api/tickets/${selectedTicket.id}/close`), {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch(`/api/tickets/${selectedTicket.id}/close`, { method: 'PUT' });
 
       if (response.ok) {
         setShowActionsMenu(false);
@@ -416,12 +466,7 @@ export default function ChatArea({
     )) return;
     
     try {
-      const response = await fetch(apiUrl(`/api/tickets/${selectedTicket.id}/permanent`), {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+  const response = await apiFetch(`/api/tickets/${selectedTicket.id}/permanent`, { method: 'DELETE' });
 
       if (response.ok) {
         setShowActionsMenu(false);
@@ -476,9 +521,7 @@ export default function ChatArea({
     setQrOpen(true);
     setQrLoading(true);
     try {
-      const res = await fetch(apiUrl('/api/quick-replies'), {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      });
+  const res = await apiFetch('/api/quick-replies');
       const data = await res.json();
       const list = Array.isArray(data) ? data : (data.quickReplies || data.rows || data.items || []);
       setQrItems(Array.isArray(list) ? list : []);
@@ -508,9 +551,7 @@ export default function ChatArea({
     // If we have a shortcut, ask the API for the latest processed content
     if (item.shortcut) {
       try {
-        const res = await fetch(apiUrl(`/api/quick-replies/shortcut/${encodeURIComponent(item.shortcut)}`), {
-          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-        });
+  const res = await apiFetch(`/api/quick-replies/shortcut/${encodeURIComponent(item.shortcut)}`);
         if (res.ok) {
           const data = await res.json();
           if (data && data.processedContent) toInsert = data.processedContent;
@@ -593,13 +634,7 @@ export default function ChatArea({
 
     try {
       setUploadingFile(true);
-      const resp = await fetch(apiUrl(`/api/ticket-messages/${selectedTicket.id}/media`), {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: formData
-      });
+  const resp = await apiFetch(`/api/ticket-messages/${selectedTicket.id}/media`, { method: 'POST', body: formData });
       if (!resp.ok) throw new Error('Falha ao enviar contato');
       alert('Contato enviado');
     } catch (err) {
@@ -620,13 +655,7 @@ export default function ChatArea({
         const formData = new FormData();
         formData.append('file', file);
         formData.append('sender', 'user');
-        await fetch(apiUrl(`/api/ticket-messages/${selectedTicket.id}/media`), {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          },
-          body: formData
-        });
+  await apiFetch(`/api/ticket-messages/${selectedTicket.id}/media`, { method: 'POST', body: formData });
       }
       // reset input
       try { e.target.value = ''; } catch (e) {}
@@ -668,12 +697,9 @@ export default function ChatArea({
     )) return;
 
     try {
-      const response = await fetch(apiUrl(`/api/ticket-messages/${messageId}`), {
+      const response = await apiFetch(`/api/ticket-messages/${messageId}`, {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deleteForAll })
       });
 
@@ -692,12 +718,9 @@ export default function ChatArea({
   // Função para reagir à mensagem
   const handleReactToMessage = async (messageId, reaction) => {
     try {
-      const response = await fetch(apiUrl(`/api/ticket-messages/${messageId}/react`), {
+      const response = await apiFetch(`/api/ticket-messages/${messageId}/react`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reaction, userId: user.id })
       });
 
@@ -802,9 +825,7 @@ export default function ChatArea({
       });
       
       // Fetch do arquivo de áudio
-      const audioResponse = await fetch(`${API_BASE_URL}${quickReplyItem.mediaUrl}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      });
+  const audioResponse = await fetch(`${API_BASE_URL}${quickReplyItem.mediaUrl}`, { credentials: 'include' });
       
       console.log('🎵 Resposta do fetch do áudio:', audioResponse.status, audioResponse.statusText);
       
@@ -868,13 +889,7 @@ export default function ChatArea({
       console.log('🎵 Enviando PTT de quick reply para API...');
       
       // Enviar via API
-      const response = await fetch(apiUrl(`/api/ticket-messages/${selectedTicket.id}/media`), {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: formData
-      });
+  const response = await apiFetch(`/api/ticket-messages/${selectedTicket.id}/media`, { method: 'POST', body: formData });
       
       console.log('🎵 Resposta da API para quick reply:', response.status, response.statusText);
       
@@ -1084,12 +1099,9 @@ export default function ChatArea({
     try {
       console.log(`🎵 Enviando status de gravação: ${isRecording ? 'INICIANDO' : 'PARANDO'}`);
       
-      const response = await fetch(apiUrl(`/api/tickets/${selectedTicket.id}/recording-status`), {
+      const response = await apiFetch(`/api/tickets/${selectedTicket.id}/recording-status`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isRecording })
       });
       
@@ -1111,12 +1123,9 @@ export default function ChatArea({
     try {
       console.log(`⌨️ Enviando status de digitação: ${isTyping ? 'INICIANDO' : 'PARANDO'}`);
       
-      const response = await fetch(apiUrl(`/api/tickets/${selectedTicket.id}/typing-status`), {
+      const response = await apiFetch(`/api/tickets/${selectedTicket.id}/typing-status`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isTyping })
       });
       
@@ -1185,13 +1194,7 @@ export default function ChatArea({
       });
       
       // Enviar para API
-      const response = await fetch(apiUrl(`/api/ticket-messages/${selectedTicket.id}/media`), {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: formData
-      });
+  const response = await apiFetch(`/api/ticket-messages/${selectedTicket.id}/media`, { method: 'POST', body: formData });
       
       if (!response.ok) {
         const errorText = await response.text();
@@ -1467,11 +1470,21 @@ export default function ChatArea({
 return (
     <div className="flex-1 flex flex-col bg-slate-700 h-screen max-h-screen">
         {/* Chat Header */}
-        <div className="p-4 border-b border-slate-600/50 bg-gradient-to-r from-slate-800 to-slate-900 backdrop-blur-sm">
+        <div className="p-3 sm:p-4 border-b border-slate-600/50 bg-gradient-to-r from-slate-800 to-slate-900 backdrop-blur-sm">
             <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
+                <div className="flex items-center space-x-2 sm:space-x-3">
+                    {/* Mobile Back Button */}
+                    {onBackToList && (
+                        <button
+                            onClick={onBackToList}
+                            className="lg:hidden p-2 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-lg transition-all duration-200 mr-1"
+                        >
+                            <ArrowRightIcon className="w-5 h-5 rotate-180" />
+                        </button>
+                    )}
+                    
                     <div className="relative">
-                        <div className="w-12 h-12 rounded-full flex items-center justify-center text-white text-sm font-medium overflow-hidden shadow-lg ring-2 ring-yellow-500/20 transition-all duration-300 hover:ring-yellow-500/40">
+                        <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-white text-sm font-medium overflow-hidden shadow-lg ring-2 ring-yellow-500/20 transition-all duration-300 hover:ring-yellow-500/40">
                             {avatarUrl ? (
                                 <img 
                                     src={avatarUrl} 
@@ -1497,62 +1510,79 @@ return (
                                 {getAvatarInitials(displayName)}
                             </div>
                         </div>
-                        <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-slate-800 animate-pulse"></div>
+                        <div className="absolute -bottom-1 -right-1 w-3 h-3 sm:w-4 sm:h-4 bg-green-500 rounded-full border-2 border-slate-800 animate-pulse"></div>
                     </div>
-                    <div>
-                        <h3 className="text-white font-semibold text-lg tracking-tight">{displayName}</h3>
+                    <div className="flex-1 min-w-0">
+                        <h3 className="text-white font-semibold text-base sm:text-lg tracking-tight truncate">{displayName}</h3>
                         <div className="flex items-center space-x-2">
-                            <p className="text-slate-300 text-sm font-medium">
+                            <p className="text-slate-300 text-xs sm:text-sm font-medium truncate">
                                 {displayNumber.includes('@') ? displayNumber.split('@')[0] : displayNumber}
                             </p>
                             {loadingContact && (
-                                <div className="flex items-center space-x-1 bg-blue-500/20 px-2 py-1 rounded-full">
+                                <div className="hidden sm:flex items-center space-x-1 bg-blue-500/20 px-2 py-1 rounded-full">
                                     <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse"></div>
                                     <span className="text-xs text-blue-400 font-medium">Atualizando...</span>
                                 </div>
                             )}
                             {isRealTime && !loadingContact && (
-                                <div className="flex items-center space-x-1 bg-green-500/20 px-2 py-1 rounded-full">
+                                <div className="flex items-center space-x-1 bg-green-500/20 px-2 py-1 rounded-full backdrop-blur-sm">
                                     <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></div>
                                     <span className="text-xs text-green-400 font-medium">
-                                        {isSendingMessage ? 'Enviando...' : 'Online'}
+                                        {isSendingMessage ? (
+                                          <span className="flex items-center space-x-1">
+                                            <span>Enviando</span>
+                                            <div className="flex space-x-0.5">
+                                              <div className="w-1 h-1 bg-green-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
+                                              <div className="w-1 h-1 bg-green-400 rounded-full animate-bounce" style={{animationDelay: '150ms'}}></div>
+                                              <div className="w-1 h-1 bg-green-400 rounded-full animate-bounce" style={{animationDelay: '300ms'}}></div>
+                                            </div>
+                                          </span>
+                                        ) : 'Online'}
                                     </span>
                                 </div>
                             )}
                         </div>
                     </div>
                 </div>
-                <div className="flex items-center space-x-2">
-                    <button className="p-3 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-xl transition-all duration-200 hover:scale-105">
+                <div className="flex items-center space-x-1 sm:space-x-2">
+                    <button className="hidden sm:block p-3 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-xl transition-all duration-200 hover:scale-105">
                         <VideoCameraIcon className="w-5 h-5" />
                     </button>
-                    <button className="p-3 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-xl transition-all duration-200 hover:scale-105">
+                    <button className="hidden sm:block p-3 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-xl transition-all duration-200 hover:scale-105">
                         <PhoneIcon className="w-5 h-5" />
+                    </button>
+                    
+                    {/* Contact Info Button */}
+                    <button 
+                        onClick={onToggleContactInfo}
+                        className="p-2 sm:p-3 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-lg sm:rounded-xl transition-all duration-200 hover:scale-105"
+                    >
+                        <InformationCircleIcon className="w-5 h-5" />
                     </button>
                     
                     {/* Menu de Ações */}
                     <div className="relative actions-menu">
                         <button 
                             onClick={() => setShowActionsMenu(!showActionsMenu)}
-                            className="p-3 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-xl transition-all duration-200 hover:scale-105"
+                            className="p-2 sm:p-3 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-lg sm:rounded-xl transition-all duration-200 hover:scale-105"
                         >
                             <EllipsisVerticalIcon className="w-5 h-5" />
                         </button>
                         
                         {showActionsMenu && (
-                            <div className="absolute right-0 top-14 w-56 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700/50 rounded-xl shadow-2xl z-50 backdrop-blur-sm">
+                            <div className="absolute right-0 top-12 sm:top-14 w-48 sm:w-56 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700/50 rounded-xl shadow-2xl z-50 backdrop-blur-sm">
                                 <div className="py-2">
                                     <button
                                         onClick={() => {
                                             setShowTransferModal(true);
                                             setShowActionsMenu(false);
                                         }}
-                                        className="w-full flex items-center space-x-3 px-4 py-3 text-left text-slate-300 hover:bg-slate-700/50 transition-all duration-200 hover:text-white group"
+                                        className="w-full flex items-center space-x-3 px-3 sm:px-4 py-3 text-left text-slate-300 hover:bg-slate-700/50 transition-all duration-200 hover:text-white group touch-manipulation"
                                     >
                                         <div className="p-2 bg-blue-500/20 rounded-lg group-hover:bg-blue-500/30 transition-colors">
                                             <ArrowRightIcon className="w-4 h-4" />
                                         </div>
-                                        <span className="font-medium">Transferir Ticket</span>
+                                        <span className="font-medium text-sm sm:text-base">Transferir Ticket</span>
                                     </button>
                                     
                                     <button
@@ -1560,12 +1590,12 @@ return (
                                             setShowPriorityModal(true);
                                             setShowActionsMenu(false);
                                         }}
-                                        className="w-full flex items-center space-x-3 px-4 py-3 text-left text-slate-300 hover:bg-slate-700/50 transition-all duration-200 hover:text-white group"
+                                        className="w-full flex items-center space-x-3 px-3 sm:px-4 py-3 text-left text-slate-300 hover:bg-slate-700/50 transition-all duration-200 hover:text-white group touch-manipulation"
                                     >
                                         <div className="p-2 bg-orange-500/20 rounded-lg group-hover:bg-orange-500/30 transition-colors">
                                             <FlagIcon className="w-4 h-4" />
                                         </div>
-                                        <span className="font-medium">Alterar Prioridade</span>
+                                        <span className="font-medium text-sm sm:text-base">Alterar Prioridade</span>
                                     </button>
                                     
                                     <div className="border-t border-slate-700/50 my-2"></div>
@@ -1634,23 +1664,26 @@ return (
         </div>
 
         {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gradient-to-b from-slate-600 to-slate-700 scrollbar-thin scrollbar-thumb-slate-500 scrollbar-track-slate-700">
-            {messages.map((message, index) => (
-                <div
-                    key={message.id}
-                    className={`flex ${message.sender === 'user' ? 'justify-end' : message.sender === 'system' ? 'justify-end' : 'justify-start'}`}
-                >
-                    <div className={`flex items-end space-x-3 max-w-xs lg:max-w-md xl:max-w-lg animate-fadeIn ${
-                        message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : message.sender === 'system' ? 'flex-row-reverse space-x-reverse' : ''
-                    }`}>
-                        <div className="relative group">
-                            {message.sender === 'system' ? (
-                                // Avatar especial para mensagens do sistema
-                                <div className="w-8 h-8 rounded-full flex items-center justify-center bg-gradient-to-br from-blue-500 to-indigo-600 shadow-lg ring-2 ring-blue-400/30">
-                                    <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                                    </svg>
-                                </div>
+        <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-4 sm:space-y-6 bg-gradient-to-b from-slate-600 to-slate-700 custom-scrollbar touch-manipulation">
+            {messages.map((message, index) => {
+                const messageAnimation = `message-enter ${message.sender === 'user' || message.sender === 'system' ? 'message-my' : 'message-other'}`;
+                
+                return (
+                    <div
+                        key={message.id}
+                        className={`flex ${message.sender === 'user' ? 'justify-end' : message.sender === 'system' ? 'justify-end' : 'justify-start'} ${messageAnimation}`}
+                    >
+                        <div className={`flex items-end space-x-3 max-w-xs lg:max-w-md xl:max-w-lg ${
+                            message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : message.sender === 'system' ? 'flex-row-reverse space-x-reverse' : ''
+                        }`}>
+                            <div className="relative group">
+                                {message.sender === 'system' ? (
+                                    // Avatar especial para mensagens do sistema
+                                    <div className="w-8 h-8 rounded-full flex items-center justify-center bg-gradient-to-br from-blue-500 to-indigo-600 shadow-lg ring-2 ring-blue-400/30">
+                                        <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                                        </svg>
+                                    </div>
                             ) : (
                                 <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs overflow-hidden shadow-lg transition-all duration-300 ${
                                     message.sender === 'user' ? 'ring-2 ring-yellow-500/30' : 'ring-2 ring-slate-500/30'
@@ -1972,35 +2005,36 @@ return (
                                 </span>
                                 {/* You can add message status icons here if needed */}
                             </div>
+                            </div>
                         </div>
                     </div>
-                </div>
-            ))}
+                );
+            })}
             {/* Referência para scroll automático */}
             <div ref={messagesEndRef} />
         </div>
 
         {/* Message Input */}
-        <div className="p-4 border-t border-slate-600/50 bg-gradient-to-r from-slate-800 to-slate-900">
+        <div className="p-3 sm:p-4 border-t border-slate-600/50 bg-gradient-to-r from-slate-800 to-slate-900">
             {/* Mensagem de erro de gravação */}
             {recordingError && (
-                <div className="mb-4 p-3 bg-red-500/20 border border-red-500/30 rounded-lg backdrop-blur-sm">
+                <div className="mb-3 sm:mb-4 p-3 bg-red-500/20 border border-red-500/30 rounded-lg backdrop-blur-sm">
                     <div className="text-red-400 text-sm">
                         {recordingError}
                     </div>
                 </div>
             )}
             
-            <div className="flex items-end space-x-3">
+            <div className="flex items-end space-x-2 sm:space-x-3">
         {/* Photos/Videos button */}
         <button
-          className="p-3 text-slate-400 hover:text-white hover:bg-slate-700 rounded-full transition-all duration-200 hover:scale-105 disabled:opacity-50"
+          className="p-2 sm:p-3 text-slate-400 hover:text-white hover:bg-slate-700 rounded-full transition-all duration-200 hover:scale-105 disabled:opacity-50 touch-manipulation"
           onClick={() => handleFileButtonClick('media')}
           disabled={uploadingFile || isRecording}
           type="button"
           title="Fotos/Vídeos"
         >
-          <VideoCameraIcon className="w-5 h-5" />
+          <VideoCameraIcon className="w-4 h-4 sm:w-5 sm:h-5" />
           <input
             type="file"
             ref={fileInputMediaRef}
@@ -2013,13 +2047,13 @@ return (
 
         {/* Documents button */}
         <button
-          className="p-3 text-slate-400 hover:text-white hover:bg-slate-700 rounded-full transition-all duration-200 hover:scale-105 disabled:opacity-50"
+          className="p-2 sm:p-3 text-slate-400 hover:text-white hover:bg-slate-700 rounded-full transition-all duration-200 hover:scale-105 disabled:opacity-50 touch-manipulation"
           onClick={() => handleFileButtonClick('document')}
           disabled={uploadingFile || isRecording}
           type="button"
           title="Documentos"
         >
-          <FileText className="w-5 h-5" />
+          <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
           <input
             type="file"
             ref={fileInputDocRef}
@@ -2032,17 +2066,17 @@ return (
 
         {/* Contact button */}
         <button
-          className="p-3 text-slate-400 hover:text-white hover:bg-slate-700 rounded-full transition-all duration-200 hover:scale-105 disabled:opacity-50"
+          className="hidden sm:block p-2 sm:p-3 text-slate-400 hover:text-white hover:bg-slate-700 rounded-full transition-all duration-200 hover:scale-105 disabled:opacity-50 touch-manipulation"
           onClick={handleSendContact}
           disabled={uploadingFile || isRecording}
           type="button"
           title="Enviar contato"
         >
-          <UserPlusIcon className="w-5 h-5" />
+          <UserPlusIcon className="w-4 h-4 sm:w-5 sm:h-5" />
         </button>
                 
                 {/* Área de input principal */}
-                <div className={`flex-1 bg-gradient-to-r from-slate-700 to-slate-600 rounded-full px-4 py-3 flex items-center border border-slate-600/50 shadow-lg backdrop-blur-sm ${
+                <div className={`flex-1 bg-gradient-to-r from-slate-700 to-slate-600 rounded-full px-3 sm:px-4 py-2 sm:py-3 flex items-center border border-slate-600/50 shadow-lg backdrop-blur-sm min-h-[44px] ${
                     isRecording ? 'opacity-50' : ''
                 }`}>
                     {isRecording ? (
@@ -2056,14 +2090,27 @@ return (
                         </div>
                     ) : (
                         /* Input de texto normal */
-                        <input
-                            type="text"
-                            className="flex-1 bg-transparent text-white placeholder-slate-400 focus:outline-none"
-                            placeholder="Digite sua mensagem..."
+                        <textarea
+                            rows="1"
+                            className="flex-1 bg-transparent text-white placeholder-slate-400 focus:outline-none text-sm sm:text-base auto-resize-textarea touch-target no-highlight transition-all duration-200 ease-in-out"
+                            placeholder="Digite sua mensagem... (Shift+Enter para nova linha)"
                             value={newMessage}
                             onChange={(e) => {
                               const val = e.target.value;
                               onNewMessageChange(val);
+                              
+                              // Auto-resize textarea com transição suave
+                              e.target.style.height = 'auto';
+                              const newHeight = Math.min(e.target.scrollHeight, 120);
+                              e.target.style.height = newHeight + 'px';
+                              
+                              // Haptic feedback para mudanças significativas
+                              if (val.length > 0 && val.length % 50 === 0) {
+                                if (navigator.vibrate) {
+                                  navigator.vibrate(5);
+                                }
+                              }
+                              
                               if (val.endsWith('/') && !isRecording) {
                                 if (!qrOpen) openQuickReplies();
                                 setQrQuery('');
@@ -2078,35 +2125,43 @@ return (
                             onKeyDown={(e) => {
                                 if (
                                     e.key === 'Enter' &&
+                                    !e.shiftKey &&
                                     !isSendingMessage &&
                                     !isRecording &&
                                     newMessage.trim()
                                 ) {
+                                    e.preventDefault();
                                     onSendMessage();
+                                } else if (e.key === 'Enter' && e.shiftKey) {
+                                    // Allow line break with Shift+Enter
                                 }
                             }}
                             disabled={isSendingMessage}
+                            style={{ 
+                              minHeight: '20px',
+                              maxHeight: '120px'
+                            }}
                         />
                     )}
                     
                     {/* Botões do lado direito */}
-                    <div className="flex items-center space-x-2 ml-3">
+                    <div className="flex items-center space-x-1 sm:space-x-2 ml-2 sm:ml-3">
                         {isRecording ? (
                             /* Botões durante gravação */
                             <>
                                 <button
                                     onClick={cancelRecording}
-                                    className="p-3 text-slate-300 hover:text-red-400 hover:bg-red-600/20 rounded-full transition-all duration-200 hover:scale-105"
+                                    className="p-2 sm:p-3 text-slate-300 hover:text-red-400 hover:bg-red-600/20 rounded-full transition-all duration-200 hover:scale-105 touch-manipulation"
                                     title="Cancelar gravação"
                                 >
-                                    <XMarkIcon className="w-5 h-5" />
+                                    <XMarkIcon className="w-4 h-4 sm:w-5 sm:h-5" />
                                 </button>
                                 <button
                                     onClick={stopRecording}
-                                    className="p-3 bg-green-600 hover:bg-green-500 text-white rounded-full transition-all duration-200 hover:scale-105 shadow-lg shadow-green-500/25"
+                                    className="p-2 sm:p-3 bg-green-600 hover:bg-green-500 text-white rounded-full transition-all duration-200 hover:scale-105 shadow-lg shadow-green-500/25 touch-manipulation"
                                     title="Enviar áudio"
                                 >
-                                    <CheckIcon className="w-5 h-5" />
+                                    <CheckIcon className="w-4 h-4 sm:w-5 sm:h-5" />
                                 </button>
                             </>
                         ) : (
@@ -2115,59 +2170,87 @@ return (
                                 {/* Botão de microfone - só aparece quando não tem texto */}
                                 {!newMessage.trim() && (
                                     <button
-                                        className="p-3 text-slate-400 hover:text-green-400 hover:bg-green-600/20 rounded-full transition-all duration-300 hover:scale-105 disabled:opacity-50 transform animate-slideIn"
+                                        className="p-2 sm:p-3 text-slate-400 hover:text-green-400 hover:bg-green-600/20 rounded-full transition-all duration-300 hover:scale-105 disabled:opacity-50 transform animate-slideIn touch-manipulation"
                                         onClick={startRecording}
                                         disabled={uploadingFile || isSendingMessage}
                                         type="button"
                                         title="Gravar áudio"
                                     >
-                                        <MicrophoneIcon className="w-5 h-5" />
+                                        <MicrophoneIcon className="w-4 h-4 sm:w-5 sm:h-5" />
                                     </button>
                                 )}
                                 
                                 {/* Botão de enviar - só aparece quando tem texto */}
                                 {newMessage.trim() && (
                                     <button
-                                        className={`p-3 rounded-full transition-all duration-300 shadow-lg transform animate-slideIn ${
+                                        className={`p-2 sm:p-3 rounded-full transition-all duration-300 shadow-lg transform touch-target no-highlight relative overflow-hidden ripple-effect ${
                                             isSendingMessage
-                                                ? 'bg-gray-600 cursor-not-allowed text-gray-400 scale-95'
-                                                : 'bg-gradient-to-r from-green-500 to-green-400 text-white hover:from-green-400 hover:to-green-300 hover:scale-105 shadow-green-500/25'
+                                                ? 'bg-gray-600 cursor-not-allowed text-gray-400 scale-95 opacity-70'
+                                                : 'bg-gradient-to-r from-green-500 to-green-400 text-white hover:from-green-400 hover:to-green-300 hover:scale-110 active:scale-95 shadow-green-500/25 hover:shadow-green-400/40 hover:shadow-lg'
                                         }`}
-                                        onClick={onSendMessage}
+                                        onClick={(e) => {
+                                          // Enhanced haptic feedback
+                                          if (navigator.vibrate && !isSendingMessage) {
+                                            navigator.vibrate([30, 10, 30]);
+                                          }
+                                          
+                                          // Visual feedback
+                                          e.currentTarget.style.transform = 'scale(0.95)';
+                                          setTimeout(() => {
+                                            e.currentTarget.style.transform = '';
+                                          }, 150);
+                                          
+                                          onSendMessage(e);
+                                        }}
                                         disabled={isSendingMessage}
                                         type="button"
-                                        title="Enviar mensagem"
+                                        title={isSendingMessage ? "Enviando..." : "Enviar mensagem (Enter)"}
+                                        onTouchStart={() => {
+                                          // Light haptic feedback on touch
+                                          if (navigator.vibrate && !isSendingMessage) {
+                                            navigator.vibrate(5);
+                                          }
+                                        }}
                                     >
-                                        <PaperAirplaneIcon className="w-5 h-5" />
+                                        {isSendingMessage ? (
+                                          <div className="animate-spin">
+                                            <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24">
+                                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                            </svg>
+                                          </div>
+                                        ) : (
+                                          <PaperAirplaneIcon className="w-4 h-4 sm:w-5 sm:h-5 transform transition-transform duration-200 group-hover:translate-x-1" />
+                                        )}
                                     </button>
                                 )}
                                 {/* Quick Replies Button */}
                                 {!isRecording && (
                                   <div className="relative quick-replies-popover">
                                     <button
-                                      className={`p-3 rounded-full transition-all duration-200 hover:scale-105 ${qrOpen ? 'bg-yellow-500 text-slate-900' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}
+                                      className={`p-2 sm:p-3 rounded-full transition-all duration-200 hover:scale-105 touch-manipulation ${qrOpen ? 'bg-yellow-500 text-slate-900' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}
                                       onClick={() => (qrOpen ? setQrOpen(false) : openQuickReplies())}
                                       type="button"
                                       title="Respostas rápidas (/ atalho)"
                                     >
-                                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 sm:w-5 sm:h-5">
                                         <path d="M7.266 3.04a.75.75 0 01.694.805l-.234 3.273h3.809l.234-3.273a.75.75 0 011.499.107l-.234 3.166H16a.75.75 0 010 1.5h-3.092l-.24 3.35H15a.75.75 0 010 1.5h-2.482l-.234 3.166a.75.75 0 01-1.499-.107l.234-3.059H7.21l-.234 3.166a.75.75 0 01-1.499-.107l.234-3.059H4a.75.75 0 010-1.5h1.571l.24-3.35H4a.75.75 0 010-1.5h1.928l.234-3.273a.75.75 0 01.805-.694zM8.48 8.118l-.24 3.35h3.808l.24-3.35H8.48z" />
                                       </svg>
                                     </button>
 
                                 {/* Interactive Buttons Button */}
                                 <button
-                                  className="p-3 rounded-full text-slate-400 hover:text-white hover:bg-slate-700/50 transition-all duration-200 hover:scale-105"
+                                  className="hidden sm:block p-2 sm:p-3 rounded-full text-slate-400 hover:text-white hover:bg-slate-700/50 transition-all duration-200 hover:scale-105 touch-manipulation"
                                   onClick={() => setButtonModalOpen(true)}
                                   type="button"
                                   title="Enviar botões interativos"
                                 >
-                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 sm:w-5 sm:h-5">
                                     <path fillRule="evenodd" d="M4 3a1 1 0 000 2h12a1 1 0 100-2H4zm0 4a1 1 0 000 2h12a1 1 0 100-2H4zm0 4a1 1 0 000 2h8a1 1 0 100-2H4z" clipRule="evenodd" />
                                   </svg>
                                 </button>
                                     {qrOpen && (
-                                      <div className="absolute bottom-12 right-0 w-80 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl p-3 z-50">
+                                      <div className="absolute bottom-12 right-0 w-72 sm:w-80 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl p-3 z-50 max-h-64 overflow-y-auto">
                                         <div className="flex items-center gap-2 mb-2">
                                           <span className="text-slate-300 text-sm">/</span>
                                           <input

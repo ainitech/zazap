@@ -18,6 +18,7 @@ import Tag from './tag.js';
 import TicketTag from './ticketTag.js';
 import Campaign from './campaign.js';
 import CampaignMessage from './campaignMessage.js';
+import refreshTokenFactory from './refreshToken.js';
 
 // Definir associações
 User.hasMany(Session, { foreignKey: 'userId' });
@@ -71,6 +72,11 @@ User.hasMany(QuickReply, { foreignKey: 'userId', as: 'QuickReplies' });
 QuickReply.belongsTo(User, { foreignKey: 'userId', as: 'User' });
 
 const MessageReaction = messageReactionFactory(sequelize);
+const RefreshToken = refreshTokenFactory(sequelize, sequelize.Sequelize.DataTypes);
+
+// RefreshToken associations
+User.hasMany(RefreshToken, { foreignKey: 'userId', as: 'refreshTokens' });
+RefreshToken.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 
 // Schedule associations
 User.hasMany(Schedule, { foreignKey: 'userId' });
@@ -133,6 +139,7 @@ export {
   PushSubscription,
   QuickReply,
   MessageReaction,
+  RefreshToken,
   Schedule,
   Tag,
   TicketTag,

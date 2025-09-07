@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import SocketAuthStatus from './common/SocketAuthStatus';
 import {
   HomeIcon,
   ChatBubbleBottomCenterTextIcon,
@@ -202,14 +203,39 @@ export default function PageLayout({ children, title, subtitle }) {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false); // Fechado por padrão no mobile
   const [scheduleCount, setScheduleCount] = useState(0);
   const [expandedGroups, setExpandedGroups] = useState({});
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+  // Inicialização única para detectar se é mobile
+  useEffect(() => {
+    const mobile = window.innerWidth < 768;
+    setIsMobile(mobile);
+  }, []);
 
   useEffect(() => {
+    // Detectar mudanças de tamanho de tela
+    const handleResize = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (mobile && sidebarOpen) {
+        setSidebarOpen(false); // Fechar sidebar automaticamente no mobile
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    
+    return () => window.removeEventListener('resize', handleResize);
+  }, [sidebarOpen]);
+
+  useEffect(() => {
+    // Usar sessionStorage ao invés de localStorage para estado do sidebar
     try {
-      const v = localStorage.getItem('sidebarOpen');
-      if (v !== null) setSidebarOpen(v === 'true');
+      const v = sessionStorage.getItem('sidebarOpen');
+      if (v !== null && !isMobile) { // Só aplicar estado salvo se não for mobile
+        setSidebarOpen(v === 'true');
+      }
     } catch (e) {
       // ignore
     }
@@ -229,9 +255,14 @@ export default function PageLayout({ children, title, subtitle }) {
 
   useEffect(() => {
     const loadCounts = async () => {
+      // Só carregar contadores se o usuário estiver autenticado
+      if (!user) return;
+      
       try {
-        const r = await apiFetch('/api/schedules/counts');
-        const data = await safeJson(r);
+        // Usar authService para fazer requisição autenticada
+        const { default: authService } = await import('../services/authService');
+        const response = await authService.request('/api/schedules/counts');
+        const data = await response.json();
         setScheduleCount(data?.total || 0);
       } catch (e) {
         console.error('Falha ao carregar contadores', e);
@@ -240,10 +271,11 @@ export default function PageLayout({ children, title, subtitle }) {
     loadCounts();
     const t = setInterval(loadCounts, 15000);
     return () => clearInterval(t);
-  }, []);
+  }, [user]);
 
   useEffect(() => {
-    try { localStorage.setItem('sidebarOpen', sidebarOpen ? 'true' : 'false'); } catch (e) {}
+    // Usar sessionStorage ao invés de localStorage
+    try { sessionStorage.setItem('sidebarOpen', sidebarOpen ? 'true' : 'false'); } catch (e) {}
   }, [sidebarOpen]);
 
   const isActiveRoute = (route) => {
@@ -267,27 +299,50 @@ export default function PageLayout({ children, title, subtitle }) {
 
   const handleNavigation = (route) => {
     navigate(route);
+    // Fechar sidebar automaticamente no mobile após navegação
+    if (isMobile) {
+      setSidebarOpen(false);
+    }
   };
 
   // Filtrar menus baseado nas permissões do usuário
   const filteredMenus = filterMenusByPermissions(sidebarMenus, user?.role || 'attendant');
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen bg-gray-50 page-layout-fix relative">
+      {/* Mobile Overlay */}
+      {isMobile && sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden transition-opacity duration-300 ease-in-out"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <div className={`${sidebarOpen ? 'w-64' : 'w-16'} ${sidebarOpen ? 'bg-slate-800' : 'bg-slate-800'} flex flex-col py-6 border-r border-slate-700 transition-all duration-300 shadow-sm`}>
+      <div 
+        className={`${
+          isMobile 
+            ? sidebarOpen 
+              ? 'fixed inset-y-0 left-0 z-50 w-64 transform translate-x-0 transition-transform duration-300 ease-in-out' 
+              : 'fixed inset-y-0 left-0 z-50 w-64 transform -translate-x-full transition-transform duration-300 ease-in-out'
+            : sidebarOpen 
+              ? 'w-64 transition-all duration-300 ease-in-out' 
+              : 'w-16 transition-all duration-300 ease-in-out'
+        } bg-gradient-to-b from-slate-800 to-slate-900 flex flex-col py-4 md:py-6 border-r border-slate-700 shadow-xl flex-shrink-0`}
+        onClick={(e) => isMobile && e.stopPropagation()}
+      >
         {/* Logo */}
-        <div className={`flex items-center ${sidebarOpen ? 'justify-between px-6' : 'justify-center'} w-full mb-8`}> 
+        <div className={`flex items-center ${(sidebarOpen && !isMobile) ? 'justify-between px-6' : 'justify-center px-4'} w-full mb-6 md:mb-8`}> 
           <div className="flex items-center">
             <div className="w-8 h-8 bg-yellow-500 rounded-lg flex items-center justify-center">
               <ChatBubbleBottomCenterTextIconSolid className="w-5 h-5 text-slate-900" />
             </div>
-            {sidebarOpen && <span className="ml-3 text-white font-bold text-lg">Zazap</span>}
+            {(sidebarOpen || isMobile) && <span className="ml-3 text-white font-bold text-lg">Zazap</span>}
           </div>
-          {sidebarOpen && (
+          {(sidebarOpen || isMobile) && (
             <button
               onClick={() => setSidebarOpen(false)}
-              className="p-1 rounded-md hover:bg-slate-700 text-slate-400 hover:text-white"
+              className="p-1 rounded-md hover:bg-slate-700 text-slate-400 hover:text-white lg:block"
               title="Fechar menu"
             >
               <AdjustmentsHorizontalIcon className="w-5 h-5" />
@@ -296,7 +351,7 @@ export default function PageLayout({ children, title, subtitle }) {
         </div>
 
         {/* Navigation Items */}
-        <nav className="flex flex-col flex-1 w-full px-3">
+        <nav className="flex flex-col flex-1 w-full px-3 overflow-y-auto">
           {filteredMenus.map((menu, index) => {
             const needsSeparator = index > 0 && (
               (index === 1) || // After Dashboard
@@ -305,7 +360,7 @@ export default function PageLayout({ children, title, subtitle }) {
 
             return (
               <React.Fragment key={index}>
-                {needsSeparator && sidebarOpen && (
+                {needsSeparator && (sidebarOpen || isMobile) && (
                   <div className="my-2">
                     <div className="h-px bg-slate-700"></div>
                   </div>
@@ -325,15 +380,15 @@ export default function PageLayout({ children, title, subtitle }) {
                         <menu.icon className="w-5 h-5" />
                       </div>
 
-                      {sidebarOpen && (
+                      {(sidebarOpen || isMobile) && (
                         <span className="text-sm font-medium">
                           {menu.label}
                         </span>
                       )}
 
-                      {/* Tooltip when collapsed */}
-                      {!sidebarOpen && (
-                        <div className="absolute left-full ml-3 top-1/2 transform -translate-y-1/2 bg-gray-900 text-white text-xs rounded-md px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
+                      {/* Tooltip when collapsed - only on desktop */}
+                      {!sidebarOpen && !isMobile && (
+                        <div className="absolute left-full ml-3 top-1/2 transform -translate-y-1/2 bg-gray-900 text-white text-xs rounded-md px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-[9999]">
                           {menu.label}
                         </div>
                       )}
@@ -343,7 +398,7 @@ export default function PageLayout({ children, title, subtitle }) {
                   <div className="relative w-full mb-2">
                     {/* Group Header */}
                     <button
-                      onClick={() => sidebarOpen ? toggleGroup(menu.label) : setSidebarOpen(true)}
+                      onClick={() => (sidebarOpen || isMobile) ? toggleGroup(menu.label) : setSidebarOpen(true)}
                       className={`group relative flex items-center w-full gap-3 px-3 py-3 rounded-lg transition-all duration-200 ${
                         isGroupActive(menu) 
                           ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 shadow-sm' 
@@ -354,7 +409,7 @@ export default function PageLayout({ children, title, subtitle }) {
                         <menu.icon className="w-5 h-5" />
                       </div>
 
-                      {sidebarOpen && (
+                      {(sidebarOpen || isMobile) && (
                         <>
                           <span className="text-sm font-medium flex-1 text-left">
                             {menu.label}
@@ -376,9 +431,9 @@ export default function PageLayout({ children, title, subtitle }) {
                         </>
                       )}
 
-                      {/* Tooltip when collapsed */}
-                      {!sidebarOpen && (
-                        <div className="absolute left-full ml-3 top-1/2 transform -translate-y-1/2 bg-gray-900 text-white text-xs rounded-md px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
+                      {/* Tooltip when collapsed - only on desktop */}
+                      {!sidebarOpen && !isMobile && (
+                        <div className="absolute left-full ml-3 top-1/2 transform -translate-y-1/2 bg-gray-900 text-white text-xs rounded-md px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-[9999]">
                           {menu.label}
                           {menu.description && (
                             <div className="text-gray-400 text-[10px] mt-0.5">{menu.description}</div>
@@ -388,10 +443,10 @@ export default function PageLayout({ children, title, subtitle }) {
                     </button>
 
                     {/* Submenu Items */}
-                    {sidebarOpen && (
+                    {(sidebarOpen || isMobile) && (
                       <div className={`ml-6 mt-1 space-y-1 overflow-hidden transition-all duration-300 ease-in-out ${
                         expandedGroups[menu.label] 
-                          ? 'max-h-96 opacity-100' 
+                          ? 'max-h-[500px] opacity-100' 
                           : 'max-h-0 opacity-0'
                       }`}>
                         {menu.items.map((item, itemIndex) => {
@@ -436,7 +491,7 @@ export default function PageLayout({ children, title, subtitle }) {
 
         {/* User Profile */}
         <div className="w-full px-3">
-          {sidebarOpen ? (
+          {(sidebarOpen || isMobile) ? (
             <div className="bg-slate-700 rounded-lg p-4 flex items-center gap-3 border border-slate-600">
               <div className="w-10 h-10 rounded-full bg-gradient-to-br from-yellow-400 to-yellow-600 flex items-center justify-center text-slate-900 font-medium text-sm">
                 {user?.name ? getAvatarInitials(user.name) : 'U'}
@@ -469,11 +524,11 @@ export default function PageLayout({ children, title, subtitle }) {
         </div>
       </div>
 
-      {/* Floating toggle button when sidebar is closed */}
-      {!sidebarOpen && (
+      {/* Floating toggle button when sidebar is closed - only on desktop */}
+      {!sidebarOpen && !isMobile && (
         <button
           onClick={() => setSidebarOpen(true)}
-          className="fixed top-4 left-4 z-50 w-10 h-10 bg-slate-800 rounded-lg shadow-lg flex items-center justify-center hover:shadow-xl transition-shadow border border-slate-600"
+          className="fixed top-4 left-4 z-[9999] w-10 h-10 bg-slate-800 rounded-lg shadow-lg flex items-center justify-center hover:shadow-xl transition-shadow border border-slate-600"
           title="Abrir menu"
         >
           <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -482,19 +537,35 @@ export default function PageLayout({ children, title, subtitle }) {
         </button>
       )}
 
+      {/* Mobile toggle button - only visible when sidebar is closed */}
+      {isMobile && !sidebarOpen && (
+        <button
+          onClick={() => setSidebarOpen(true)}
+          className="fixed top-4 left-4 z-[9999] w-12 h-12 bg-gradient-to-r from-slate-800 to-slate-700 rounded-xl shadow-lg flex items-center justify-center hover:shadow-xl transition-all duration-300 border border-slate-600 lg:hidden group"
+          title="Abrir menu"
+        >
+          <div className="relative">
+            <svg className="w-6 h-6 text-white transition-transform duration-300 group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+            <div className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-500 rounded-full animate-pulse"></div>
+          </div>
+        </button>
+      )}
+
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className={`flex-1 flex flex-col overflow-hidden min-h-0 main-content-fix ${isMobile ? 'w-full' : ''}`}>
         {/* Header */}
         {(title || subtitle) && (
-          <div className="bg-white border-b border-gray-200 px-6 py-4">
+          <div className="bg-white border-b border-gray-200 px-4 md:px-6 py-4 flex-shrink-0">
             <div className="flex items-center justify-between">
-              <div>
-                {title && <h1 className="text-2xl font-bold text-gray-900">{title}</h1>}
-                {subtitle && <p className="text-gray-600 mt-1">{subtitle}</p>}
+              <div className={`${isMobile ? 'ml-14' : ''}`}>
+                {title && <h1 className="text-xl md:text-2xl font-bold text-gray-900">{title}</h1>}
+                {subtitle && <p className="text-gray-600 mt-1 text-sm md:text-base">{subtitle}</p>}
               </div>
-              <div className="text-sm text-gray-500">
+              <div className="text-xs md:text-sm text-gray-500">
                 {user?.name && (
-                  <span>Olá, <strong>{user.name}</strong></span>
+                  <span className="hidden sm:inline">Olá, <strong>{user.name}</strong></span>
                 )}
               </div>
             </div>
@@ -502,8 +573,13 @@ export default function PageLayout({ children, title, subtitle }) {
         )}
 
         {/* Page Content */}
-        <div className="flex-1 overflow-auto">
-          {children}
+        <div className="flex-1 overflow-auto min-h-0 bg-gray-50 content-area-fix">
+          <div className="p-4 md:p-6 min-h-full">
+            <SocketAuthStatus />
+            <div className="-m-4 md:-m-6 min-h-full">
+              {children}
+            </div>
+          </div>
         </div>
       </div>
     </div>

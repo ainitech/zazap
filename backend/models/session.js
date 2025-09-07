@@ -19,6 +19,14 @@ const Session = sequelize.define('Session', {
     type: DataTypes.STRING,
     allowNull: false,
   },
+  name: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  realNumber: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
   library: {
     type: DataTypes.STRING,
     allowNull: false,

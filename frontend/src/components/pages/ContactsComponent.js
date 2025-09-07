@@ -34,15 +34,7 @@ export default function ContactsComponent() {
   const [noteTarget, setNoteTarget] = useState(null);
   const [noteText, setNoteText] = useState('');
   const [savingNote, setSavingNote] = useState(false);
-  const [viewMode, setViewMode] = useState(() => {
-    // Recuperar modo de visualização do localStorage
-    return localStorage.getItem('contactsViewMode') || 'cards';
-  });
-
-  // Salvar modo de visualização no localStorage quando mudar
-  useEffect(() => {
-    localStorage.setItem('contactsViewMode', viewMode);
-  }, [viewMode]);
+  const [viewMode, setViewMode] = useState('cards'); // persistência removida (antes usava localStorage)
 
   const [sortBy, setSortBy] = useState('lastContact'); // 'name', 'lastContact', 'status'
 
@@ -74,10 +66,9 @@ export default function ContactsComponent() {
     
     // Conectar ao WebSocket
     if (!socketRef.current) {
+      // Conexão via cookies httpOnly (sem token em localStorage)
       socketRef.current = io(API_BASE_URL, {
-        auth: {
-          token: localStorage.getItem('token')
-        }
+        withCredentials: true
       });
 
       // Escutar atualizações de contatos
@@ -342,11 +333,8 @@ export default function ContactsComponent() {
     if (!window.confirm(`Tem certeza que deseja deletar o contato "${contact.name}" e todos os dados relacionados? Esta ação não pode ser desfeita!`)) return;
     setDeletingContact(contact.contactId);
     try {
-      const response = await fetch(apiUrl(`/api/contacts/contact/${contact.contactId}`), {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
+      const response = await apiFetch(`/api/contacts/contact/${contact.contactId}`, {
+        method: 'DELETE'
       });
       if (response.ok) {
         setContacts(prev => prev.filter(c => c.contactId !== contact.contactId));

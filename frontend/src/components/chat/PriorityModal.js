@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { apiUrl } from '../../utils/apiClient';
+import { apiUrl, apiFetch } from '../../utils/apiClient';
 import { 
   ExclamationTriangleIcon,
   FlagIcon,
@@ -62,16 +62,10 @@ export default function PriorityModal({
   const handleSave = async () => {
     setLoading(true);
     try {
-  const response = await fetch(apiUrl(`/api/tickets/${ticket.id}/priority`), {
+      const response = await apiFetch(`/api/tickets/${ticket.id}/priority`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          priority: selectedPriority,
-          reason: reason.trim()
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ priority: selectedPriority, reason: reason.trim() })
       });
 
       if (response.ok) {

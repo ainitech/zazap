@@ -9,8 +9,9 @@ import {
   handleBaileysMessage 
 } from './messageCallbacks.js';
 
-// Função para normalizar sessionId (remover device ID)
+// Função para normalizar sessionId (remover device ID) com proteção
 const normalizeSessionId = (sessionId) => {
+  if (!sessionId || typeof sessionId !== 'string') return '';
   return sessionId.split(':')[0];
 };
 
@@ -65,24 +66,21 @@ const isSessionActuallyActive = async (whatsappId, library) => {
       }
 
       // Verificar todas as sessões ativas para encontrar uma com o mesmo base number
-      const activeSessions = listBaileysSessions();
-      console.log(`📋 Sessões ativas no Baileys: ${activeSessions.map(s => s.sessionId).join(', ') || 'nenhuma'}`);
+      const activeSessions = listBaileysSessions(); // array de strings (sessionIds)
+      console.log(`📋 Sessões ativas no Baileys: ${activeSessions.join(', ') || 'nenhuma'}`);
 
       // Procurar por uma sessão ativa com o mesmo número base
-      const matchingSession = activeSessions.find(s => {
-        const sBaseNumber = normalizeSessionId(s.sessionId);
-        return sBaseNumber === baseNumber;
-      });
+      const matchingSessionId = activeSessions.find(id => normalizeSessionId(id) === baseNumber);
 
-      if (matchingSession) {
-        console.log(`🔄 Sessão encontrada por base number: ${matchingSession.sessionId} para busca ${baseNumber}`);
+      if (matchingSessionId) {
+        console.log(`🔄 Sessão encontrada por base number: ${matchingSessionId} para busca ${baseNumber}`);
 
         // Atualizar o whatsappId no banco de dados para o ID correto
         try {
           const dbSession = await findSessionByBaseNumber(whatsappId);
-          if (dbSession && dbSession.whatsappId !== matchingSession.sessionId) {
-            console.log(`📝 Atualizando whatsappId no banco: ${dbSession.whatsappId} → ${matchingSession.sessionId}`);
-            await dbSession.update({ whatsappId: matchingSession.sessionId });
+          if (dbSession && dbSession.whatsappId !== matchingSessionId) {
+            console.log(`📝 Atualizando whatsappId no banco: ${dbSession.whatsappId} → ${matchingSessionId}`);
+            await dbSession.update({ whatsappId: matchingSessionId });
           }
         } catch (updateError) {
           console.error(`❌ Erro ao atualizar whatsappId no banco:`, updateError.message);
@@ -156,8 +154,8 @@ export const syncAllSessions = async () => {
     let disconnectedCount = 0;
 
     // Primeiro, obter todas as sessões ativas do Baileys
-    const activeBaileysSessions = listBaileysSessions();
-  console.log(`📋 Sessões ativas no Baileys: ${activeBaileysSessions.map(s => s.sessionId).join(', ') || 'nenhuma'}`);
+  const activeBaileysSessions = listBaileysSessions().filter(id => !!id); // array de strings válidas
+  console.log(`📋 Sessões ativas no Baileys: ${activeBaileysSessions.join(', ') || 'nenhuma'}`);
 
     for (const session of sessions) {
       // Sempre usar o número base para verificações
@@ -168,13 +166,10 @@ export const syncAllSessions = async () => {
 
       // Verificar se existe uma sessão ativa com o mesmo base number
       if (!isActive && session.library === 'baileys') {
-        const activeSessionWithSameBase = activeBaileysSessions.find(s => {
-          const sBaseNumber = normalizeSessionId(s.sessionId);
-          return sBaseNumber === baseNumber;
-        });
+  const activeSessionWithSameBase = activeBaileysSessions.find(id => id && normalizeSessionId(id) === baseNumber);
 
         if (activeSessionWithSameBase) {
-          console.log(`🔄 Encontrada sessão ativa com mesmo base number: ${activeSessionWithSameBase.sessionId} para ${baseNumber}`);
+          console.log(`🔄 Encontrada sessão ativa com mesmo base number: ${activeSessionWithSameBase} para ${baseNumber}`);
 
           // Atualizar o whatsappId na sessão do banco de dados para usar apenas o número base
           await session.update({

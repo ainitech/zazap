@@ -12,9 +12,9 @@ import {
 } from '@heroicons/react/24/outline';
 import { FileText } from 'lucide-react';
 import io from 'socket.io-client';
-import { apiUrl } from '../../utils/apiClient';
+import { apiUrl, apiFetch, safeJson } from '../../utils/apiClient';
 
-export default function ContactInfo({ selectedTicket, showContactInfo }) {
+export default function ContactInfo({ selectedTicket, showContactInfo, onClose }) {
   const [contactInfo, setContactInfo] = useState(null);
   const [mediaFiles, setMediaFiles] = useState([]);
   const [attachments, setAttachments] = useState([]);
@@ -31,10 +31,7 @@ export default function ContactInfo({ selectedTicket, showContactInfo }) {
   // Conectar ao WebSocket quando o componente monta
   useEffect(() => {
     if (!socketRef.current) {
-  socketRef.current = io(apiUrl('/').replace(/\/$/, ''), {
-        transports: ['websocket'],
-        autoConnect: true
-      });
+  socketRef.current = io(apiUrl('/').replace(/\/$/, ''), { transports: ['websocket'], autoConnect: true, withCredentials: true });
 
       // Listener para atualizações de contato
       socketRef.current.on('contact-updated', (updatedContact) => {
@@ -88,13 +85,9 @@ export default function ContactInfo({ selectedTicket, showContactInfo }) {
     const fetchAllContactMedia = async () => {
       if (selectedTicket?.contactId) {
         try {
-          const response = await fetch(apiUrl(`/api/contacts/contact/${selectedTicket.contactId}/media`), {
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('token')}`
-            }
-          });
+          const response = await apiFetch(`/api/contacts/contact/${selectedTicket.contactId}/media`);
           if (response.ok) {
-            const mediaData = await response.json();
+            const mediaData = await safeJson(response);
             setMediaFiles(mediaData);
             console.log('📸 Todas as mídias do contato carregadas:', mediaData);
           }
@@ -116,13 +109,9 @@ export default function ContactInfo({ selectedTicket, showContactInfo }) {
         return;
       }
       try {
-  const response = await fetch(apiUrl(`/api/tickets?ticketId=${ticketId}`), {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        });
+        const response = await apiFetch(`/api/tickets?ticketId=${ticketId}`);
         if (response.ok) {
-          const data = await response.json();
+          const data = await safeJson(response);
           setTicketInfo(Array.isArray(data) ? data[0] : data);
         }
       } catch (error) {
@@ -163,13 +152,9 @@ export default function ContactInfo({ selectedTicket, showContactInfo }) {
       if (!contactInfo) {
         setLoading(true);
       }
-  const response = await fetch(apiUrl(`/api/contacts/${selectedTicket.contactId}`), {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+      const response = await apiFetch(`/api/contacts/${selectedTicket.contactId}`);
       if (response.ok) {
-        const data = await response.json();
+        const data = await safeJson(response);
         console.log('👤 Informações do contato carregadas via API:', data);
         setContactInfo(data);
       }
@@ -183,26 +168,18 @@ export default function ContactInfo({ selectedTicket, showContactInfo }) {
   const fetchMediaAndAttachments = async () => {
     try {
       const [mediaResponse, attachmentsResponse] = await Promise.all([
-        fetch(apiUrl(`/api/tickets/${selectedTicket.id}/media`), {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        }),
-        fetch(apiUrl(`/api/tickets/${selectedTicket.id}/attachments`), {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        })
+        apiFetch(`/api/tickets/${selectedTicket.id}/media`),
+        apiFetch(`/api/tickets/${selectedTicket.id}/attachments`)
       ]);
 
       if (mediaResponse.ok) {
-        const mediaData = await mediaResponse.json();
+        const mediaData = await safeJson(mediaResponse);
         setMediaFiles(mediaData);
         console.log('📸 Mídias carregadas:', mediaData);
       }
 
       if (attachmentsResponse.ok) {
-        const attachmentsData = await attachmentsResponse.json();
+        const attachmentsData = await safeJson(attachmentsResponse);
         setAttachments(attachmentsData);
         console.log('📎 Anexos carregados:', attachmentsData);
       }
@@ -243,14 +220,27 @@ export default function ContactInfo({ selectedTicket, showContactInfo }) {
   const ticketPriority = ticketInfo?.priority || selectedTicket?.priority || 'normal';
 
   return (
-    <div className="w-80 bg-gradient-to-b from-slate-900 to-slate-800 border-l border-slate-600 flex flex-col shadow-2xl">
+    <div className="w-full lg:w-80 bg-gradient-to-b from-slate-900 to-slate-800 border-l border-slate-600 flex flex-col shadow-2xl">
+      {/* Mobile Header with Close Button */}
+      {onClose && (
+        <div className="lg:hidden flex items-center justify-between p-4 border-b border-slate-600/50 bg-slate-800/90 backdrop-blur-sm">
+          <h2 className="text-white font-semibold text-lg">Informações do Contato</h2>
+          <button
+            onClick={onClose}
+            className="p-2 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-lg transition-all duration-200"
+          >
+            <XMarkIcon className="w-5 h-5" />
+          </button>
+        </div>
+      )}
+      
       {/* Contact Header */}
-      <div className="p-8 border-b border-slate-600/50 text-center relative overflow-hidden">
+      <div className="p-4 sm:p-8 border-b border-slate-600/50 text-center relative overflow-hidden">
         {/* Background decoration */}
         <div className="absolute inset-0 bg-gradient-to-br from-yellow-500/5 to-transparent"></div>
         
         <div className="relative z-10">
-          <div className="w-24 h-24 rounded-full mx-auto mb-6 flex items-center justify-center text-white text-xl font-bold overflow-hidden shadow-xl ring-4 ring-yellow-500/20 transition-all duration-300 hover:ring-yellow-500/40 hover:scale-105">
+          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full mx-auto mb-4 sm:mb-6 flex items-center justify-center text-white text-lg sm:text-xl font-bold overflow-hidden shadow-xl ring-4 ring-yellow-500/20 transition-all duration-300 hover:ring-yellow-500/40 hover:scale-105">
             {avatarUrl ? (
               <img 
                 src={avatarUrl} 
@@ -276,14 +266,14 @@ export default function ContactInfo({ selectedTicket, showContactInfo }) {
               {getAvatarInitials(displayName)}
             </div>
           </div>
-          <h3 className="text-white text-xl font-bold mb-2 tracking-tight">{displayName}</h3>
-          <p className="text-slate-300 text-sm mb-6 font-medium">
+          <h3 className="text-white text-lg sm:text-xl font-bold mb-2 tracking-tight">{displayName}</h3>
+          <p className="text-slate-300 text-sm mb-4 sm:mb-6 font-medium">
             {displayNumber.includes('@') ? displayNumber.split('@')[0] : displayNumber}
           </p>
         </div>
         
         {/* Status e prioridade do ticket */}
-        <div className="flex items-center justify-center space-x-3 mb-6">
+        <div className="flex flex-col sm:flex-row items-center justify-center space-y-2 sm:space-y-0 sm:space-x-3 mb-4 sm:mb-6">
           <span className={`px-3 py-1.5 rounded-full text-xs font-bold shadow-lg transition-all duration-200 hover:scale-105 ${
             ticketStatus === 'accepted' ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-green-500/25' :
             ticketStatus === 'resolved' ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-blue-500/25' :
@@ -309,7 +299,7 @@ export default function ContactInfo({ selectedTicket, showContactInfo }) {
         </div>
         
         {loading && (
-          <div className="text-slate-300 text-sm mb-6 flex items-center justify-center space-x-2">
+          <div className="text-slate-300 text-sm mb-4 sm:mb-6 flex items-center justify-center space-x-2">
             <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
             <span className="font-medium">Carregando informações...</span>
             <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse animation-delay-150"></div>
@@ -317,31 +307,32 @@ export default function ContactInfo({ selectedTicket, showContactInfo }) {
         )}
         
         {/* Action Buttons */}
-        <div className="flex justify-center space-x-4">
-          <button className="p-4 bg-gradient-to-br from-yellow-400 to-yellow-500 text-slate-900 rounded-full hover:from-yellow-300 hover:to-yellow-400 transition-all duration-200 shadow-lg hover:shadow-yellow-500/25 hover:scale-110 group">
-            <VideoCameraIcon className="w-5 h-5 group-hover:scale-110 transition-transform duration-200" />
+        <div className="flex justify-center space-x-3 sm:space-x-4">
+          <button className="p-3 sm:p-4 bg-gradient-to-br from-yellow-400 to-yellow-500 text-slate-900 rounded-full hover:from-yellow-300 hover:to-yellow-400 transition-all duration-200 shadow-lg hover:shadow-yellow-500/25 hover:scale-110 group touch-manipulation">
+            <VideoCameraIcon className="w-4 h-4 sm:w-5 sm:h-5 group-hover:scale-110 transition-transform duration-200" />
           </button>
-          <button className="p-4 bg-gradient-to-br from-yellow-400 to-yellow-500 text-slate-900 rounded-full hover:from-yellow-300 hover:to-yellow-400 transition-all duration-200 shadow-lg hover:shadow-yellow-500/25 hover:scale-110 group">
-            <PhoneIcon className="w-5 h-5 group-hover:scale-110 transition-transform duration-200" />
+          <button className="p-3 sm:p-4 bg-gradient-to-br from-yellow-400 to-yellow-500 text-slate-900 rounded-full hover:from-yellow-300 hover:to-yellow-400 transition-all duration-200 shadow-lg hover:shadow-yellow-500/25 hover:scale-110 group touch-manipulation">
+            <PhoneIcon className="w-4 h-4 sm:w-5 sm:h-5 group-hover:scale-110 transition-transform duration-200" />
           </button>
-          <button className="p-4 bg-gradient-to-br from-yellow-400 to-yellow-500 text-slate-900 rounded-full hover:from-yellow-300 hover:to-yellow-400 transition-all duration-200 shadow-lg hover:shadow-yellow-500/25 hover:scale-110 group">
-            <InformationCircleIcon className="w-5 h-5 group-hover:scale-110 transition-transform duration-200" />
+          <button className="p-3 sm:p-4 bg-gradient-to-br from-yellow-400 to-yellow-500 text-slate-900 rounded-full hover:from-yellow-300 hover:to-yellow-400 transition-all duration-200 shadow-lg hover:shadow-yellow-500/25 hover:scale-110 group touch-manipulation">
+            <InformationCircleIcon className="w-4 h-4 sm:w-5 sm:h-5 group-hover:scale-110 transition-transform duration-200" />
           </button>
         </div>
       </div>
 
       {/* Attachments Section */}
-      <div className="p-4 border-b border-slate-600/50 relative">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
-          <div className="flex items-center gap-2 min-w-0">            
-            <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded-full ml-1">
+      <div className="p-3 sm:p-4 border-b border-slate-600/50 relative">
+        <div className="flex flex-col gap-3 mb-3">
+          <div className="flex items-center gap-2">
+            <h4 className="text-white font-semibold text-sm sm:text-base">Arquivos</h4>
+            <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded-full">
               {mediaFiles.length + attachments.length}
             </span>
           </div>
-          <div className="flex space-x-2 bg-slate-700/50 rounded-lg p-1 backdrop-blur-sm w-fit">
+          <div className="flex space-x-1 bg-slate-700/50 rounded-lg p-1 backdrop-blur-sm">
             <button
               onClick={() => setActiveTab('media')}
-              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 flex items-center space-x-2 ${
+              className={`flex-1 px-2 sm:px-3 py-2 text-xs sm:text-sm font-medium rounded-md transition-all duration-200 flex items-center justify-center space-x-1 sm:space-x-2 touch-manipulation ${
                 activeTab === 'media' 
                   ? 'bg-gradient-to-r from-yellow-400 to-yellow-500 text-slate-900 shadow-lg' 
                   : 'text-slate-300 hover:text-white hover:bg-slate-600/50'
@@ -359,7 +350,7 @@ export default function ContactInfo({ selectedTicket, showContactInfo }) {
             </button>
             <button
               onClick={() => setActiveTab('documents')}
-              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 flex items-center space-x-2 ${
+              className={`flex-1 px-2 sm:px-3 py-2 text-xs sm:text-sm font-medium rounded-md transition-all duration-200 flex items-center justify-center space-x-1 sm:space-x-2 touch-manipulation ${
                 activeTab === 'documents' 
                   ? 'bg-gradient-to-r from-yellow-400 to-yellow-500 text-slate-900 shadow-lg' 
                   : 'text-slate-300 hover:text-white hover:bg-slate-600/50'
@@ -379,12 +370,12 @@ export default function ContactInfo({ selectedTicket, showContactInfo }) {
         </div>
 
         {activeTab === 'media' && (
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
             {mediaFiles.length > 0 ? (
               mediaFiles.slice(0, 5).map((media, index) => (
                 <div
                   key={index}
-                  className="aspect-square bg-gradient-to-br from-slate-700 to-slate-800 rounded-xl overflow-hidden cursor-pointer group transition-all duration-300 hover:scale-105 hover:shadow-lg hover:shadow-yellow-500/10 border border-slate-600/30"
+                  className="aspect-square bg-gradient-to-br from-slate-700 to-slate-800 rounded-lg sm:rounded-xl overflow-hidden cursor-pointer group transition-all duration-300 hover:scale-105 hover:shadow-lg hover:shadow-yellow-500/10 border border-slate-600/30 touch-manipulation"
                   onClick={() => {
                     setSelectedMedia(media);
                     setShowMediaModal(true);
