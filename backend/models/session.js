@@ -31,6 +31,13 @@ const Session = sequelize.define('Session', {
     type: DataTypes.STRING,
     allowNull: false,
   },
+  // Canal da sessão: whatsapp, instagram, facebook
+  channel: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: 'whatsapp',
+    comment: 'Canal / plataforma da sessão (whatsapp, instagram, facebook)'
+  },
   status: {
     type: DataTypes.STRING,
     allowNull: false,

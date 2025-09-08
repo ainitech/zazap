@@ -99,6 +99,13 @@ useEffect(() => {
         
         // Normalize Sequelize instances: message may be wrapped in dataValues
         const normalized = message && message.dataValues ? message.dataValues : message;
+        
+        // Validar se a mensagem normalizada tem propriedades essenciais
+        if (!normalized || !normalized.id || typeof normalized.sender !== 'string') {
+          console.warn('⚠️ Mensagem inválida ou incompleta recebida:', normalized);
+          return;
+        }
+        
         // Ensure numeric ticketId
         const msgTicketId = normalized?.ticketId ? Number(normalized.ticketId) : undefined;
         console.log('🔔 Nova mensagem recebida via WebSocket:', normalized);
@@ -111,7 +118,12 @@ useEffect(() => {
           setMessages(prevMessages => {
             console.log('📊 Mensagens anteriores:', prevMessages.length);
             // Verificar se a mensagem já existe para evitar duplicatas
-            const exists = prevMessages.some(m => (m.id || m.dataValues?.id) === (normalized.id || normalized.dataValues?.id));
+            const exists = prevMessages.some(m => {
+              if (!m) return false;
+              const mid = (m.id || m.dataValues?.id);
+                const nid = (normalized && (normalized.id || normalized.dataValues?.id));
+              return mid != null && nid != null && mid === nid;
+            });
             if (exists) {
               console.log('⚠️ Mensagem já existe, ignorando duplicata');
               return prevMessages;
@@ -143,7 +155,7 @@ useEffect(() => {
           });
 
           // Se a mensagem é de um ticket que não está na lista atual, atualizar a lista de tickets
-          const existsInList = Array.isArray(tickets) && tickets.some(t => Number(t.id) === Number(msgTicketId));
+          const existsInList = Array.isArray(tickets) && tickets.some(t => t && Number(t.id) === Number(msgTicketId));
           if (!existsInList && msgTicketId) {
             console.log('🔄 Ticket não está na lista atual. Atualizando tickets...');
             fetchTickets(true);
@@ -155,7 +167,7 @@ useEffect(() => {
           setTickets(prev => {
             if (!Array.isArray(prev)) return prev;
             const updated = prev.map(t => {
-              if (Number(t.id) === Number(msgTicketId)) {
+              if (t && Number(t.id) === Number(msgTicketId)) {
                 return {
                   ...t,
                   lastMessage: normalized.content || normalized.lastMessage || t.lastMessage,
@@ -190,7 +202,12 @@ useEffect(() => {
           console.log('✅ Processando atualização para ticket atual');
           setMessages(prevMessages => {
             console.log('📊 Mensagens anteriores:', prevMessages.length);
-            const exists = prevMessages.some(m => (m.id || m.dataValues?.id) === (normalized.id || normalized.dataValues?.id));
+            const exists = prevMessages.some(m => {
+              if (!m) return false;
+              const mid = (m.id || m.dataValues?.id);
+              const nid = (normalized && (normalized.id || normalized.dataValues?.id));
+              return mid != null && nid != null && mid === nid;
+            });
             if (exists) {
               console.log('⚠️ Mensagem já existe no message-update, ignorando');
               return prevMessages;
@@ -214,14 +231,68 @@ useEffect(() => {
       }
     };
 
+    // Handler para mensagens enviadas via Instagram/Facebook (feedback instantâneo)
+    const handleMessageSent = (data) => {
+      try {
+        console.log('✅ ChatComponent: handleMessageSent chamado', data);
+        
+        if (selectedTicket && data.ticketId === selectedTicket.id) {
+          console.log('✅ Adicionando mensagem enviada via', data.channel);
+          setMessages(prevMessages => {
+            // Evitar duplicação
+            const exists = prevMessages.some(m => 
+                m && 
+                m.content === data.content && 
+                m.sender === 'user' && 
+                m.timestamp && data.timestamp &&
+                Math.abs(new Date(m.timestamp).getTime() - new Date(data.timestamp).getTime()) < 2000
+            );
+            if (exists) {
+              console.log('⚠️ Mensagem enviada já existe, ignorando');
+              return prevMessages;
+            }
+            
+            const newMessage = {
+              id: Date.now(), // ID temporário até sincronizar com banco
+              content: data.content,
+              sender: 'user',
+              timestamp: data.timestamp,
+              messageType: data.messageType,
+              channel: data.channel,
+              status: data.status
+            };
+            
+            console.log('➕ Adicionando mensagem enviada:', newMessage);
+            return [...prevMessages, newMessage];
+          });
+        }
+      } catch (err) {
+        console.error('Erro em handleMessageSent:', err);
+      }
+    };
+
+    // Handler para erros de envio
+    const handleMessageError = (data) => {
+      try {
+        console.log('❌ ChatComponent: handleMessageError chamado', data);
+        // O toast já é mostrado no SocketContext, mas podemos adicionar lógica adicional aqui
+      } catch (err) {
+        console.error('Erro em handleMessageError:', err);
+      }
+    };
+
     socket.on('tickets-update', handleTicketsUpdate);
     socket.on('new-message', handleNewMessage);
     socket.on('message-update', handleMessageUpdate);
+    socket.on('message-sent', handleMessageSent);
+    socket.on('message-error', handleMessageError);
 
     console.log('✅ Listeners WebSocket registrados:', {
       'tickets-update': true,
       'new-message': true,
-      'message-update': true
+      'message-update': true,
+      'message-sent': true,
+      'message-error': true
     });
 
     // Garantir que estamos na sala do ticket após configurar listeners
@@ -243,13 +314,15 @@ useEffect(() => {
       socket.off('tickets-update', handleTicketsUpdate);
       socket.off('new-message', handleNewMessage);
       socket.off('message-update', handleMessageUpdate);
+      socket.off('message-sent', handleMessageSent);
+      socket.off('message-error', handleMessageError);
       socket.off('test-event');
     };
   }, [socket, isConnected, selectedTicket, joinTicket]);
 
   useEffect(() => {
-    if (ticketId) {
-      const ticket = tickets.find(t => t.id === parseInt(ticketId));
+    if (ticketId && Array.isArray(tickets)) {
+      const ticket = tickets.find(t => t && t.id === parseInt(ticketId));
       if (ticket) {
         handleTicketSelect(ticket);
       }
@@ -377,8 +450,9 @@ useEffect(() => {
       
       if (response.ok) {
         const data = await response.json();
-        setMessages(data);
-        console.log(`✅ [FETCH ONCE] ${data.length} mensagens iniciais carregadas para ticket ${ticketId}`);
+        const messagesArray = Array.isArray(data) ? data : [];
+        setMessages(messagesArray);
+        console.log(`✅ [FETCH ONCE] ${messagesArray.length} mensagens iniciais carregadas para ticket ${ticketId}`);
       } else {
         console.error('❌ [FETCH ONCE] Erro ao buscar mensagens iniciais');
       }
@@ -471,15 +545,13 @@ useEffect(() => {
     }
   };
 
-  const unreadCount = tickets.filter(ticket => ticket.unreadCount > 0).length;
+  const unreadCount = Array.isArray(tickets) ? tickets.filter(ticket => ticket && ticket.unreadCount > 0).length : 0;
 
   return (
-    <div className="flex h-screen bg-gray-50 relative">
-      {/* Mobile: ConversationList as overlay when no ticket selected */}
+    <div className="flex h-screen bg-gray-50 relative overflow-hidden">
+      {/* Lista de Conversas - Responsiva */}
       <div className={`
-        ${selectedTicket ? 'hidden lg:block' : 'block'} 
-        ${selectedTicket ? 'lg:w-80' : 'w-full lg:w-80'} 
-        relative z-10
+      
       `}>
         <ConversationList
           tickets={tickets}
@@ -489,16 +561,16 @@ useEffect(() => {
           onSearchChange={setSearchTerm}
           unreadCount={unreadCount}
           isRealTime={isConnected}
-          currentUser={null} // TODO: Adicionar usuário atual quando necessário
+          currentUser={null}
           onAcceptTicket={acceptTicket}
           onRefresh={handleRefreshTickets}
         />
       </div>
       
-      {/* Mobile: ChatArea takes full width when ticket selected */}
+      {/* Área do Chat - Responsiva */}
       <div className={`
-        ${selectedTicket ? 'block' : 'hidden lg:block'} 
-        ${selectedTicket ? 'w-full lg:flex-1' : 'lg:flex-1'} 
+        flex-1 flex flex-col min-w-0 transition-all duration-300 ease-in-out
+        ${selectedTicket ? 'flex' : 'hidden xl:flex'} 
         relative
       `}>
         <ChatArea
@@ -511,23 +583,31 @@ useEffect(() => {
           onToggleContactInfo={() => setShowContactInfo(!showContactInfo)}
           isRealTime={isConnected}
           isSendingMessage={isSendingMessage}
-          onBackToList={() => setSelectedTicket(null)} // Add back button for mobile
+          onBackToList={() => setSelectedTicket(null)}
         />
       </div>
       
-      {/* ContactInfo as overlay on mobile */}
+      {/* Informações do Contato - Responsiva */}
       <div className={`
-        ${showContactInfo ? 'block' : 'hidden'} 
-        lg:block lg:relative
-        ${showContactInfo ? 'fixed inset-0 z-50 lg:relative lg:inset-auto lg:z-auto' : ''}
-        ${showContactInfo ? 'lg:w-80' : 'lg:w-0 lg:overflow-hidden'}
+        flex-shrink-0 transition-all duration-300 ease-in-out
+        ${showContactInfo ? 'flex' : 'hidden'} 
+        ${showContactInfo ? 'fixed inset-y-0 right-0 z-50 w-80 sm:w-96 lg:relative lg:inset-auto lg:z-auto lg:w-80 xl:w-96' : 'w-0'}
+        bg-white border-l border-gray-200 shadow-xl lg:shadow-none
       `}>
         <ContactInfo
           selectedTicket={selectedTicket}
           showContactInfo={showContactInfo}
-          onClose={() => setShowContactInfo(false)} // Add close function for mobile
+          onClose={() => setShowContactInfo(false)}
         />
       </div>
+      
+      {/* Overlay para mobile quando ContactInfo está aberto */}
+      {showContactInfo && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
+          onClick={() => setShowContactInfo(false)}
+        />
+      )}
     </div>
   );
 }

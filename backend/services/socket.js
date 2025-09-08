@@ -287,3 +287,40 @@ export const emitToAll = (event, data) => {
     console.error(`❌ Socket.IO não inicializado para emitir evento '${event}' globalmente`);
   }
 };
+
+export const getConnectedClients = (roomName = null) => {
+  if (!io) return 0;
+  
+  if (roomName) {
+    const room = io.sockets.adapter.rooms.get(roomName);
+    return room ? room.size : 0;
+  }
+  
+  return io.sockets.sockets.size;
+};
+
+export const getRoomInfo = (roomName) => {
+  if (!io) return null;
+  
+  const room = io.sockets.adapter.rooms.get(roomName);
+  if (!room) return null;
+  
+  const clients = [];
+  for (const socketId of room) {
+    const socket = io.sockets.sockets.get(socketId);
+    if (socket) {
+      clients.push({
+        id: socketId,
+        userId: socket.user?.id,
+        userName: socket.user?.name,
+        authenticated: socket.isAuthenticated
+      });
+    }
+  }
+  
+  return {
+    roomName,
+    clientCount: room.size,
+    clients
+  };
+};

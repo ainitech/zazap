@@ -9,7 +9,6 @@ import { FileText } from 'lucide-react';
 import PriorityModal from './PriorityModal';
 import TagSelector from '../TagSelector';
 import ButtonModal from '../modals/ButtonModal';
-import PollMessage from './PollMessage';
 import { 
   ChatBubbleBottomCenterTextIcon,
   EllipsisVerticalIcon,
@@ -1960,12 +1959,6 @@ return (
                                             Mensagem automática do sistema
                                         </div>
                                     )}
-
-                                    {/* Exibir enquete se for uma mensagem de enquete */}
-                                    <PollMessage
-                                        message={message}
-                                        isUser={message.sender === 'user'}
-                                    />
                                 </>
                             )}
 
@@ -2015,26 +2008,26 @@ return (
         </div>
 
         {/* Message Input */}
-        <div className="p-3 sm:p-4 border-t border-slate-600/50 bg-gradient-to-r from-slate-800 to-slate-900">
+        <div className="p-3 border-t border-slate-600/30 bg-slate-800">
             {/* Mensagem de erro de gravação */}
             {recordingError && (
-                <div className="mb-3 sm:mb-4 p-3 bg-red-500/20 border border-red-500/30 rounded-lg backdrop-blur-sm">
+                <div className="mb-3 p-2 bg-red-500/20 border border-red-500/30 rounded-lg">
                     <div className="text-red-400 text-sm">
                         {recordingError}
                     </div>
                 </div>
             )}
             
-            <div className="flex items-end space-x-2 sm:space-x-3">
+            <div className="flex items-end space-x-2">
         {/* Photos/Videos button */}
         <button
-          className="p-2 sm:p-3 text-slate-400 hover:text-white hover:bg-slate-700 rounded-full transition-all duration-200 hover:scale-105 disabled:opacity-50 touch-manipulation"
+          className="p-2 text-slate-400 hover:text-white hover:bg-slate-700/60 rounded-lg transition-colors duration-200 disabled:opacity-50"
           onClick={() => handleFileButtonClick('media')}
           disabled={uploadingFile || isRecording}
           type="button"
           title="Fotos/Vídeos"
         >
-          <VideoCameraIcon className="w-4 h-4 sm:w-5 sm:h-5" />
+          <VideoCameraIcon className="w-4 h-4" />
           <input
             type="file"
             ref={fileInputMediaRef}
@@ -2047,13 +2040,13 @@ return (
 
         {/* Documents button */}
         <button
-          className="p-2 sm:p-3 text-slate-400 hover:text-white hover:bg-slate-700 rounded-full transition-all duration-200 hover:scale-105 disabled:opacity-50 touch-manipulation"
+          className="p-2 text-slate-400 hover:text-white hover:bg-slate-700/60 rounded-lg transition-colors duration-200 disabled:opacity-50"
           onClick={() => handleFileButtonClick('document')}
           disabled={uploadingFile || isRecording}
           type="button"
           title="Documentos"
         >
-          <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
+          <FileText className="w-4 h-4" />
           <input
             type="file"
             ref={fileInputDocRef}
@@ -2066,17 +2059,17 @@ return (
 
         {/* Contact button */}
         <button
-          className="hidden sm:block p-2 sm:p-3 text-slate-400 hover:text-white hover:bg-slate-700 rounded-full transition-all duration-200 hover:scale-105 disabled:opacity-50 touch-manipulation"
+          className="hidden sm:block p-2 text-slate-400 hover:text-white hover:bg-slate-700/60 rounded-lg transition-colors duration-200 disabled:opacity-50"
           onClick={handleSendContact}
           disabled={uploadingFile || isRecording}
           type="button"
           title="Enviar contato"
         >
-          <UserPlusIcon className="w-4 h-4 sm:w-5 sm:h-5" />
+          <UserPlusIcon className="w-4 h-4" />
         </button>
                 
                 {/* Área de input principal */}
-                <div className={`flex-1 bg-gradient-to-r from-slate-700 to-slate-600 rounded-full px-3 sm:px-4 py-2 sm:py-3 flex items-center border border-slate-600/50 shadow-lg backdrop-blur-sm min-h-[44px] ${
+                <div className={`flex-1 bg-slate-700 rounded-xl px-3 py-2 flex items-center border border-slate-600/40 min-h-[36px] focus-within:border-yellow-500/60 ${
                     isRecording ? 'opacity-50' : ''
                 }`}>
                     {isRecording ? (
@@ -2092,24 +2085,17 @@ return (
                         /* Input de texto normal */
                         <textarea
                             rows="1"
-                            className="flex-1 bg-transparent text-white placeholder-slate-400 focus:outline-none text-sm sm:text-base auto-resize-textarea touch-target no-highlight transition-all duration-200 ease-in-out"
-                            placeholder="Digite sua mensagem... (Shift+Enter para nova linha)"
+                            className="flex-1 bg-transparent text-white placeholder-slate-400 focus:outline-none text-sm resize-none"
+                            placeholder="Digite sua mensagem..."
                             value={newMessage}
                             onChange={(e) => {
                               const val = e.target.value;
                               onNewMessageChange(val);
                               
-                              // Auto-resize textarea com transição suave
+                              // Auto-resize textarea
                               e.target.style.height = 'auto';
-                              const newHeight = Math.min(e.target.scrollHeight, 120);
+                              const newHeight = Math.min(e.target.scrollHeight, 80);
                               e.target.style.height = newHeight + 'px';
-                              
-                              // Haptic feedback para mudanças significativas
-                              if (val.length > 0 && val.length % 50 === 0) {
-                                if (navigator.vibrate) {
-                                  navigator.vibrate(5);
-                                }
-                              }
                               
                               if (val.endsWith('/') && !isRecording) {
                                 if (!qrOpen) openQuickReplies();
@@ -2132,36 +2118,34 @@ return (
                                 ) {
                                     e.preventDefault();
                                     onSendMessage();
-                                } else if (e.key === 'Enter' && e.shiftKey) {
-                                    // Allow line break with Shift+Enter
                                 }
                             }}
                             disabled={isSendingMessage}
                             style={{ 
                               minHeight: '20px',
-                              maxHeight: '120px'
+                              maxHeight: '80px'
                             }}
                         />
                     )}
                     
                     {/* Botões do lado direito */}
-                    <div className="flex items-center space-x-1 sm:space-x-2 ml-2 sm:ml-3">
+                    <div className="flex items-center space-x-1 ml-2">
                         {isRecording ? (
                             /* Botões durante gravação */
                             <>
                                 <button
                                     onClick={cancelRecording}
-                                    className="p-2 sm:p-3 text-slate-300 hover:text-red-400 hover:bg-red-600/20 rounded-full transition-all duration-200 hover:scale-105 touch-manipulation"
+                                    className="p-2 text-slate-300 hover:text-red-400 hover:bg-red-600/20 rounded-lg transition-colors duration-200"
                                     title="Cancelar gravação"
                                 >
-                                    <XMarkIcon className="w-4 h-4 sm:w-5 sm:h-5" />
+                                    <XMarkIcon className="w-4 h-4" />
                                 </button>
                                 <button
                                     onClick={stopRecording}
-                                    className="p-2 sm:p-3 bg-green-600 hover:bg-green-500 text-white rounded-full transition-all duration-200 hover:scale-105 shadow-lg shadow-green-500/25 touch-manipulation"
+                                    className="p-2 bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors duration-200"
                                     title="Enviar áudio"
                                 >
-                                    <CheckIcon className="w-4 h-4 sm:w-5 sm:h-5" />
+                                    <CheckIcon className="w-4 h-4" />
                                 </button>
                             </>
                         ) : (
@@ -2170,57 +2154,38 @@ return (
                                 {/* Botão de microfone - só aparece quando não tem texto */}
                                 {!newMessage.trim() && (
                                     <button
-                                        className="p-2 sm:p-3 text-slate-400 hover:text-green-400 hover:bg-green-600/20 rounded-full transition-all duration-300 hover:scale-105 disabled:opacity-50 transform animate-slideIn touch-manipulation"
+                                        className="p-2 text-slate-400 hover:text-green-400 hover:bg-green-600/20 rounded-lg transition-colors duration-200 disabled:opacity-50"
                                         onClick={startRecording}
                                         disabled={uploadingFile || isSendingMessage}
                                         type="button"
                                         title="Gravar áudio"
                                     >
-                                        <MicrophoneIcon className="w-4 h-4 sm:w-5 sm:h-5" />
+                                        <MicrophoneIcon className="w-4 h-4" />
                                     </button>
                                 )}
                                 
                                 {/* Botão de enviar - só aparece quando tem texto */}
                                 {newMessage.trim() && (
                                     <button
-                                        className={`p-2 sm:p-3 rounded-full transition-all duration-300 shadow-lg transform touch-target no-highlight relative overflow-hidden ripple-effect ${
+                                        className={`p-2 rounded-lg transition-colors duration-200 ${
                                             isSendingMessage
-                                                ? 'bg-gray-600 cursor-not-allowed text-gray-400 scale-95 opacity-70'
-                                                : 'bg-gradient-to-r from-green-500 to-green-400 text-white hover:from-green-400 hover:to-green-300 hover:scale-110 active:scale-95 shadow-green-500/25 hover:shadow-green-400/40 hover:shadow-lg'
+                                                ? 'bg-gray-600 cursor-not-allowed text-gray-400 opacity-70'
+                                                : 'bg-green-600 text-white hover:bg-green-500'
                                         }`}
-                                        onClick={(e) => {
-                                          // Enhanced haptic feedback
-                                          if (navigator.vibrate && !isSendingMessage) {
-                                            navigator.vibrate([30, 10, 30]);
-                                          }
-                                          
-                                          // Visual feedback
-                                          e.currentTarget.style.transform = 'scale(0.95)';
-                                          setTimeout(() => {
-                                            e.currentTarget.style.transform = '';
-                                          }, 150);
-                                          
-                                          onSendMessage(e);
-                                        }}
+                                        onClick={onSendMessage}
                                         disabled={isSendingMessage}
                                         type="button"
-                                        title={isSendingMessage ? "Enviando..." : "Enviar mensagem (Enter)"}
-                                        onTouchStart={() => {
-                                          // Light haptic feedback on touch
-                                          if (navigator.vibrate && !isSendingMessage) {
-                                            navigator.vibrate(5);
-                                          }
-                                        }}
+                                        title={isSendingMessage ? "Enviando..." : "Enviar mensagem"}
                                     >
                                         {isSendingMessage ? (
                                           <div className="animate-spin">
-                                            <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24">
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24">
                                               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                             </svg>
                                           </div>
                                         ) : (
-                                          <PaperAirplaneIcon className="w-4 h-4 sm:w-5 sm:h-5 transform transition-transform duration-200 group-hover:translate-x-1" />
+                                          <PaperAirplaneIcon className="w-4 h-4" />
                                         )}
                                     </button>
                                 )}
@@ -2228,24 +2193,24 @@ return (
                                 {!isRecording && (
                                   <div className="relative quick-replies-popover">
                                     <button
-                                      className={`p-2 sm:p-3 rounded-full transition-all duration-200 hover:scale-105 touch-manipulation ${qrOpen ? 'bg-yellow-500 text-slate-900' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}
+                                      className={`p-2 rounded-lg transition-colors duration-200 ${qrOpen ? 'bg-yellow-500 text-slate-900' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}
                                       onClick={() => (qrOpen ? setQrOpen(false) : openQuickReplies())}
                                       type="button"
-                                      title="Respostas rápidas (/ atalho)"
+                                      title="Respostas rápidas"
                                     >
-                                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 sm:w-5 sm:h-5">
+                                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
                                         <path d="M7.266 3.04a.75.75 0 01.694.805l-.234 3.273h3.809l.234-3.273a.75.75 0 011.499.107l-.234 3.166H16a.75.75 0 010 1.5h-3.092l-.24 3.35H15a.75.75 0 010 1.5h-2.482l-.234 3.166a.75.75 0 01-1.499-.107l.234-3.059H7.21l-.234 3.166a.75.75 0 01-1.499-.107l.234-3.059H4a.75.75 0 010-1.5h1.571l.24-3.35H4a.75.75 0 010-1.5h1.928l.234-3.273a.75.75 0 01.805-.694zM8.48 8.118l-.24 3.35h3.808l.24-3.35H8.48z" />
                                       </svg>
                                     </button>
 
                                 {/* Interactive Buttons Button */}
                                 <button
-                                  className="hidden sm:block p-2 sm:p-3 rounded-full text-slate-400 hover:text-white hover:bg-slate-700/50 transition-all duration-200 hover:scale-105 touch-manipulation"
+                                  className="hidden sm:block p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700/50 transition-colors duration-200"
                                   onClick={() => setButtonModalOpen(true)}
                                   type="button"
-                                  title="Enviar botões interativos"
+                                  title="Botões interativos"
                                 >
-                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 sm:w-5 sm:h-5">
+                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
                                     <path fillRule="evenodd" d="M4 3a1 1 0 000 2h12a1 1 0 100-2H4zm0 4a1 1 0 000 2h12a1 1 0 100-2H4zm0 4a1 1 0 000 2h8a1 1 0 100-2H4z" clipRule="evenodd" />
                                   </svg>
                                 </button>

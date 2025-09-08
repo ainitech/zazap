@@ -72,6 +72,12 @@ const TicketMessage = sequelize.define('TicketMessage', {
     defaultValue: 'text',
     comment: 'Tipo da mensagem: text, poll, poll_response, etc',
   },
+  channel: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: 'whatsapp',
+    comment: 'Canal da mensagem (whatsapp, instagram, facebook)'
+  },
   pollData: {
     type: DataTypes.TEXT,
     allowNull: true,

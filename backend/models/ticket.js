@@ -66,6 +66,12 @@ const Ticket = sequelize.define('Ticket', {
     allowNull: false,
     defaultValue: 'open',
   },
+  channel: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: 'whatsapp',
+    comment: 'Canal de origem da conversa (whatsapp, instagram, facebook)'
+  },
   chatStatus: {
     type: DataTypes.ENUM('waiting', 'accepted', 'resolved', 'closed'),
     defaultValue: 'waiting',

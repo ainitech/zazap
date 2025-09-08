@@ -1,6 +1,8 @@
 import { TicketMessage, Ticket, Session, Contact, MessageReaction, User, Queue } from '../models/index.js';
 import { Op } from 'sequelize';
 import { sendText as sendTextBaileys, getBaileysSession, sendMedia as sendMediaBaileys } from '../services/baileysService.js';
+import { sendInstagramText, sendInstagramMedia } from '../services/instagramService.js';
+import { sendFacebookText, sendFacebookMedia } from '../services/facebookService.js';
 import { emitToTicket, emitToAll } from '../services/socket.js';
 import path from 'path';
 import fs from 'fs';
@@ -158,17 +160,34 @@ export const sendMessage = async (req, res) => {
         timestamp: message.timestamp
       });
       
+      // Emitir tanto para a sala específica quanto globalmente
+      const ticketRoomName = `ticket-${ticketId}`;
+      const { getConnectedClients, getRoomInfo } = await import('../services/socket.js');
+      const clientsInRoom = getConnectedClients(ticketRoomName);
+      const roomInfo = getRoomInfo(ticketRoomName);
+      
+      console.log(`📊 Emitindo 'new-message' para sala ${ticketRoomName} (${clientsInRoom} clientes conectados)`);
+      if (roomInfo) {
+        console.log(`👥 Clientes na sala do ticket:`, roomInfo.clients);
+      } else {
+        console.log(`⚠️ Nenhum cliente conectado na sala ${ticketRoomName}`);
+      }
+      
       emitToTicket(ticketId, 'new-message', message);
+      console.log(`✅ Evento 'new-message' emitido para sala ${ticketRoomName}`);
+      
+      const totalClients = getConnectedClients();
       emitToAll('message-update', { ticketId, message });
+      console.log(`✅ Evento 'message-update' emitido para todos os clientes (${totalClients} conectados)`);
       
       console.log(`✅ Eventos WebSocket emitidos com sucesso para ${ticketId}`);
     } catch (socketError) {
       console.error(`❌ Erro ao emitir evento WebSocket:`, socketError);
     }
     
-    // Enviar mensagem via WhatsApp se sender for 'user'
+    // Enviar mensagem via canal correspondente se sender for 'user'
     if (sender === 'user') {
-      console.log(`📱 Enviando mensagem via WhatsApp para ${ticket.contact}`);
+      console.log(`📱 Enviando mensagem via ${ticket.channel || 'whatsapp'} para ${ticket.contact}`);
       
       // Atualizar informações do contato ao enviar mensagem
       await updateContactOnSend(ticket, ticket.sessionId);
@@ -178,12 +197,56 @@ export const sendMessage = async (req, res) => {
       if (!session) {
         console.error(`❌ Sessão ${ticket.sessionId} não encontrada no banco de dados`);
       } else {
-        console.log(`🔍 Tentando enviar mensagem para ${ticket.contact} - Sessão: ${session.whatsappId}`);
+        console.log(`🔍 Tentando enviar mensagem para ${ticket.contact} - Sessão: ${session.whatsappId} - Canal: ${ticket.channel || 'whatsapp'}`);
         
         let messageSent = false;
+        // Inferir canal se não estiver definido (backfill para tickets antigos)
+        let channel = ticket.channel;
+        if (!channel) {
+          if (ticket.contact?.startsWith('ig:')) channel = 'instagram';
+          else if (ticket.contact?.startsWith('fb:')) channel = 'facebook';
+          else channel = 'whatsapp';
+          try {
+            await ticket.update({ channel });
+            console.log(`🛠️ Canal do ticket ${ticket.id} atualizado (backfill) para '${channel}'`);
+          } catch (e) {
+            console.log(`⚠️ Falha ao backfill canal do ticket ${ticket.id}:`, e.message);
+          }
+        }
         
-  // Enviar via Baileys
-        if (!messageSent) {
+        // Enviar conforme o canal
+        if (channel === 'instagram') {
+          console.log(`🔁 Fluxo Instagram -> sessionKey=${session.whatsappId} contato=${ticket.contact}`);
+          // Debug: listar sessões Instagram ativas
+          try {
+            const { listInstagramSessions } = await import('../services/instagramService.js');
+            listInstagramSessions();
+          } catch (e) {
+            console.log('Erro ao listar sessões Instagram:', e.message);
+          }
+          
+          try {
+            console.log(`📤 Tentando envio via Instagram para ${ticket.contact}`);
+            await sendInstagramText(session.whatsappId, ticket.contact, content, ticket.id);
+            console.log(`✅ Mensagem enviada com sucesso via Instagram`);
+            messageSent = true;
+          } catch (instagramError) {
+            console.error(`❌ Erro no Instagram:`, instagramError.message);
+            if (instagramError?.message?.includes('não encontrada em memória')) {
+              console.log('💡 Dica: Recrie a sessão Instagram via /api/mc/init ou faça novo login.');
+            }
+          }
+        } else if (channel === 'facebook') {
+          try {
+            console.log(`📤 Tentando envio via Facebook para ${ticket.contact}`);
+            await sendFacebookText(session.whatsappId, ticket.contact, content);
+            console.log(`✅ Mensagem enviada com sucesso via Facebook`);
+            messageSent = true;
+          } catch (facebookError) {
+            console.error(`❌ Erro no Facebook:`, facebookError.message);
+          }
+        } else {
+          // Canal WhatsApp (padrão)
           try {
             const activeSession = getBaileysSession(session.whatsappId);
             if (activeSession && activeSession.user) {
@@ -316,26 +379,56 @@ export const sendMediaMessage = async (req, res) => {
     
     console.log(`✅ Evento 'message-update' emitido para todos os clientes`);
 
-    // Enviar via WhatsApp (Baileys apenas) quando enviado pelo usuário ou resposta rápida
+    // Enviar via canal correspondente quando enviado pelo usuário ou resposta rápida
     if (sender === 'user' || sender === 'quick-reply') {
       try {
         const session = await Session.findByPk(ticket.sessionId);
         if (!session) {
           console.error(`❌ Sessão ${ticket.sessionId} não encontrada no banco de dados`);
         } else {
-          console.log(`🔍 Tentando enviar arquivo para ${ticket.contact} - Sessão: ${session.whatsappId}`);
-          const sock = getBaileysSession(session.whatsappId);
-          if (sock && sock.user) {
-            const filePath = path.isAbsolute(file.path) ? file.path : path.join(process.cwd(), file.path);
-            const fileBuffer = fs.readFileSync(filePath);
-            await sendMediaBaileys(session.whatsappId, ticket.contact, fileBuffer, file.mimetype);
-            console.log(`✅ Arquivo enviado com sucesso via Baileys`);
+          const channel = ticket.channel || 'whatsapp';
+          console.log(`🔍 Tentando enviar arquivo para ${ticket.contact} - Sessão: ${session.whatsappId} - Canal: ${channel}`);
+          
+          let fileSent = false;
+          
+          if (channel === 'instagram') {
+            try {
+              console.log(`📤 Tentando envio de mídia via Instagram`);
+              await sendInstagramMedia(session.whatsappId, ticket.contact, fileBuffer, file.mimetype, ticket.id);
+              console.log(`✅ Mídia enviada com sucesso via Instagram`);
+              fileSent = true;
+            } catch (instagramError) {
+              console.error(`❌ Erro no envio Instagram:`, instagramError.message);
+            }
+          } else if (channel === 'facebook') {
+            try {
+              console.log(`📤 Tentando envio de mídia via Facebook`);
+              await sendFacebookMedia(session.whatsappId, ticket.contact, fileBuffer, file.mimetype);
+              console.log(`✅ Mídia enviada com sucesso via Facebook`);
+              fileSent = true;
+            } catch (facebookError) {
+              console.error(`❌ Erro no envio Facebook:`, facebookError.message);
+            }
           } else {
-            console.log(`⚠️ Baileys não disponível ou não conectado para sessão ${session.whatsappId}`);
+            // Canal WhatsApp (padrão)
+            const sock = getBaileysSession(session.whatsappId);
+            if (sock && sock.user) {
+              const filePath = path.isAbsolute(file.path) ? file.path : path.join(process.cwd(), file.path);
+              const fileBuffer = fs.readFileSync(filePath);
+              await sendMediaBaileys(session.whatsappId, ticket.contact, fileBuffer, file.mimetype);
+              console.log(`✅ Arquivo enviado com sucesso via Baileys`);
+              fileSent = true;
+            } else {
+              console.log(`⚠️ Baileys não disponível ou não conectado para sessão ${session.whatsappId}`);
+            }
+          }
+          
+          if (!fileSent) {
+            console.log(`⚠️ Arquivo não foi enviado via nenhum canal para sessão ${session.whatsappId}`);
           }
         }
       } catch (sendErr) {
-        console.error(`❌ Erro ao enviar mídia via Baileys:`, sendErr);
+        console.error(`❌ Erro ao enviar mídia:`, sendErr);
       }
     }
 

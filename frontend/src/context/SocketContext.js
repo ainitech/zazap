@@ -230,12 +230,48 @@ export const SocketProvider = ({ children }) => {
       // Listeners específicos para mensagens (garantir que chegam ao ChatComponent)
       newSocket.on('new-message', (message) => {
         console.log('🔔 SocketContext: new-message recebido', message);
+        
+        // Validar se a mensagem tem propriedades essenciais
+        if (!message || !message.id || typeof message.sender !== 'string') {
+          console.warn('⚠️ SocketContext: Mensagem inválida recebida:', message);
+          return;
+        }
+        
+        console.log('📍 SocketContext: Dados da mensagem:', {
+          id: message.id,
+          ticketId: message.ticketId,
+          content: message.content,
+          sender: message.sender,
+          channel: message.channel
+        });
+        
+        // Verificar se o frontend está conectado à sala do ticket
+        if (message.ticketId && window.testJoinTicket) {
+          console.log(`🧪 SocketContext: Verificando conexão à sala do ticket ${message.ticketId}`);
+        }
+        
         // Este evento será capturado pelo ChatComponent também
       });
 
       newSocket.on('message-update', (data) => {
         console.log('🔄 SocketContext: message-update recebido', data);
         // Este evento será capturado pelo ChatComponent também
+      });
+
+      newSocket.on('message-sent', (data) => {
+        console.log('✅ SocketContext: message-sent recebido', data);
+        // Mensagem enviada via Instagram/Facebook - atualizar UI instantaneamente
+      });
+
+      newSocket.on('message-error', (data) => {
+        console.log('❌ SocketContext: message-error recebido', data);
+        // Erro no envio via Instagram/Facebook - mostrar feedback
+        if (toast && toast.addToast) {
+          toast.addToast(`Erro ao enviar mensagem via ${data.channel}: ${data.error}`, { 
+            type: 'error', 
+            duration: 5000 
+          });
+        }
       });
 
       // Global listener for session status updates to show toast even when sessions page isn't mounted

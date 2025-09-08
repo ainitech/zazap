@@ -4,7 +4,7 @@
     "password": "99480231a",
     "database": "zazap2",
     "host": "127.0.0.1",
-    "port": 5433,
+    "port": 5432,
     "dialect": "postgres",
     "dialectOptions": {
       "ssl": false

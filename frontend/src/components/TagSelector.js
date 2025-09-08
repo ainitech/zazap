@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   TagIcon,
   XMarkIcon,
@@ -161,8 +162,137 @@ export default function TagSelector({
   };
 
   if (compact) {
+    const modal = isOpen ? createPortal(
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        {/* Backdrop */}
+        <div
+          className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+          onClick={() => setIsOpen(false)}
+        />
+        {/* Modal */}
+        <div
+          ref={dropdownRef}
+          className="relative bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-4 sm:p-5 max-w-md w-full max-h-[80vh] overflow-y-auto animate-fade-in"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-white">Adicionar Tags</h3>
+            <button
+              onClick={() => setIsOpen(false)}
+              className="p-1 hover:bg-slate-800 rounded transition-colors"
+            >
+              <XMarkIcon className="w-5 h-5 text-slate-400" />
+            </button>
+          </div>
+          <div className="space-y-3">
+            {/* Search */}
+            <div className="relative">
+              <MagnifyingGlassIcon className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                className="w-full pl-9 pr-3 py-2 bg-slate-800 border border-slate-600 text-white placeholder-slate-500 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+                placeholder="Buscar tags..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            {showCreateForm ? (
+              <div className="bg-slate-800 border border-slate-700 rounded-lg p-4 space-y-4 animate-fade-in">
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    placeholder="Nome da tag"
+                    value={newTagForm.name}
+                    onChange={(e) => setNewTagForm({ ...newTagForm, name: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-600 text-white placeholder-slate-500 rounded focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Categoria (opcional)"
+                    value={newTagForm.category}
+                    onChange={(e) => setNewTagForm({ ...newTagForm, category: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-600 text-white placeholder-slate-500 rounded focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    {predefinedColors.map((color, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setNewTagForm({ ...newTagForm, color: color.value })}
+                        className={`w-7 h-7 rounded-full ring-2 transition ${
+                          newTagForm.color === color.value
+                            ? 'ring-yellow-400 scale-105'
+                            : 'ring-transparent hover:ring-slate-600'
+                        } ${color.value}`}
+                        title={color.name}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex gap-3 pt-1">
+                    <button
+                      type="button"
+                      onClick={createNewTag}
+                      className="flex-1 px-3 py-2 bg-yellow-500 text-slate-900 font-medium rounded hover:bg-yellow-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={!newTagForm.name.trim()}
+                    >
+                      Salvar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setShowCreateForm(false); setNewTagForm({ name: '', color: 'bg-blue-500', category: '' }); }}
+                      className="flex-1 px-3 py-2 border border-slate-600 text-slate-300 rounded hover:bg-slate-700"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Available tags */}
+                <div className="max-h-48 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+                  {filteredTags.map(tag => {
+                    const colorClasses = getColorClasses(tag.color);
+                    return (
+                      <button
+                        key={tag.id}
+                        onClick={() => addTagToTicket(tag)}
+                        className="w-full flex items-center gap-2 p-2 hover:bg-slate-800 rounded-lg transition-colors text-left"
+                      >
+                        <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs ${colorClasses.bg} ${colorClasses.text}`}>
+                          <TagIcon className="w-3 h-3" />
+                          {tag.name}
+                        </div>
+                        {tag.category && (
+                          <span className="text-xs text-slate-400">({tag.category})</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                  {filteredTags.length === 0 && (
+                    <div className="text-center py-6 text-slate-500 text-sm">
+                      {searchQuery ? 'Nenhuma tag encontrada' : 'Digite para buscar ou criar nova tag'}
+                    </div>
+                  )}
+                </div>
+                {/* Create new tag */}
+                <button
+                  onClick={() => setShowCreateForm(true)}
+                  className="w-full flex items-center gap-2 p-2 text-yellow-400 hover:bg-slate-800 rounded-lg transition-colors"
+                >
+                  <PlusIcon className="w-4 h-4" />
+                  Criar nova tag
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>,
+      document.body
+    ) : null;
+
     return (
-      <div className={`flex flex-wrap gap-1 ${className}`}>
+      <div className={`flex flex-wrap gap-1 justify-center ${className}`}>
         {selectedTags.map(tag => {
           const colorClasses = getColorClasses(tag.color);
           return (
@@ -183,91 +313,25 @@ export default function TagSelector({
             </div>
           );
         })}
-        
         {!readOnly && (
           <button
             onClick={() => setIsOpen(true)}
-            className="inline-flex items-center gap-1 px-2 py-1 bg-slate-200 text-slate-600 rounded-full text-xs hover:bg-slate-300 transition-colors"
+            className="inline-flex items-center gap-1 px-2 py-1 bg-slate-700 border border-slate-600 text-slate-300 rounded-full text-xs hover:bg-slate-600 transition-colors"
           >
             <PlusIcon className="w-3 h-3" />
             Tag
           </button>
         )}
-
-        {/* Dropdown for compact mode */}
-        {isOpen && (
-          <div
-            ref={dropdownRef}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
-          >
-            <div className="bg-white rounded-lg shadow-xl p-4 max-w-md w-full mx-4 max-h-96 overflow-y-auto">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold">Adicionar Tags</h3>
-                <button
-                  onClick={() => setIsOpen(false)}
-                  className="p-1 hover:bg-gray-100 rounded"
-                >
-                  <XMarkIcon className="w-5 h-5" />
-                </button>
-              </div>
-              
-              <div className="space-y-3">
-                {/* Search */}
-                <div className="relative">
-                  <MagnifyingGlassIcon className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    ref={searchInputRef}
-                    type="text"
-                    className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Buscar tags..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
-                </div>
-
-                {/* Available tags */}
-                <div className="max-h-40 overflow-y-auto space-y-1">
-                  {filteredTags.map(tag => {
-                    const colorClasses = getColorClasses(tag.color);
-                    return (
-                      <button
-                        key={tag.id}
-                        onClick={() => addTagToTicket(tag)}
-                        className="w-full flex items-center gap-2 p-2 hover:bg-gray-50 rounded-lg transition-colors"
-                      >
-                        <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs ${colorClasses.bg} ${colorClasses.text}`}>
-                          <TagIcon className="w-3 h-3" />
-                          {tag.name}
-                        </div>
-                        {tag.category && (
-                          <span className="text-xs text-gray-500">({tag.category})</span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Create new tag */}
-                <button
-                  onClick={() => setShowCreateForm(true)}
-                  className="w-full flex items-center gap-2 p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                >
-                  <PlusIcon className="w-4 h-4" />
-                  Criar nova tag
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        {modal}
       </div>
     );
   }
 
   return (
-    <div className={`relative ${className}`} ref={dropdownRef}>
+    <div className={`relative flex flex-col items-center ${className}`} ref={dropdownRef}>
       {/* Selected Tags */}
       {selectedTags.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-3">
+        <div className="flex flex-wrap gap-2 mb-3 justify-center">
           {selectedTags.map(tag => {
             const colorClasses = getColorClasses(tag.color);
             return (

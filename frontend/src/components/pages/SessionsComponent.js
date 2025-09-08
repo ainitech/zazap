@@ -42,7 +42,12 @@ export default function SessionsComponent() {
   const [newSession, setNewSession] = useState({ 
     whatsappId: '', 
     library: 'baileys',
-    name: ''
+    name: '',
+    channel: 'whatsapp',
+    igUser: '',
+    igPass: '',
+    fbEmail: '',
+    fbPass: ''
   });
   const [qrCode, setQrCode] = useState('');
   const [qrStatus, setQrStatus] = useState('');
@@ -344,21 +349,44 @@ export default function SessionsComponent() {
       setError('ID da sessão é obrigatório');
       return;
     }
-
+    // Valida credenciais conforme canal
+    if (newSession.channel === 'instagram' && (!newSession.igUser || !newSession.igPass)) {
+      setError('Credenciais Instagram necessárias');
+      return;
+    }
+    if (newSession.channel === 'facebook' && (!newSession.fbEmail || !newSession.fbPass)) {
+      setError('Credenciais Facebook necessárias');
+      return;
+    }
     try {
       setActionLoading(prev => ({ ...prev, create: true }));
-      
-  const response = await apiFetch('/api/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ whatsappId: newSession.whatsappId.trim(), library: 'baileys', name: newSession.name?.trim() || undefined })
-      });
+      let response;
+      if (newSession.channel === 'whatsapp') {
+        response = await apiFetch('/api/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ whatsappId: newSession.whatsappId.trim(), library: 'baileys', name: newSession.name?.trim() || undefined })
+        });
+      } else {
+        // Multi canal init direto
+        const payload = { sessionId: newSession.whatsappId.trim(), channel: newSession.channel };
+        if (newSession.channel === 'instagram') {
+          payload.credentials = { username: newSession.igUser, password: newSession.igPass };
+        }
+        if (newSession.channel === 'facebook') {
+          payload.credentials = { email: newSession.fbEmail, password: newSession.fbPass };
+        }
+        response = await apiFetch('/api/mc/init', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      }
 
       if (response.ok) {
         setShowCreateModal(false);
-  setNewSession({ whatsappId: '', library: 'baileys', name: '' });
+        setNewSession({ whatsappId: '', library: 'baileys', name: '', channel: 'whatsapp', igUser: '', igPass: '', fbEmail: '', fbPass: '' });
         setError('');
-        // Não buscar sessões manualmente - WebSocket irá atualizar
       } else {
         const errorData = await response.json();
         setError(errorData.error || 'Erro ao criar sessão');
@@ -749,7 +777,7 @@ export default function SessionsComponent() {
             </div>
             <div>
               <h1 className="text-xl md:text-2xl font-bold bg-gradient-to-r from-yellow-400 to-orange-500 bg-clip-text text-transparent">
-                Sessões WhatsApp
+                Sessões
               </h1>
               <div className="flex items-center space-x-2 mt-1">
                 <div className={`w-2 h-2 rounded-full ${
@@ -761,9 +789,7 @@ export default function SessionsComponent() {
                   {isConnected ? 'Conectado' : 'Desconectado'}
                 </span>
                 <span className="text-xs text-gray-400">•</span>
-                <span className="text-xs text-gray-400">
-                  {sessions.length} sessão{sessions.length !== 1 ? 'ões' : ''}
-                </span>
+                <span className="text-xs text-gray-400">{sessions.length} sessão{sessions.length !== 1 ? 'ões' : ''}</span>
               </div>
             </div>
           </div>
@@ -871,7 +897,7 @@ export default function SessionsComponent() {
             {/* Library Badge */}
             <div className="mb-3">
               <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-blue-500/20 text-blue-400">
-                Baileys
+                {session.channel ? session.channel : 'whatsapp'}
               </span>
             </div>
 
@@ -955,17 +981,47 @@ export default function SessionsComponent() {
 
               <div>
                 <label className="block text-sm font-semibold text-gray-300 mb-2 sm:mb-3">
-                  Biblioteca WhatsApp
+                  Canal
                 </label>
-                <div className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-slate-700/50 border border-slate-600/50 text-white rounded-xl text-sm sm:text-base">
-                  Baileys (única suportada)
-                </div>
-                <div className="mt-3 p-3 bg-slate-700/30 rounded-lg border border-slate-600/30">
-                  <p className="text-xs text-gray-300">
-                    ✅ Baileys: Mais estável, melhor performance e suporte completo a recursos
-                  </p>
-                </div>
+                <select
+                  value={newSession.channel}
+                  onChange={(e) => setNewSession({ ...newSession, channel: e.target.value })}
+                  className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-slate-700/50 border border-slate-600/50 text-white rounded-xl focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500/50 text-sm sm:text-base"
+                >
+                  <option value="whatsapp">WhatsApp (Baileys)</option>
+                  <option value="instagram">Instagram</option>
+                  <option value="facebook">Facebook</option>
+                </select>
               </div>
+
+              {newSession.channel === 'instagram' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-300 mb-2">IG Username *</label>
+                    <input value={newSession.igUser} onChange={e=>setNewSession({...newSession, igUser:e.target.value})} className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600/50 text-white rounded-xl focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500/50 text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-300 mb-2">IG Password *</label>
+                    <input type="password" value={newSession.igPass} onChange={e=>setNewSession({...newSession, igPass:e.target.value})} className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600/50 text-white rounded-xl focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500/50 text-sm" />
+                  </div>
+                  <p className="text-xs text-amber-400 sm:col-span-2">Credenciais armazenadas somente na sessão do servidor (não persistimos em claro no frontend).</p>
+                </div>
+              )}
+
+              {newSession.channel === 'facebook' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-300 mb-2">FB Email *</label>
+                    <input value={newSession.fbEmail} onChange={e=>setNewSession({...newSession, fbEmail:e.target.value})} className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600/50 text-white rounded-xl focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500/50 text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-300 mb-2">FB Password *</label>
+                    <input type="password" value={newSession.fbPass} onChange={e=>setNewSession({...newSession, fbPass:e.target.value})} className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600/50 text-white rounded-xl focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500/50 text-sm" />
+                  </div>
+                  <p className="text-xs text-amber-400 sm:col-span-2">Use conta secundária. API não oficial pode gerar bloqueios.</p>
+                </div>
+              )}
+
 
               <div>
                 <label className="block text-sm font-semibold text-gray-300 mb-2 sm:mb-3">
