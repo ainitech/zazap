@@ -240,42 +240,113 @@ export const startSessionHealthCheck = () => {
 export const autoReconnectSessions = async () => {
   try {
     console.log('🚀 Iniciando reconexão automática de sessões...');
+    // Buscar todas as sessões
+    const all = await Session.findAll();
+    // Incluir conectadas ou que tenham importAllChats (porque o usuário espera fluxo de import)
+    const target = all.filter(s => {
+      const st = String(s.status || '').toLowerCase();
+      return st === 'connected' || st === 'connecting' || (s.importAllChats && (st === 'disconnected' || !st));
+    });
 
-  // Buscar todas as sessões e filtrar em memória (case-insensitive)
-  const all = await Session.findAll();
-  const sessions = all.filter(s => String(s.status || '').toLowerCase() === 'connected');
-
-  if (sessions.length === 0) {
-      console.log('📱 Nenhuma sessão para reconectar');
+    if (!target.length) {
+      console.log('📱 Nenhuma sessão elegível para reconectar');
       return;
     }
 
-    console.log(`📱 Encontradas ${sessions.length} sessões marcadas como conectadas`);
+    console.log(`📱 Sessões alvo para reconexão inicial: ${target.length}`);
 
-    for (const session of sessions) {
-      // Sempre normalizar o ID para evitar problemas com device IDs
+    // Primeira passada
+    for (const session of target) {
       const baseNumber = normalizeSessionId(session.whatsappId);
-      console.log(`🔍 Verificando se sessão ${baseNumber} realmente precisa de reconexão...`);
-
-      // Verificar se a sessão já está ativa antes de tentar reconectar
-      const isAlreadyActive = await isSessionActuallyActive(session.whatsappId, session.library);
-
-      if (isAlreadyActive) {
-        console.log(`✅ Sessão ${baseNumber} já está ativa, pulando reconexão`);
+      console.log(`🔍 (Passo 1) Checando sessão ${baseNumber}`);
+      const active = await isSessionActuallyActive(session.whatsappId, session.library);
+      if (active) {
+        console.log(`✅ (Passo 1) Sessão ${baseNumber} já ativa`);
         continue;
       }
-
-      console.log(`🔄 Sessão ${baseNumber} não está ativa, tentando reconectar...`);
-
-      // Aguardar um pouco entre tentativas para não sobrecarregar
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
+      console.log(`🔄 (Passo 1) Reativando sessão ${baseNumber}`);
       await reactivateSession(session);
+      await new Promise(r => setTimeout(r, 1200));
     }
 
-    console.log('✅ Reconexão automática concluída');
+    console.log('⏳ Aguardando 5s para segunda verificação de sessões que ainda não responderam...');
+    await new Promise(r => setTimeout(r, 5000));
+
+    // Segunda tentativa para qualquer sessão marcada como connected/importAllChats ainda não ativa
+    for (const session of target) {
+      const baseNumber = normalizeSessionId(session.whatsappId);
+      const active = await isSessionActuallyActive(session.whatsappId, session.library);
+      if (active) continue;
+      console.log(`♻️ (Passo 2) Segunda tentativa de reativação para sessão ${baseNumber}`);
+      await reactivateSession(session);
+      await new Promise(r => setTimeout(r, 1500));
+    }
+
+    // Loop adicional (até 5 ciclos) a cada 5 segundos para sessões que ainda não ativaram
+    const MAX_EXTRA_CYCLES = 5; // total ~25s adicionais
+    for (let cycle = 1; cycle <= MAX_EXTRA_CYCLES; cycle++) {
+      // Verificar se ainda restam sessões inativas
+      const remaining = [];
+      for (const session of target) {
+        const active = await isSessionActuallyActive(session.whatsappId, session.library);
+        if (!active) remaining.push(session);
+      }
+      if (!remaining.length) {
+        console.log('✅ Todas as sessões alvo já estão ativas antes de esgotar ciclos extras');
+        break;
+      }
+      console.log(`⏱️ Ciclo extra ${cycle}/${MAX_EXTRA_CYCLES} (5s) — ${remaining.length} sessão(ões) ainda inativa(s)`);
+      await new Promise(r => setTimeout(r, 5000));
+      for (const session of remaining) {
+        const baseNumber = normalizeSessionId(session.whatsappId);
+        const activeNow = await isSessionActuallyActive(session.whatsappId, session.library);
+        if (activeNow) continue;
+        console.log(`🔁 (Extra ${cycle}) Tentando novamente sessão ${baseNumber}`);
+        try {
+          await reactivateSession(session);
+        } catch (e) {
+          console.warn(`⚠️ Falha tentativa extra (${cycle}) para ${baseNumber}:`, e.message);
+        }
+        await new Promise(r => setTimeout(r, 800));
+      }
+    }
+
+    console.log('✅ Reconexão automática concluída (2-pass)');
 
   } catch (error) {
     console.error('❌ Erro na reconexão automática:', error);
   }
+};
+
+// Warmup: reexecuta tentativas de ativação a cada 5s por ~60s após o boot
+export const startStartupWarmup = () => {
+  const WINDOW_MS = 60_000; // 1 minuto
+  const INTERVAL_MS = 5_000; // 5s
+  const startedAt = Date.now();
+  let running = false;
+  console.log('🔥 Iniciando warmup de sessões (5s interval por 60s)...');
+  const timer = setInterval(async () => {
+    if (running) return; // evitar sobreposição
+    if (Date.now() - startedAt > WINDOW_MS) {
+      clearInterval(timer);
+      console.log('✅ Warmup de sessões finalizado');
+      return;
+    }
+    running = true;
+    try {
+      const all = await Session.findAll();
+      const candidates = all.filter(s => s.library === 'baileys');
+      for (const s of candidates) {
+        const active = await isSessionActuallyActive(s.whatsappId, s.library);
+        if (active) continue;
+        console.log(`🛠️ [warmup] Sessão ${s.whatsappId} ainda inativa – reativando`);
+        try { await reactivateSession(s); } catch (e) { console.warn('[warmup] falha reativando', s.whatsappId, e.message); }
+        await new Promise(r => setTimeout(r, 400));
+      }
+    } catch (e) {
+      console.warn('⚠️ Erro no warmup de sessões:', e.message);
+    } finally {
+      running = false;
+    }
+  }, INTERVAL_MS);
 };

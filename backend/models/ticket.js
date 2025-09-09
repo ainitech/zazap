@@ -78,6 +78,23 @@ const Ticket = sequelize.define('Ticket', {
     allowNull: false,
     comment: 'Status do chat: aguardando, aceito, resolvido ou fechado'
   },
+  protocol: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    unique: true,
+    comment: 'Número de protocolo gerado ao fechar o ticket'
+  },
+  npsScore: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: 'Pontuação NPS fornecida pelo cliente (0-10)'
+  },
+  npsUserId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: { model: 'users', key: 'id' },
+    comment: 'Usuário responsável no momento da captura do NPS'
+  },
   priority: {
     type: DataTypes.ENUM('low', 'normal', 'high', 'urgent'),
     defaultValue: 'normal',

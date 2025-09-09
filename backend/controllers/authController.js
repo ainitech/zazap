@@ -3,6 +3,23 @@ import jwt from 'jsonwebtoken';
 import { User } from '../models/index.js';
 import { TokenService } from '../services/tokenService.js';
 
+// Util para determinar opções de cookie de refresh de forma flexível
+const buildRefreshCookieOptions = () => {
+  const forceInsecure = process.env.FORCE_INSECURE_COOKIES === 'true';
+  const secureEnv = process.env.COOKIE_SECURE === 'true' || (!forceInsecure && process.env.NODE_ENV === 'production');
+  // sameSite 'none' exige secure true; se não for possível, usar 'lax'
+  const sameSite = process.env.COOKIE_SAMESITE || (secureEnv ? 'none' : 'lax');
+  return {
+    httpOnly: true,
+    secure: secureEnv,
+    sameSite,
+    maxAge: (parseInt(process.env.REFRESH_COOKIE_DAYS || '7') * 24 * 60 * 60 * 1000),
+    path: '/',
+    // opcional: domain configurável
+    ...(process.env.COOKIE_DOMAIN ? { domain: process.env.COOKIE_DOMAIN } : {})
+  };
+};
+
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
   console.warn('[authController] WARNING: process.env.JWT_SECRET is not set. Tokens signed/verified may be inconsistent.');
@@ -39,23 +56,18 @@ export const login = async (req, res) => {
     );
 
     // Configurar cookie httpOnly para o refresh token
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production', // HTTPS em produção
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 dias
-      path: '/'
-    });
+  res.cookie('refreshToken', refreshToken, buildRefreshCookieOptions());
 
     res.json({ 
-      accessToken, 
-      user: { 
-        id: user.id, 
-        name: user.name, 
-        email: user.email, 
-        role: user.role 
-      } 
-    });
+        accessToken,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role
+        },
+        ...(process.env.EXPOSE_REFRESH_TOKEN === 'true' ? { refreshToken } : {})
+      });
   } catch (err) {
     console.error('Erro no login:', err);
     res.status(500).json({ error: err.message });
@@ -64,30 +76,34 @@ export const login = async (req, res) => {
 
 export const refresh = async (req, res) => {
   try {
-    const refreshToken = req.cookies.refreshToken;
-    
+    // Aceitar refresh token via cookie, header ou body para ambientes sem cookies seguros
+    const refreshToken = req.cookies.refreshToken || req.headers['x-refresh-token'] || req.body?.refreshToken;
+
     if (!refreshToken) {
       return res.status(401).json({ error: 'Refresh token não fornecido.' });
     }
 
     const tokens = await TokenService.refreshTokens(refreshToken);
 
-    // Configurar novo cookie httpOnly
-    res.cookie('refreshToken', tokens.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 dias
-      path: '/'
-    });
+    // Renovar cookie (se possível). Em ambiente sem HTTPS + production, avisar no log.
+    try {
+      const opts = buildRefreshCookieOptions();
+      if (opts.secure && req.protocol !== 'https' && !req.headers['x-forwarded-proto']) {
+        console.warn('[authController] Cookie seguro exigido mas conexão não é https visível. Considere FORCE_INSECURE_COOKIES=true temporariamente.');
+      }
+      res.cookie('refreshToken', tokens.refreshToken, opts);
+    } catch (cookieErr) {
+      console.warn('[authController] Falha ao definir cookie de refresh:', cookieErr.message);
+    }
 
     res.json({
       accessToken: tokens.accessToken,
-      user: tokens.user
+      user: tokens.user,
+      ...(process.env.EXPOSE_REFRESH_TOKEN === 'true' ? { refreshToken: tokens.refreshToken } : {})
     });
   } catch (err) {
     console.error('Erro no refresh:', err);
-    res.status(401).json({ error: err.message });
+    res.status(401).json({ error: err.message || 'Token inválido ou expirado' });
   }
 };
 
@@ -100,12 +116,7 @@ export const logout = async (req, res) => {
     }
 
     // Limpar cookie
-    res.clearCookie('refreshToken', {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      path: '/'
-    });
+  res.clearCookie('refreshToken', buildRefreshCookieOptions());
 
     res.json({ message: 'Logout realizado com sucesso.' });
   } catch (err) {
@@ -120,12 +131,7 @@ export const logoutAll = async (req, res) => {
     await TokenService.revokeAllUserTokens(userId);
 
     // Limpar cookie
-    res.clearCookie('refreshToken', {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      path: '/'
-    });
+  res.clearCookie('refreshToken', buildRefreshCookieOptions());
 
     res.json({ message: 'Logout de todos os dispositivos realizado com sucesso.' });
   } catch (err) {

@@ -66,10 +66,19 @@ export const autoReceiveTicketToQueue = async (ticket, sessionId) => {
     // Atribuir ticket à fila
     await ticket.update({
       queueId: queue.id,
-      status: 'pending'
+      status: 'pending',
+      chatStatus: 'accepted'  // Importante: quando auto-recebido, o chatStatus deve ser 'accepted'
     });
 
-  qlog(`Ticket #${ticket.id} associado à fila ${queue.name} status=pending`);
+  qlog(`Ticket #${ticket.id} associado à fila ${queue.name} status=pending chatStatus=accepted`);
+
+    // Emissão imediata para reduzir janela onde frontend não vê o ticket atualizado
+    try {
+      const { emitTicketsUpdate } = await import('./ticketBroadcast.js');
+      await emitTicketsUpdate();
+    } catch (err) {
+      console.warn('⚠️ Falha ao emitir tickets-update imediatamente após autoReceive:', err.message);
+    }
 
     // Emitir evento
     emitToAll('ticket-auto-received', {

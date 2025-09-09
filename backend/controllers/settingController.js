@@ -79,27 +79,41 @@ export const updateSetting = async (req, res) => {
     const { key } = req.params;
     const { value, description } = req.body;
 
-    const setting = await Setting.findOne({ where: { key } });
+    let setting = await Setting.findOne({ where: { key } });
 
+    // Se não existir, criar automaticamente (facilita adicionar novas keys sem nova seed)
     if (!setting) {
-      return res.status(404).json({ error: 'Configuração não encontrada' });
-    }
+      // Inferir tipo
+      let inferredType = 'string';
+      if (typeof value === 'number') inferredType = 'number';
+      else if (typeof value === 'boolean') inferredType = 'boolean';
+      else if (value && typeof value === 'object') inferredType = 'json';
 
-    // Se for do tipo file e estiver removendo, deletar o arquivo antigo
-    if (setting.type === 'file' && setting.value && !value) {
-      try {
-        const filePath = path.join(process.cwd(), 'uploads', setting.value);
-        await fs.unlink(filePath);
-      } catch (fileError) {
-        console.warn('Erro ao deletar arquivo antigo:', fileError);
+      setting = await Setting.create({
+        key,
+        value: inferredType === 'json' ? JSON.stringify(value) : String(value ?? ''),
+        type: inferredType,
+        description: description || null,
+        category: 'chat', // default para novas chaves dinâmicas relacionadas a esta feature
+        isPublic: false
+      });
+      console.log(`[settings] Criada nova configuração dinâmica: ${key}`);
+    } else {
+      // Se for do tipo file e estiver removendo, deletar o arquivo antigo
+      if (setting.type === 'file' && setting.value && !value) {
+        try {
+          const filePath = path.join(process.cwd(), 'uploads', setting.value);
+          await fs.unlink(filePath);
+        } catch (fileError) {
+          console.warn('Erro ao deletar arquivo antigo:', fileError);
+        }
       }
-    }
 
-    // Atualizar configuração
-    await setting.update({
-      value: setting.type === 'json' ? JSON.stringify(value) : value,
-      description: description || setting.description
-    });
+      await setting.update({
+        value: setting.type === 'json' ? JSON.stringify(value) : value,
+        description: description || setting.description
+      });
+    }
 
     res.json({
       value: setting.type === 'json' ? JSON.parse(setting.value || '{}') : setting.value,
@@ -121,21 +135,36 @@ export const updateSettings = async (req, res) => {
     const results = {};
 
     for (const [key, value] of Object.entries(settings)) {
-      const setting = await Setting.findOne({ where: { key } });
-      
-      if (setting) {
+      let setting = await Setting.findOne({ where: { key } });
+
+      if (!setting) {
+        let inferredType = 'string';
+        if (typeof value === 'number') inferredType = 'number';
+        else if (typeof value === 'boolean') inferredType = 'boolean';
+        else if (value && typeof value === 'object') inferredType = 'json';
+
+        setting = await Setting.create({
+          key,
+            value: inferredType === 'json' ? JSON.stringify(value) : String(value ?? ''),
+            type: inferredType,
+            description: null,
+            category: 'chat',
+            isPublic: false
+        });
+        console.log(`[settings] Criada nova configuração dinâmica (bulk): ${key}`);
+      } else {
         await setting.update({
           value: setting.type === 'json' ? JSON.stringify(value) : value
         });
-        
-        results[key] = {
-          value: setting.type === 'json' ? JSON.parse(setting.value || '{}') : setting.value,
-          type: setting.type,
-          description: setting.description,
-          category: setting.category,
-          isPublic: setting.isPublic
-        };
       }
+
+      results[key] = {
+        value: setting.type === 'json' ? JSON.parse(setting.value || '{}') : setting.value,
+        type: setting.type,
+        description: setting.description,
+        category: setting.category,
+        isPublic: setting.isPublic
+      };
     }
 
     res.json(results);

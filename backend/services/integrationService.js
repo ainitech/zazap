@@ -102,7 +102,7 @@ class IntegrationService {
     if (queueId) {
       const queueIntegrations = await IntegrationQueue.findAll({
         where: { queueId, active: true },
-        include: [{ model: Integration, where: { active: true } }]
+        include: [{ model: Integration, as: 'Integration', where: { active: true } }]
       });
 
       integrations.push(...queueIntegrations.map(link => link.Integration));
@@ -111,7 +111,7 @@ class IntegrationService {
     // Integrações diretas do ticket
     const ticketIntegrations = await IntegrationTicket.findAll({
       where: { ticketId, active: true },
-      include: [{ model: Integration, where: { active: true } }]
+      include: [{ model: Integration, as: 'Integration', where: { active: true } }]
     });
 
     integrations.push(...ticketIntegrations.map(link => link.Integration));

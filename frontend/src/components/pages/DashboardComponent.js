@@ -207,6 +207,121 @@ export default function DashboardComponent() {
         />
       </div>
 
+      {/* NPS Section */}
+      <div className="mb-8 grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-6 border border-slate-700">
+          <h3 className="text-xl font-bold text-white mb-4 flex items-center">
+            <SparklesIcon className="w-5 h-5 mr-2 text-yellow-400" />
+            Satisfação (NPS)
+          </h3>
+          {stats?.nps?.totalResponses > 0 ? (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2 flex items-center justify-between p-4 rounded-xl bg-slate-700/30 border border-slate-600/40">
+                <div>
+                  <div className="text-slate-400 text-xs font-medium uppercase tracking-wide">NPS</div>
+                  <div className="text-3xl font-extrabold text-white mt-1">{stats.nps.nps}</div>
+                  <div className="text-slate-500 text-xs mt-1">Net Promoter Score</div>
+                </div>
+                <div className="w-24 h-24 relative">
+                  <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="45" stroke="#334155" strokeWidth="8" fill="none" />
+                    <circle
+                      cx="50" cy="50" r="45" stroke="#FBBF24" strokeWidth="8" fill="none"
+                      strokeDasharray="283" strokeDashoffset={283 - (283 * ((stats.nps.nps + 100) / 200))}
+                      className="transition-all duration-700 ease-out"
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="text-sm text-slate-300 font-medium">{stats.nps.totalResponses} resp.</span>
+                  </div>
+                </div>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-700/20 border border-slate-600/30">
+                <div className="text-xs text-slate-400">Média</div>
+                <div className="text-xl font-bold text-white">{stats.nps.average}</div>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-700/20 border border-slate-600/30">
+                <div className="text-xs text-slate-400">Promotores</div>
+                <div className="text-lg font-semibold text-green-400">{stats.nps.promoters}</div>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-700/20 border border-slate-600/30">
+                <div className="text-xs text-slate-400">Neutros</div>
+                <div className="text-lg font-semibold text-blue-400">{stats.nps.passives}</div>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-700/20 border border-slate-600/30">
+                <div className="text-xs text-slate-400">Detratores</div>
+                <div className="text-lg font-semibold text-red-400">{stats.nps.detractors}</div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-slate-400 text-sm">Nenhuma resposta de NPS ainda.</div>
+          )}
+        </div>
+        <div className="xl:col-span-2 bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-6 border border-slate-700">
+          <h4 className="text-lg font-semibold text-white mb-4">Distribuição das Notas</h4>
+          {stats?.nps?.distribution?.length > 0 ? (
+            <div className="h-48">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={stats.nps.distribution}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
+                  <XAxis dataKey="score" stroke="#9CA3AF" fontSize={12} />
+                  <YAxis stroke="#9CA3AF" fontSize={12} allowDecimals={false} />
+                  <Tooltip contentStyle={{ backgroundColor: '#1E293B', border: '1px solid #475569', borderRadius: '8px', color: '#F1F5F9' }} />
+                  <Bar dataKey="count" radius={[4,4,0,0]}>
+                    {stats.nps.distribution.map((d,i)=>(
+                      <Cell key={i} fill={d.score >=9 ? '#10B981' : d.score >=6 ? '#3B82F6' : '#EF4444'} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="text-slate-400 text-sm">Sem dados suficientes para distribuição.</div>
+          )}
+          <div className="flex flex-wrap items-center gap-4 mt-4 text-xs text-slate-400">
+            <div className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-sm bg-red-500"></span> 0–5 Ruim</div>
+            <div className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-sm bg-blue-500"></span> 6–8 Neutro</div>
+            <div className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-sm bg-green-500"></span> 9–10 Ótimo</div>
+          </div>
+          {/* NPS por Usuário */}
+          <div className="mt-8">
+            <h4 className="text-lg font-semibold text-white mb-3">NPS por Agente</h4>
+            {stats?.npsByUser?.length ? (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm text-slate-300">
+                  <thead>
+                    <tr className="bg-slate-700/40 text-left">
+                      <th className="px-3 py-2 font-medium">Agente</th>
+                      <th className="px-3 py-2 font-medium">Resp.</th>
+                      <th className="px-3 py-2 font-medium">Média</th>
+                      <th className="px-3 py-2 font-medium">NPS</th>
+                      <th className="px-3 py-2 font-medium text-green-400">Prom.</th>
+                      <th className="px-3 py-2 font-medium text-blue-400">Neut.</th>
+                      <th className="px-3 py-2 font-medium text-red-400">Detr.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stats.npsByUser.map(u => (
+                      <tr key={u.userId || 'none'} className="border-b border-slate-700/40 last:border-none hover:bg-slate-700/20">
+                        <td className="px-3 py-2 whitespace-nowrap">{u.userName}</td>
+                        <td className="px-3 py-2">{u.totalResponses}</td>
+                        <td className="px-3 py-2">{u.average}</td>
+                        <td className={`px-3 py-2 font-semibold ${u.nps >= 0 ? 'text-green-400' : 'text-red-400'}`}>{u.nps}</td>
+                        <td className="px-3 py-2 text-green-400">{u.promoters}</td>
+                        <td className="px-3 py-2 text-blue-400">{u.passives}</td>
+                        <td className="px-3 py-2 text-red-400">{u.detractors}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="text-slate-500 text-sm">Ainda sem respostas por agente.</div>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Dashboard Grid Layout */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
         

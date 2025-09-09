@@ -1466,7 +1466,7 @@ export default function ChatArea({
 return (
     <div className="flex-1 flex flex-col bg-slate-700 h-screen max-h-screen">
         {/* Chat Header */}
-        <div className="p-3 sm:p-4 border-b border-slate-600/50 bg-gradient-to-r from-slate-800 to-slate-900 backdrop-blur-sm">
+  <div className="p-3 sm:p-4 border-b border-slate-600/50 bg-gradient-to-r from-slate-800 to-slate-900 backdrop-blur-sm relative z-40">
             <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2 sm:space-x-3">
                     {/* Mobile Back Button */}
@@ -1566,7 +1566,7 @@ return (
                         </button>
                         
                         {showActionsMenu && (
-                            <div className="absolute right-0 top-12 sm:top-14 w-48 sm:w-56 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700/50 rounded-xl shadow-2xl z-50 backdrop-blur-sm">
+                            <div className="absolute right-0 top-12 sm:top-14 w-48 sm:w-56 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700/50 rounded-xl shadow-2xl z-[10000] backdrop-blur-sm">
                                 <div className="py-2">
                                     <button
                                         onClick={() => {
@@ -1660,7 +1660,7 @@ return (
         </div>
 
         {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-4 sm:space-y-6 bg-gradient-to-b from-slate-600 to-slate-700 custom-scrollbar touch-manipulation">
+  <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-4 sm:space-y-6 bg-gradient-to-b from-slate-600 to-slate-700 custom-scrollbar touch-manipulation relative z-10">
             {messages.filter(message => message && message.sender).map((message, index) => {
                 const messageAnimation = `message-enter ${message.sender === 'user' || message.sender === 'system' ? 'message-my' : 'message-other'}`;
                 

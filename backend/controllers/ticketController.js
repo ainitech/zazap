@@ -1,5 +1,5 @@
 
-import { Ticket, Queue, Contact, User, TicketMessage, TicketComment, MessageReaction, Tag, TicketTag, Integration } from '../models/index.js';
+import { Ticket, Queue, Contact, User, TicketMessage, TicketComment, MessageReaction, Tag, TicketTag, Integration, Setting } from '../models/index.js';
 import { Op } from 'sequelize';
 import { emitToAll } from '../services/socket.js';
 import emitTicketsUpdateShared from '../services/ticketBroadcast.js';
@@ -251,6 +251,89 @@ export const acceptTicket = async (req, res) => {
     // Processar integração de mudança de status
     await integrationService.processTicketStatusChanged(updatedTicket, 'waiting', 'accepted');
     
+  // Enviar saudação personalizada do atendente (apresentação)
+  try {
+    console.log('👋 Preparando mensagem de apresentação do atendente...');
+    const user = await User.findByPk(userId);
+    if (!user) {
+      console.warn('⚠️ Usuário não encontrado para mensagem de apresentação');
+    }
+    let introTemplate = 'Olá! Meu nome é {nome} e vou continuar seu atendimento. Como posso ajudar?';
+    const introSetting = await Setting.findOne({ where: { key: 'chat_attendant_intro_template' } });
+    if (introSetting && introSetting.value) {
+      console.log('📄 Template de apresentação encontrado em settings');
+      introTemplate = introSetting.value;
+    } else {
+      console.log('ℹ️ Usando template padrão de apresentação');
+    }
+    if (user) {
+      const firstName = (user.name || '').split(' ')[0] || user.username || 'Atendente';
+      const introMsg = introTemplate.replace(/\{nome\}/g, firstName);
+      console.log('📝 Conteúdo da apresentação gerado:', introMsg);
+      try {
+        const createdIntro = await TicketMessage.create({
+          ticketId: ticket.id,
+          sender: 'system',
+          content: introMsg,
+          timestamp: new Date(),
+          isFromGroup: false,
+          messageType: 'text',
+          channel: 'system'
+        });
+        console.log('✅ Mensagem de apresentação registrada. ID msg:', createdIntro.id);
+        // Enviar objeto completo para satisfazer validação do frontend (precisa de id)
+        emitToAll('new-message', {
+          id: createdIntro.id,
+          ticketId: ticket.id,
+          content: introMsg,
+          sender: 'system',
+          channel: 'system',
+          messageType: 'text',
+          createdAt: createdIntro.createdAt
+        });
+
+        // Se não há fila (queueId null) e existir sessionId, enviar via WhatsApp automaticamente
+        if (!ticket.queueId && ticket.sessionId) {
+          console.log('🔄 Enviando apresentação diretamente ao contato via sessão WhatsApp (sem fila)...');
+          try {
+            const { sendText } = await import('../services/baileysService.js');
+            // Tentar com ticket.sessionId, se falhar tentar mapear via Session.whatsappId
+            try {
+              await sendText(ticket.sessionId, ticket.contact, introMsg);
+            } catch(firstSendErr) {
+              console.warn('⚠️ Primeira tentativa falhou com sessionId direto, tentando mapear whatsappId da sessão:', firstSendErr.message);
+              try {
+                const { Session } = await import('../models/index.js');
+                const sessionRecord = await Session.findByPk(ticket.sessionId);
+                if (sessionRecord) {
+                  await sendText(sessionRecord.whatsappId, ticket.contact, introMsg);
+                } else {
+                  throw new Error('Session record não encontrado para fallback');
+                }
+              } catch(fallbackErr) {
+                console.warn('⚠️ Fallback para whatsappId da sessão falhou:', fallbackErr.message);
+                throw firstSendErr;
+              }
+            }
+            console.log('📨 Apresentação enviada ao número do contato.');
+          } catch (sendErr) {
+            console.warn('⚠️ Falha ao enviar apresentação para o contato:', sendErr.message);
+          }
+        } else {
+          if (ticket.queueId) {
+            console.log('ℹ️ Ticket possui queueId, não enviando apresentação automática externa.');
+          } else {
+            console.log('ℹ️ Ticket sem sessionId válido, não é possível enviar mensagem externa.');
+          }
+        }
+      } catch (e) {
+        console.warn('⚠️ Falha ao registrar mensagem de introdução do atendente:', e.message);
+      }
+    }
+  } catch (e) {
+    console.warn('⚠️ Erro ao preparar apresentação do atendente:', e.message);
+  }
+
   // Emitir atualização de tickets
   await emitTicketsUpdate();
     
@@ -294,20 +377,75 @@ export const resolveTicket = async (req, res) => {
     }
     
     // Atualizar ticket para resolvido
-    await ticket.update({
-      chatStatus: 'resolved'
-    });
-    
-    console.log(`✅ Ticket #${ticketId} resolvido pelo usuário ${userId}`);
-    
-    // Emitir atualização de tickets
+    await ticket.update({ chatStatus: 'resolved' });
+
+    // Gerar protocolo se habilitado e ainda não existir
+    let protocol = ticket.protocol;
+    try {
+      const protoEnabledSetting = await Setting.findOne({ where: { key: 'chat_protocol_enabled' } });
+      const protocolEnabled = protoEnabledSetting ? (protoEnabledSetting.value === '1' || protoEnabledSetting.value === 'true') : true;
+      if (!protocol && protocolEnabled) {
+        protocol = `${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${ticket.id}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
+        await ticket.update({ protocol });
+      }
+    } catch (protoErr) {
+      console.warn('⚠️ Erro ao gerar protocolo (resolve):', protoErr.message);
+    }
+
+    // Montar e enviar mensagem de despedida + NPS (mesma lógica usada em close/update resolved)
+    try {
+      let farewellTemplate = 'Atendimento encerrado.{protocoloParte}';
+      let npsEnabled = true;
+      let npsTemplate = 'Sua opinião é muito importante! Responda com uma nota de 0 a 10: quanto você recomendaria nosso atendimento?';
+      const fwSetting = await Setting.findOne({ where: { key: 'chat_farewell_template' } });
+      if (fwSetting && fwSetting.value) farewellTemplate = fwSetting.value;
+      const npsEnabledSetting = await Setting.findOne({ where: { key: 'chat_nps_enabled' } });
+      if (npsEnabledSetting) npsEnabled = npsEnabledSetting.value === '1' || npsEnabledSetting.value === 'true';
+      const npsTemplateSetting = await Setting.findOne({ where: { key: 'chat_nps_request_template' } });
+      if (npsTemplateSetting && npsTemplateSetting.value) npsTemplate = npsTemplateSetting.value;
+
+      const protocoloParte = protocol ? ` Protocolo: ${protocol}.` : '';
+      const farewellBase = farewellTemplate.replace(/\{protocolo\}/g, protocol || '').replace(/\{protocoloParte\}/g, protocoloParte);
+      const farewell = npsEnabled ? `${farewellBase} ${npsTemplate}` : farewellBase;
+
+      try {
+        const farewellMsg = await TicketMessage.create({
+          ticketId: ticket.id,
+          sender: 'system',
+          content: farewell,
+          timestamp: new Date(),
+          isFromGroup: false,
+          messageType: 'text',
+          channel: 'system'
+        });
+        emitToAll('new-message', {
+          id: farewellMsg.id,
+          ticketId: ticket.id,
+          content: farewell,
+          sender: 'system',
+          channel: 'system',
+          messageType: 'text',
+          createdAt: farewellMsg.createdAt
+        });
+        if (!ticket.queueId && ticket.sessionId) {
+          try {
+            const { sendText } = await import('../services/baileysService.js');
+            await sendText(ticket.sessionId, ticket.contact, farewell);
+          } catch (extErr) {
+            console.warn('⚠️ Falha ao enviar despedida externa (resolveTicket):', extErr.message);
+          }
+        }
+      } catch (fwErr) {
+        console.warn('⚠️ Falha ao registrar/enviar mensagem de despedida (resolveTicket):', fwErr.message);
+      }
+    } catch (flowErr) {
+      console.warn('⚠️ Erro geral no fluxo de despedida/NPS (resolveTicket):', flowErr.message);
+    }
+
+    console.log(`✅ Ticket #${ticketId} resolvido pelo usuário ${userId} (protocolo=${protocol || 'N/A'})`);
+
     await emitTicketsUpdate();
-    
-    res.json({ 
-      success: true, 
-      ticket,
-      message: 'Ticket resolvido com sucesso!' 
-    });
+    res.json({ success: true, ticket, protocol, message: 'Ticket resolvido com sucesso!' });
   } catch (err) {
     console.error('❌ Erro ao resolver ticket:', err);
     res.status(500).json({ error: err.message });
@@ -366,11 +504,83 @@ export const closeTicket = async (req, res) => {
       });
     }
     
-    // Atualizar ticket para fechado
+    // Verificar se protocolo está habilitado (setting: chat_protocol_enabled)
+    let protocol = null;
+    const protoEnabledSetting = await Setting.findOne({ where: { key: 'chat_protocol_enabled' } });
+    const protocolEnabled = protoEnabledSetting ? protoEnabledSetting.value === '1' || protoEnabledSetting.value === 'true' : true;
+    if (protocolEnabled) {
+      protocol = `${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${ticket.id}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
+    }
+
     await ticket.update({
       chatStatus: 'closed',
-      closedAt: new Date()
+      closedAt: new Date(),
+      protocol: protocol
     });
+
+    // Mensagem de despedida + protocolo + NPS
+  // Carregar templates (settings)
+  let farewellTemplate = 'Atendimento encerrado.{protocoloParte}';
+  let npsEnabled = true;
+  let npsTemplate = 'Sua opinião é muito importante! Responda com uma nota de 0 a 10: quanto você recomendaria nosso atendimento?';
+  const fwSetting = await Setting.findOne({ where: { key: 'chat_farewell_template' } });
+  if (fwSetting && fwSetting.value) farewellTemplate = fwSetting.value;
+  const npsEnabledSetting = await Setting.findOne({ where: { key: 'chat_nps_enabled' } });
+  if (npsEnabledSetting) npsEnabled = npsEnabledSetting.value === '1' || npsEnabledSetting.value === 'true';
+  const npsTemplateSetting = await Setting.findOne({ where: { key: 'chat_nps_request_template' } });
+  if (npsTemplateSetting && npsTemplateSetting.value) npsTemplate = npsTemplateSetting.value;
+
+  const protocoloParte = protocol ? ` Protocolo: ${protocol}.` : '';
+  const farewellBase = farewellTemplate.replace(/\{protocolo\}/g, protocol || '').replace(/\{protocoloParte\}/g, protocoloParte);
+  const farewell = npsEnabled ? `${farewellBase} ${npsTemplate}` : farewellBase;
+    try {
+      const farewellMsg = await TicketMessage.create({
+        ticketId: ticket.id,
+        sender: 'system',
+        content: farewell,
+        timestamp: new Date(),
+        isFromGroup: false,
+        messageType: 'text',
+        channel: 'system'
+      });
+      emitToAll('new-message', {
+        id: farewellMsg.id,
+        ticketId: ticket.id,
+        content: farewell,
+        sender: 'system',
+        channel: 'system',
+        messageType: 'text',
+        createdAt: farewellMsg.createdAt
+      });
+      // Enviar externamente se não há fila e há sessionId
+      if (!ticket.queueId && ticket.sessionId) {
+        try {
+          const { sendText } = await import('../services/baileysService.js');
+          try {
+            await sendText(ticket.sessionId, ticket.contact, farewell);
+          } catch(firstSendErr) {
+            console.warn('⚠️ Primeira tentativa despedida falhou, tentando fallback whatsappId:', firstSendErr.message);
+            try {
+              const { Session } = await import('../models/index.js');
+              const sessionRecord = await Session.findByPk(ticket.sessionId);
+              if (sessionRecord) {
+                await sendText(sessionRecord.whatsappId, ticket.contact, farewell);
+              } else {
+                throw new Error('Session record não encontrado (closeTicket)');
+              }
+            } catch(fallbackErr) {
+              console.warn('⚠️ Fallback despedida falhou:', fallbackErr.message);
+              throw firstSendErr;
+            }
+          }
+          console.log('📨 Mensagem de despedida/NPS enviada externamente.');
+        } catch (extErr) {
+          console.warn('⚠️ Falha ao enviar despedida externa:', extErr.message);
+        }
+      }
+    } catch (e) {
+      console.warn('⚠️ Falha ao registrar mensagem de despedida/NPS:', e.message);
+    }
     
     console.log(`🔒 Ticket #${ticketId} fechado pelo usuário ${userId}`);
     
@@ -379,8 +589,9 @@ export const closeTicket = async (req, res) => {
     
     res.json({ 
       success: true, 
-      ticket,
-      message: 'Ticket fechado com sucesso!' 
+  ticket,
+  message: 'Ticket fechado com sucesso!',
+  protocol
     });
   } catch (err) {
     console.error('❌ Erro ao fechar ticket:', err);
@@ -402,13 +613,79 @@ export const updateTicket = async (req, res) => {
     for (const key of allowed) {
       if (Object.prototype.hasOwnProperty.call(updates, key)) payload[key] = updates[key];
     }
+    const prevChatStatus = ticket.chatStatus;
+    const willResolve = payload.chatStatus === 'resolved' && prevChatStatus !== 'resolved' && prevChatStatus !== 'closed';
 
     await ticket.update(payload);
 
-    // Emitir atualização
+    // Se está sendo marcado como resolvido, gerar protocolo + mensagem de despedida/NPS (similar a closeTicket)
+    if (willResolve) {
+      try {
+        // Gerar protocolo se ainda não existir e se feature habilitada
+        let protocol = ticket.protocol;
+        const protoEnabledSetting = await Setting.findOne({ where: { key: 'chat_protocol_enabled' } });
+        const protocolEnabled = protoEnabledSetting ? (protoEnabledSetting.value === '1' || protoEnabledSetting.value === 'true') : true;
+        if (!protocol && protocolEnabled) {
+          protocol = `${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${ticket.id}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
+          await ticket.update({ protocol });
+        }
+
+        // Carregar templates / flags
+        let farewellTemplate = 'Atendimento encerrado.{protocoloParte}';
+        let npsEnabled = true;
+        let npsTemplate = 'Sua opinião é muito importante! Responda com uma nota de 0 a 10: quanto você recomendaria nosso atendimento?';
+        const fwSetting = await Setting.findOne({ where: { key: 'chat_farewell_template' } });
+        if (fwSetting && fwSetting.value) farewellTemplate = fwSetting.value;
+        const npsEnabledSetting = await Setting.findOne({ where: { key: 'chat_nps_enabled' } });
+        if (npsEnabledSetting) npsEnabled = npsEnabledSetting.value === '1' || npsEnabledSetting.value === 'true';
+        const npsTemplateSetting = await Setting.findOne({ where: { key: 'chat_nps_request_template' } });
+        if (npsTemplateSetting && npsTemplateSetting.value) npsTemplate = npsTemplateSetting.value;
+
+        const protocoloParte = protocol ? ` Protocolo: ${protocol}.` : '';
+        const farewellBase = farewellTemplate.replace(/\{protocolo\}/g, protocol || '').replace(/\{protocoloParte\}/g, protocoloParte);
+        const farewell = npsEnabled ? `${farewellBase} ${npsTemplate}` : farewellBase;
+
+        try {
+          const farewellMsg = await TicketMessage.create({
+            ticketId: ticket.id,
+            sender: 'system',
+            content: farewell,
+            timestamp: new Date(),
+            isFromGroup: false,
+            messageType: 'text',
+            channel: 'system'
+          });
+          emitToAll('new-message', {
+            id: farewellMsg.id,
+            ticketId: ticket.id,
+            content: farewell,
+            sender: 'system',
+            channel: 'system',
+            messageType: 'text',
+            createdAt: farewellMsg.createdAt
+          });
+          // Enviar externamente se não há fila e há sessionId
+          if (!ticket.queueId && ticket.sessionId) {
+            try {
+              const { sendText } = await import('../services/baileysService.js');
+              await sendText(ticket.sessionId, ticket.contact, farewell);
+            } catch (extErr) {
+              console.warn('⚠️ Falha ao enviar despedida externa (resolve):', extErr.message);
+            }
+          }
+        } catch (logErr) {
+          console.warn('⚠️ Falha ao registrar mensagem de despedida/NPS (resolve):', logErr.message);
+        }
+        console.log(`✅ Ticket #${ticket.id} marcado como resolvido. Protocolo=${protocol || 'N/A'}`);
+      } catch (resolveErr) {
+        console.warn('⚠️ Erro no fluxo de resolução (mensagem protocolo/NPS):', resolveErr.message);
+      }
+    }
+
+    // Emitir atualização sempre
     await emitTicketsUpdate();
 
-    res.json({ success: true, ticket });
+    res.json({ success: true, ticket, resolvedFlow: willResolve });
   } catch (err) {
     console.error('❌ Erro ao atualizar ticket:', err);
     res.status(500).json({ error: err.message });

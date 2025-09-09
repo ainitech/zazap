@@ -53,9 +53,17 @@ export default function authMiddleware(req, res, next) {
 
   // Se não há access token válido, tentar refresh cookie
   if (!token) {
-    const refreshToken = req.cookies?.refreshToken;
+    // Ordem de busca: cookie -> header -> body -> query (último, apenas fallback debug)
+    const refreshToken =
+      req.cookies?.refreshToken ||
+      req.headers['x-refresh-token'] ||
+      req.body?.refreshToken ||
+      req.query?.refreshToken;
     if (refreshToken) {
-      console.log('[auth] usando cookies httpOnly para autenticação');
+      console.log('[auth] tentando autenticar via refresh token (fonte:',
+        req.cookies?.refreshToken ? 'cookie' :
+        (req.headers['x-refresh-token'] ? 'header' : (req.body?.refreshToken ? 'body' : 'query')),
+        ')');
       return authenticateViaRefreshToken(req, res, next, refreshToken);
     }
   }

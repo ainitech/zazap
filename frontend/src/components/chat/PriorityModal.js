@@ -88,8 +88,8 @@ export default function PriorityModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md">
+    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[9999] backdrop-blur-sm">
+      <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md shadow-2xl border border-slate-700/70">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center space-x-2">
             <FlagIcon className="w-5 h-5 text-primary-light" />

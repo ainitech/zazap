@@ -80,6 +80,7 @@ export default function SettingsComponent() {
   const tabs = [
     { id: 'profile', label: 'Perfil', icon: UserIcon },
     { id: 'appearance', label: 'Aparência', icon: PaintBrushIcon },
+    { id: 'chat', label: 'Chat', icon: Cog6ToothIcon },
     { id: 'groups', label: 'Grupos', icon: UserGroupIcon },
     { id: 'notifications', label: 'Notificações', icon: BellIcon },
     { id: 'security', label: 'Segurança', icon: ShieldCheckIcon },
@@ -93,6 +94,51 @@ export default function SettingsComponent() {
       setMessage('');
       setMessageType('');
     }, 3000);
+  };
+
+  // ====== CHAT SETTINGS HANDLERS ======
+  const chatSettingValue = (key, def='') => (settings[key]?.value ?? def);
+  const [chatForm, setChatForm] = useState({
+    attendantIntro: '',
+    protocolEnabled: true,
+    farewellTemplate: '',
+    npsEnabled: true,
+    npsRequest: ''
+  });
+
+  useEffect(() => {
+    setChatForm({
+      attendantIntro: chatSettingValue('chat_attendant_intro_template','Olá! Meu nome é {nome} e vou continuar seu atendimento. Como posso ajudar?'),
+      protocolEnabled: (chatSettingValue('chat_protocol_enabled','true') === 'true' || chatSettingValue('chat_protocol_enabled','true') === '1'),
+      farewellTemplate: chatSettingValue('chat_farewell_template','Atendimento encerrado.{protocoloParte}'),
+      npsEnabled: (chatSettingValue('chat_nps_enabled','true') === 'true' || chatSettingValue('chat_nps_enabled','true') === '1'),
+      npsRequest: chatSettingValue('chat_nps_request_template','Sua opinião é muito importante! Responda com uma nota de 0 a 10: quanto você recomendaria nosso atendimento?')
+    });
+  }, [settings]);
+
+  const handleChatFormChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setChatForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
+  };
+
+  const saveChatSettings = async (e) => {
+    e.preventDefault();
+    try {
+      setLoading(true);
+      await Promise.all([
+        updateSetting('chat_attendant_intro_template', chatForm.attendantIntro),
+        updateSetting('chat_protocol_enabled', chatForm.protocolEnabled ? 'true' : 'false'),
+        updateSetting('chat_farewell_template', chatForm.farewellTemplate),
+        updateSetting('chat_nps_enabled', chatForm.npsEnabled ? 'true' : 'false'),
+        updateSetting('chat_nps_request_template', chatForm.npsRequest)
+      ]);
+      showMessage('Configurações de chat salvas.');
+    } catch (err) {
+      console.error(err);
+      showMessage('Erro ao salvar configurações de chat.', 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Função para atualizar dados do perfil
@@ -626,6 +672,82 @@ export default function SettingsComponent() {
           </div>
         );
 
+      case 'chat':
+        return (
+          <form onSubmit={saveChatSettings} className="space-y-8">
+            <div>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Configurações de Chat</h3>
+              <p className="text-sm text-gray-500">Personalize mensagens automáticas e coleta de feedback.</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 space-y-2 md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700">Template de Apresentação</label>
+                <textarea
+                  name="attendantIntro"
+                  value={chatForm.attendantIntro}
+                  onChange={handleChatFormChange}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                />
+                <p className="text-xs text-gray-500">Variáveis: {'{nome}'}</p>
+              </div>
+              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 space-y-2">
+                <label className="block text-sm font-medium text-gray-700">Template de Despedida</label>
+                <textarea
+                  name="farewellTemplate"
+                  value={chatForm.farewellTemplate}
+                  onChange={handleChatFormChange}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                />
+                <p className="text-xs text-gray-500">Variáveis: {'{protocolo} {protocoloParte}'}</p>
+              </div>
+              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 space-y-2">
+                <label className="block text-sm font-medium text-gray-700">Pergunta NPS</label>
+                <textarea
+                  name="npsRequest"
+                  value={chatForm.npsRequest}
+                  onChange={handleChatFormChange}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                  disabled={!chatForm.npsEnabled}
+                />
+                <p className="text-xs text-gray-500">Usada se coleta de NPS estiver habilitada.</p>
+              </div>
+              <div className="flex items-center gap-3 bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <input
+                  id="protocolEnabled"
+                  name="protocolEnabled"
+                  type="checkbox"
+                  checked={chatForm.protocolEnabled}
+                  onChange={handleChatFormChange}
+                  className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                />
+                <label htmlFor="protocolEnabled" className="text-sm font-medium text-gray-700">Gerar protocolo</label>
+              </div>
+              <div className="flex items-center gap-3 bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <input
+                  id="npsEnabled"
+                  name="npsEnabled"
+                  type="checkbox"
+                  checked={chatForm.npsEnabled}
+                  onChange={handleChatFormChange}
+                  className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                />
+                <label htmlFor="npsEnabled" className="text-sm font-medium text-gray-700">Coletar NPS</label>
+              </div>
+            </div>
+            <div>
+              <button
+                type="submit"
+                disabled={loading}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+              >
+                {loading ? 'Salvando...' : 'Salvar Configurações'}
+              </button>
+            </div>
+          </form>
+        );
       case 'appearance':
         return (
           <div className="space-y-6">

@@ -48,9 +48,16 @@ Ticket.hasMany(TicketMessage, { foreignKey: 'ticketId' });
 Integration.belongsToMany(Ticket, { through: IntegrationTicket, foreignKey: 'integrationId' });
 Ticket.belongsToMany(Integration, { through: IntegrationTicket, foreignKey: 'ticketId' });
 
+// Associações diretas para permitir eager loading nas tabelas de junção
+IntegrationTicket.belongsTo(Integration, { foreignKey: 'integrationId', as: 'Integration' });
+IntegrationTicket.belongsTo(Ticket, { foreignKey: 'ticketId', as: 'Ticket' });
+
 // Integração <-> Queue
 Integration.belongsToMany(Queue, { through: IntegrationQueue, foreignKey: 'integrationId' });
 Queue.belongsToMany(Integration, { through: IntegrationQueue, foreignKey: 'queueId' });
+
+IntegrationQueue.belongsTo(Integration, { foreignKey: 'integrationId', as: 'Integration' });
+IntegrationQueue.belongsTo(Queue, { foreignKey: 'queueId', as: 'Queue' });
 
 // Session <-> Contact
 Session.hasMany(Contact, { foreignKey: 'sessionId' });

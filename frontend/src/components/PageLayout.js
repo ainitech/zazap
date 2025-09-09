@@ -265,8 +265,17 @@ export default function PageLayout({ children, title, subtitle }) {
         const { API_BASE_URL } = await import('../utils/apiClient');
         const { default: authService } = await import('../services/authService');
         const response = await authService.request(`${API_BASE_URL}/api/schedules/counts`);
-        const data = await response.json();
-        setScheduleCount(data?.total || 0);
+        const ct = response.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+          const text = await response.text();
+          console.warn('⚠️ /api/schedules/counts retornou non-JSON. Status:', response.status, 'Body snippet:', text.slice(0,120));
+          return; // não tentar parsear
+        }
+        const data = await response.json().catch(err => {
+          console.error('Erro parse JSON counts:', err);
+          return null;
+        });
+        if (data) setScheduleCount(data?.total || 0);
       } catch (e) {
         console.error('Falha ao carregar contadores', e);
       }

@@ -37,10 +37,24 @@ export default function TransferModal({
       const response = await apiFetch('/api/users');
       if (response.ok) {
         const data = await safeJson(response);
-        setUsers(data);
+        let normalized = [];
+        if (Array.isArray(data)) {
+          normalized = data;
+        } else if (Array.isArray(data?.rows)) {
+          normalized = data.rows;
+        } else if (Array.isArray(data?.users)) {
+          normalized = data.users;
+        } else {
+          console.warn('⚠️ /api/users retornou formato inesperado:', data);
+        }
+        setUsers(normalized);
+      } else {
+        console.warn('⚠️ Falha ao carregar usuários. HTTP', response.status);
+        setUsers([]);
       }
     } catch (error) {
       console.error('Erro ao buscar usuários:', error);
+      setUsers([]);
     }
   };
 
@@ -49,10 +63,24 @@ export default function TransferModal({
       const response = await apiFetch('/api/queues');
       if (response.ok) {
         const data = await safeJson(response);
-        setQueues(data);
+        let normalized = [];
+        if (Array.isArray(data)) {
+          normalized = data;
+        } else if (Array.isArray(data?.rows)) {
+          normalized = data.rows;
+        } else if (Array.isArray(data?.queues)) {
+          normalized = data.queues;
+        } else {
+            console.warn('⚠️ /api/queues retornou formato inesperado:', data);
+        }
+        setQueues(normalized);
+      } else {
+        console.warn('⚠️ Falha ao carregar filas. HTTP', response.status);
+        setQueues([]);
       }
     } catch (error) {
       console.error('Erro ao buscar filas:', error);
+      setQueues([]);
     }
   };
 
@@ -95,8 +123,8 @@ export default function TransferModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md">
+    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[9999] backdrop-blur-sm">
+      <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md shadow-2xl border border-slate-700/70">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-white text-lg font-semibold">Transferir Atendimento</h2>
           <button
@@ -162,9 +190,13 @@ export default function TransferModal({
               required
             >
               <option value="">Escolha um agente...</option>
-              {users.map(user => (
-                <option key={user.id} value={user.id}>{user.name}</option>
-              ))}
+              {Array.isArray(users) && users.length > 0 ? (
+                users.map(user => (
+                  <option key={user.id} value={user.id}>{user.name}</option>
+                ))
+              ) : (
+                <option value="" disabled>Nenhum usuário</option>
+              )}
             </select>
           </div>
         )}
@@ -180,9 +212,13 @@ export default function TransferModal({
               required
             >
               <option value="">Escolha uma fila...</option>
-              {queues.map(queue => (
-                <option key={queue.id} value={queue.id}>{queue.name}</option>
-              ))}
+              {Array.isArray(queues) && queues.length > 0 ? (
+                queues.map(queue => (
+                  <option key={queue.id} value={queue.id}>{queue.name}</option>
+                ))
+              ) : (
+                <option value="" disabled>Nenhuma fila</option>
+              )}
             </select>
           </div>
         )}

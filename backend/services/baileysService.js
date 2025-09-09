@@ -66,6 +66,13 @@ const sessions = [];
 // Map para rastrear tentativas de reconexão por número base (sessionId normalizado)
 const reconnectAttemptsMap = new Map();
 
+// Controle de cancelamento de importação de chats
+const canceledImports = new Set();
+export const cancelSessionImport = (sessionId) => {
+  canceledImports.add(sessionId);
+  console.log(`🛑 Cancelamento solicitado para importação de chats da sessão ${sessionId}`);
+};
+
 // Função para criar ou atualizar contato no Baileys
 // IMPORTANTE: Não sobrescrever name/pushname existentes com valores nulos ou vazios
 const createOrUpdateContactBaileys = async (whatsappId, sessionId, sock) => {
@@ -171,35 +178,56 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
     await fs.mkdir(authDir, { recursive: true });
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     
+    // Obter registro da sessão no banco (para saber se precisa histórico completo)
+    let sessionDb = null;
+    try {
+      sessionDb = await Session.findOne({ where: { whatsappId: sessionId } });
+    } catch (e) {
+      console.log('⚠️ Não foi possível buscar sessão no banco antes de criar socket:', e.message);
+    }
+
     // Obter versão mais recente do Baileys
     const { version } = await fetchLatestBaileysVersion();
     console.log(`📱 Versão do Baileys: ${version}`);
     console.log(`🔌 makeWASocket disponível: ${typeof makeWASocket}`);
 
     // Criar socket
+    const wantFullHistory = !!sessionDb?.importAllChats;
+    if (wantFullHistory) {
+      console.log('🗂️ Sessão configurada para importar histórico completo — habilitando fireInitQueries');
+    }
     const sock = makeWASocket({
       version,
       auth: state,
       printQRInTerminal: false,
       generateHighQualityLinkPreview: true,
-      syncFullHistory: false,
+      // Habilitar sync completo para permitir importação de chats históricos
+      syncFullHistory: true,
       markOnlineOnConnect: false,
       connectTimeoutMs: 90_000,
       defaultQueryTimeoutMs: 0,
       keepAliveIntervalMs: 30_000,
       emitOwnEvents: true,
-      fireInitQueries: false,
+      fireInitQueries: wantFullHistory, // se precisamos histórico inicial, deixar Baileys disparar queries iniciais
       browser: ['ZaZap', 'Desktop', '1.0.0'],
       retryRequestDelayMs: 250,
       maxMsgRetryCount: 5,
       // Adicionar configurações para melhor reconexão
       qrTimeout: 60_000, // 60 segundos para QR
       getMessage: async () => null, // Evitar erros de mensagem não encontrada
-      appStateMacVerification: {
-        patch: false,
-        snapshot: false
-      }
+      appStateMacVerification: { patch: false, snapshot: false }
     });
+
+    // Tentar iniciar store de memória (se disponível) para garantir chats
+    try {
+      if (!sock.store && makeWASocket?.initInMemoryStore) {
+        sock.store = makeWASocket.initInMemoryStore({});
+        sock.store.bind(sock.ev);
+        console.log('🗄️ Store em memória inicializada para sessão', sessionId);
+      }
+    } catch (storeErr) {
+      console.log('⚠️ Não foi possível inicializar store em memória:', storeErr.message);
+    }
 
   // Criar instância da sessão (preservar tentativas de reconexão se existirem)
   const baseNumber = sessionId.split(':')[0];
@@ -393,6 +421,138 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
                 realNumber: actualWhatsAppId
               });
               console.log(`🔒 whatsappId preservado (${sessionRecord.whatsappId}), realNumber armazenado (${actualWhatsAppId})`);
+
+              // IMPORTAÇÃO OPCIONAL DE CHATS (apenas Baileys) -------------------
+              if (sessionRecord.importAllChats) {
+                try {
+                  console.log(`📥 Iniciando importação completa de chats para sessão ${sessionId}...`);
+                  const { emitToAll } = await import('./socket.js');
+                  // Buscar lista de conversas brutas
+                  let rawChats = await sock?.store?.chats?.all?.() || [];
+                  if (!rawChats.length) {
+                    console.log('ℹ️ Store de chats vazia; tentando aguardar sincronização inicial...');
+                    // Aguardar alguns ciclos para permitir sync inicial
+                    for (let i=0;i<5 && !rawChats.length;i++) {
+                      await new Promise(r=>setTimeout(r, 1500));
+                      rawChats = await sock?.store?.chats?.all?.() || [];
+                    }
+                  }
+                  if (!rawChats.length) {
+                    console.log('ℹ️ Store ainda vazia; tentativa final de obter lista de IDs via sock?.ws?.chats (se exposto).');
+                    try {
+                      const maybe = sock?.ws?.chats || [];
+                      if (Array.isArray(maybe) && maybe.length) {
+                        rawChats = maybe;
+                      }
+                    } catch {}
+                  }
+                  const fromDate = sessionRecord.importFromDate ? new Date(sessionRecord.importFromDate) : null;
+                  const toDate = sessionRecord.importToDate ? new Date(sessionRecord.importToDate) : null;
+                  if (fromDate) fromDate.setHours(0,0,0,0);
+                  if (toDate) toDate.setHours(23,59,59,999);
+                  if (fromDate || toDate) {
+                    console.log(`🗂️ Aplicando filtro de data na importação: ${fromDate ? fromDate.toISOString().split('T')[0] : '∞'} -> ${toDate ? toDate.toISOString().split('T')[0] : '∞'}`);
+                  }
+                  // Pré-filtrar candidatos (1:1, sem broadcast/newsletter)
+                  const candidates = rawChats.filter(chat => {
+                    const jid = chat.id;
+                    if (!jid) return false;
+                    if (jid.endsWith('@broadcast')) return false;
+                    if (jid.includes('newsletter')) return false;
+                    if (jid.endsWith('@g.us')) return false; // ignorar grupos (fase 1)
+                    // Data aproximada
+                    if (fromDate || toDate) {
+                      const tsSec = chat?.conversationTimestamp || chat?.lastMsgTimestamp || chat?.t;
+                      if (tsSec) {
+                        const tsMs = typeof tsSec === 'number' ? (tsSec.toString().length === 13 ? tsSec : tsSec * 1000) : parseInt(tsSec) * 1000;
+                        const chatDate = new Date(tsMs);
+                        if (fromDate && chatDate < fromDate) return false;
+                        if (toDate && chatDate > toDate) return false;
+                      }
+                    }
+                    return true;
+                  });
+                  const total = candidates.length;
+                  let processed = 0;
+                  let created = 0;
+                  const progressPayload = () => ({
+                    sessionId: sessionRecord.id,
+                    whatsappId: sessionRecord.whatsappId,
+                    total,
+                    processed,
+                    created,
+                    percentage: total === 0 ? 100 : Math.round((processed / total) * 100),
+                    status: processed >= total ? 'completed' : 'running'
+                  });
+                  emitToAll('session-import-progress', { ...progressPayload(), status: 'starting' });
+                  for (const chat of candidates) {
+                    if (canceledImports.has(sessionId)) {
+                      console.log(`🛑 Importação cancelada manualmente para sessão ${sessionId}`);
+                      emitToAll('session-import-progress', { ...progressPayload(), status: 'canceled' });
+                      break;
+                    }
+                    const jid = chat.id;
+                    try {
+                      // Verificar se já existe ticket aberto para este contato
+                      const existing = await Ticket.findOne({ where: { contact: jid } });
+                      if (!existing) {
+                        let contact = await Contact.findOne({ where: { whatsappId: jid } });
+                        if (!contact) {
+                          contact = await Contact.create({
+                            whatsappId: jid,
+                            name: chat.name || chat.subject || jid.split('@')[0],
+                            pushname: chat.name || null,
+                            isGroup: false
+                          });
+                        }
+                        await Ticket.create({
+                          contact: jid,
+                          contactId: contact.id,
+                          sessionId: sessionRecord.id,
+                          status: 'open',
+                          chatStatus: 'waiting',
+                          lastMessage: null,
+                          channel: 'whatsapp'
+                        });
+                        created++;
+                        console.log(`🆕 Ticket importado (sem mensagens) para chat ${jid}`);
+                      }
+                    } catch (chatErr) {
+                      console.warn('⚠️ Falha ao importar chat:', chatErr.message);
+                    } finally {
+                      processed++;
+                      // Emitir a cada 1 ou a cada 5 itens dependendo do tamanho
+                      if (total <= 50 || processed === total || processed % 5 === 0) {
+                        emitToAll('session-import-progress', { ...progressPayload(), current: jid });
+                      }
+                    }
+                  }
+                  if (!canceledImports.has(sessionId)) {
+                    emitToAll('session-import-progress', { ...progressPayload(), status: 'completed' });
+                    console.log(`✅ Importação de chats concluída. Total candidatos=${total} criados=${created}`);
+                  } else {
+                    console.log(`ℹ️ Loop de importação terminou em estado cancelado para sessão ${sessionId}`);
+                  }
+                  canceledImports.delete(sessionId);
+                } catch (impErr) {
+                  console.warn('⚠️ Erro durante importação de chats:', impErr.message);
+                  try {
+                    const { emitToAll } = await import('./socket.js');
+                    emitToAll('session-import-progress', {
+                      sessionId: sessionRecord.id,
+                      whatsappId: sessionRecord.whatsappId,
+                      total: 0,
+                      processed: 0,
+                      created: 0,
+                      percentage: 0,
+                      status: 'error',
+                      error: impErr.message
+                    });
+                  } catch {}
+                  canceledImports.delete(sessionId);
+                }
+              }
+              // -----------------------------------------------------------------
             }
           } catch (updateError) {
             console.error('❌ Erro ao salvar realNumber da sessão:', updateError);
@@ -551,11 +711,103 @@ export const getBaileysSession = (sessionId) => {
  * Enviar texto
  */
 export const sendText = async (sessionId, to, text) => {
+  // Garantir que sessionId é string
+  if (typeof sessionId !== 'string') {
+    sessionId = String(sessionId);
+  }
   console.log(`🔍 Buscando sessão Baileys: "${sessionId}"`);
   
   const sock = getBaileysSession(sessionId);
   if (!sock) {
     console.error(`❌ Sessão "${sessionId}" não encontrada no Baileys`);
+    // Tentativa de fallback automática: se sessionId for numérico, buscar registro Session e usar whatsappId
+    const numericId = Number(sessionId);
+    if (!isNaN(numericId)) {
+      try {
+        const sessionRecord = await Session.findByPk(numericId);
+        if (sessionRecord && sessionRecord.whatsappId && sessionRecord.whatsappId !== sessionId) {
+          console.log(`🔁 Fallback: tentando com whatsappId da sessão (${sessionRecord.whatsappId})`);
+          const fallbackSock = getBaileysSession(sessionRecord.whatsappId);
+          if (!fallbackSock) {
+            console.error(`❌ Fallback também não encontrou sessão Baileys para whatsappId ${sessionRecord.whatsappId}`);
+            throw new Error(`Sessão "${sessionId}" (e fallback ${sessionRecord.whatsappId}) não encontrada no Baileys`);
+          }
+          // Atualizar sessionId para fluxo posterior (registro de mensagem etc.)
+          sessionId = sessionRecord.whatsappId;
+          // Continuar usando fallbackSock como sock
+          return await (async () => {
+            // Normalizar destino para JID válido
+            let jid = to;
+            if (typeof jid === 'string' && !jid.includes('@')) {
+              const onlyDigits = jid.replace(/[^0-9]/g, '');
+              jid = `${onlyDigits}@s.whatsapp.net`;
+            }
+            console.log(`✅ Sessão (fallback) "${sessionId}" encontrada, enviando mensagem para ${jid} (input original: ${to})...`);
+            const result = await fallbackSock.sendMessage(jid, { text });
+            // Replicar lógica de pós-envio (registro local) usando whatsappId atualizado
+            try {
+              const session = await Session.findOne({ where: { whatsappId: sessionId } });
+              if (session) {
+                await createOrUpdateContactBaileys(jid, session.id, fallbackSock);
+                try {
+                  const { Ticket, TicketMessage } = await import('../models/index.js');
+                  let ticket = await Ticket.findOne({ where: { sessionId: session.id, contact: jid } });
+                  if (!ticket) {
+                    ticket = await Ticket.create({
+                      sessionId: session.id,
+                      contact: jid,
+                      lastMessage: text,
+                      unreadCount: 0,
+                      status: 'open'
+                    });
+                  } else {
+                    await ticket.update({ lastMessage: text, updatedAt: new Date() });
+                  }
+                  const saved = await TicketMessage.create({
+                    ticketId: ticket.id,
+                    sender: 'user',
+                    content: text,
+                    messageId: result?.key?.id || null,
+                    timestamp: new Date(),
+                    messageType: 'text'
+                  });
+                  try {
+                    emitToAll('new-message', {
+                      id: saved.id,
+                      ticketId: ticket.id,
+                      sender: 'user',
+                      content: text,
+                      timestamp: saved.createdAt,
+                      messageType: 'text',
+                      messageId: saved.messageId
+                    });
+                    const { emitToTicket } = await import('./socket.js');
+                    emitToTicket(ticket.id, 'new-message', {
+                      id: saved.id,
+                      ticketId: ticket.id,
+                      sender: 'user',
+                      content: text,
+                      timestamp: saved.createdAt,
+                      messageType: 'text',
+                      messageId: saved.messageId
+                    });
+                  } catch (emitErr) {
+                    console.log('⚠️ Falha ao emitir evento (fallback) de mensagem enviada:', emitErr.message);
+                  }
+                } catch (ticketErr) {
+                  console.log('⚠️ Erro (fallback) ao registrar mensagem enviada localmente:', ticketErr.message);
+                }
+              }
+            } catch (updateError) {
+              console.log(`⚠️ Erro (fallback) ao atualizar contato após envio: ${updateError.message}`);
+            }
+            return result;
+          })();
+        }
+      } catch (fallbackError) {
+        console.warn(`⚠️ Fallback automático falhou: ${fallbackError.message}`);
+      }
+    }
     throw new Error(`Sessão "${sessionId}" não encontrada no Baileys`);
   }
   

@@ -233,11 +233,25 @@ export default function ConversationList({
   });
 
   // Dividir tickets por status
+  // Regra ajustada: tickets auto-recebidos (chatStatus=accepted mas sem assignedUserId) continuam em "Aguardando"
+  // Só exibimos em Aceitos quando há um usuário atribuído.
   const waitingTickets = filteredTickets.filter(ticket => 
-    (ticket.chatStatus === 'waiting' || !ticket.chatStatus) && (!ticket.Contact?.isGroup) // Excluir grupos dos status normais
+    (
+      ticket.chatStatus === 'waiting' || 
+      !ticket.chatStatus ||
+      (ticket.chatStatus === 'accepted' && !ticket.assignedUserId) // accepted sem usuário => ainda aguardando atendimento humano
+    ) && (!ticket.Contact?.isGroup)
   );
+  if (process.env.NODE_ENV === 'development') {
+    const debugLost = tickets.filter(t => !t.Contact && t.chatStatus && ['waiting','accepted'].includes(t.chatStatus));
+    if (debugLost.length) {
+      // Ajuda a detectar tickets sem join de Contact
+      // eslint-disable-next-line no-console
+      console.debug('🔎 Tickets sem Contact retornados do backend (diagnóstico):', debugLost.map(t => ({id:t.id, contact:t.contact, chatStatus:t.chatStatus, queueId:t.queueId, assignedUserId:t.assignedUserId})));
+    }
+  }
   const acceptedTickets = filteredTickets.filter(ticket => 
-    ticket.chatStatus === 'accepted' && ticket.assignedUserId && (!ticket.Contact?.isGroup) // Apenas aceitos com usuário atribuído, excluir grupos
+    ticket.chatStatus === 'accepted' && ticket.assignedUserId && (!ticket.Contact?.isGroup) // Aceitos apenas quando há usuário responsável
   );
   const resolvedTickets = filteredTickets.filter(ticket => 
     ticket.chatStatus === 'resolved' && (!ticket.Contact?.isGroup) // Excluir grupos dos status normais

@@ -47,7 +47,10 @@ export default function SessionsComponent() {
     igUser: '',
     igPass: '',
     fbEmail: '',
-    fbPass: ''
+  fbPass: '',
+  importAllChats: false,
+  importFromDate: '',
+  importToDate: ''
   });
   const [qrCode, setQrCode] = useState('');
   const [qrStatus, setQrStatus] = useState('');
@@ -60,6 +63,7 @@ export default function SessionsComponent() {
   const [queues, setQueues] = useState([]);
   const [loadingQueues, setLoadingQueues] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [importProgress, setImportProgress] = useState({}); // sessionId -> progress object
 
   useEffect(() => {
     // Buscar sessões iniciais apenas uma vez
@@ -186,6 +190,22 @@ export default function SessionsComponent() {
     socket.on('sessions-update', handleSessionsUpdate);
     socket.on('session-status-update', handleSessionStatusUpdate);
     socket.on('session-qr-update', handleQRCodeUpdate);
+    // Import progress listener
+    const handleImportProgress = (payload) => {
+      if (!payload || !payload.sessionId) return;
+      setImportProgress(prev => ({ ...prev, [payload.sessionId]: payload }));
+      if (payload.status === 'completed') {
+        // Pequeno toast opcional
+        if (toastApiRef.current && toastApiRef.current.addToast) {
+          toastApiRef.current.addToast(`Importação concluída (${payload.created}/${payload.total}) para sessão ${payload.whatsappId}`, { type: 'success', duration: 6000 });
+        }
+      } else if (payload.status === 'error') {
+        if (toastApiRef.current && toastApiRef.current.addToast) {
+          toastApiRef.current.addToast(`Erro na importação: ${payload.error}`, { type: 'error', duration: 8000 });
+        }
+      }
+    };
+    socket.on('session-import-progress', handleImportProgress);
 
     console.log('✅ Listeners WebSocket configurados com sucesso');
 
@@ -193,7 +213,8 @@ export default function SessionsComponent() {
       console.log('🔌 Removendo listeners WebSocket...');
       socket.off('sessions-update', handleSessionsUpdate);
       socket.off('session-status-update', handleSessionStatusUpdate);
-      socket.off('session-qr-update', handleQRCodeUpdate);
+  socket.off('session-qr-update', handleQRCodeUpdate);
+  socket.off('session-import-progress', handleImportProgress);
       console.log('✅ Listeners WebSocket removidos');
     };
   }, [socket, isConnected, showQRModal, selectedSession]);
@@ -365,7 +386,14 @@ export default function SessionsComponent() {
         response = await apiFetch('/api/sessions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ whatsappId: newSession.whatsappId.trim(), library: 'baileys', name: newSession.name?.trim() || undefined })
+          body: JSON.stringify({ 
+            whatsappId: newSession.whatsappId.trim(), 
+            library: 'baileys', 
+            name: newSession.name?.trim() || undefined,
+            importAllChats: !!newSession.importAllChats,
+            importFromDate: newSession.importAllChats && newSession.importFromDate ? newSession.importFromDate : undefined,
+            importToDate: newSession.importAllChats && newSession.importToDate ? newSession.importToDate : undefined
+          })
         });
       } else {
         // Multi canal init direto
@@ -385,7 +413,7 @@ export default function SessionsComponent() {
 
       if (response.ok) {
         setShowCreateModal(false);
-        setNewSession({ whatsappId: '', library: 'baileys', name: '', channel: 'whatsapp', igUser: '', igPass: '', fbEmail: '', fbPass: '' });
+  setNewSession({ whatsappId: '', library: 'baileys', name: '', channel: 'whatsapp', igUser: '', igPass: '', fbEmail: '', fbPass: '', importAllChats: false, importFromDate: '', importToDate: '' });
         setError('');
       } else {
         const errorData = await response.json();
@@ -629,10 +657,10 @@ export default function SessionsComponent() {
 
   const getStatusIcon = (sessionId, status) => {
     const currentStatus = realTimeStatus[sessionId] || status;
-    
+    // Mapeia ícones por status para evitar sempre cair no default
     switch (currentStatus) {
       case 'connected':
-        return <CheckCircleIcon className="h-5 w-5 text-green-500" />;
+        return <CheckCircleIcon className="h-5 w-5 text-emerald-500" />;
       case 'connecting':
       case 'qr_ready':
         return <ClockIcon className="h-5 w-5 text-yellow-500 animate-spin" />;
@@ -649,33 +677,39 @@ export default function SessionsComponent() {
 
   const getStatusText = (sessionId, status) => {
     const currentStatus = realTimeStatus[sessionId] || status;
-    
+    const baseCls = 'font-medium';
     switch (currentStatus) {
       case 'connected':
-        return <span className="text-green-600 font-medium">Conectado</span>;
+        return <span className="text-emerald-500 {baseCls}">Conectado</span>;
       case 'connecting':
-        return <span className="text-yellow-600 font-medium">Conectando...</span>;
-      case 'qr_ready':
-      case 'qr':
-        return <span className="text-blue-600 font-medium">Aguardando QR</span>;
-      case 'disconnected':
-        return <span className="text-red-600 font-medium">Desconectado</span>;
-      case 'error':
-        return <span className="text-red-700 font-medium">Erro</span>;
-      case 'restarting':
-        return <span className="text-orange-600 font-medium">Reiniciando...</span>;
       case 'starting':
-        return <span className="text-blue-600 font-medium">Iniciando...</span>;
+        return <span className="text-indigo-400 {baseCls}">Conectando...</span>;
+      case 'qr_ready':
+        return <span className="text-blue-500 {baseCls}">QR Pronto</span>;
+      case 'qr':
+        return <span className="text-blue-400 {baseCls}">Escaneie o QR</span>;
+      case 'restarting':
+        return <span className="text-amber-400 {baseCls}">Reiniciando...</span>;
       case 'stopping':
-        return <span className="text-orange-600 font-medium">Parando...</span>;
+        return <span className="text-yellow-500 {baseCls}">Parando...</span>;
+      case 'disconnected':
+        return <span className="text-gray-400 {baseCls}">Desconectado</span>;
+      case 'error':
+        return <span className="text-red-500 {baseCls}">Erro</span>;
+      case 'awaiting_initial_sync':
+      case 'awaiting':
+        return <span className="text-sky-400 {baseCls}">Aguardando</span>;
       default:
-        return <span className="text-gray-600 font-medium">Desconhecido</span>;
+        // Capitaliza status desconhecido para alguma visibilidade
+        return <span className="text-gray-500 {baseCls}">{(currentStatus || 'Desconhecido')}</span>;
     }
   };
 
   const getActionButtons = (session) => {
     const currentStatus = realTimeStatus[session.id] || session.status;
     const isLoading = actionLoading[session.id];
+  const importInfo = importProgress[session.id];
+  const canceling = actionLoading[`cancel_${session.id}`];
     
     return (
       <>
@@ -875,7 +909,10 @@ export default function SessionsComponent() {
 
       {/* Sessions Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {sessions.map((session) => (
+        {sessions.map((session) => {
+          const importInfo = importProgress[session.id];
+          const canceling = actionLoading[`cancel_${session.id}`];
+          return (
           <div key={session.id} className="bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-xl p-4 hover:border-blue-500/50 transition-all duration-200">
             {/* Session Header */}
             <div className="flex items-center justify-between mb-3">
@@ -912,6 +949,45 @@ export default function SessionsComponent() {
             {/* Action Buttons */}
             <div className="space-y-2">
               {getActionButtons(session)}
+               {importInfo && (
+                 <div className="mt-2">
+                   <div className="flex justify-between items-center mb-1">
+                     <span className="text-[10px] uppercase tracking-wide text-gray-400">Importação</span>
+                     <span className="text-[10px] text-gray-400">{importInfo.percentage}%</span>
+                   </div>
+                   <div className="w-full h-2 bg-slate-700/60 rounded-full overflow-hidden">
+                     <div className={`h-full transition-all duration-300 ${importInfo.status === 'error' ? 'bg-red-500' : importInfo.status === 'completed' ? 'bg-green-500' : importInfo.status === 'canceled' ? 'bg-gray-500' : 'bg-yellow-500 animate-pulse'}`}
+                          style={{ width: `${importInfo.percentage || 0}%` }} />
+                   </div>
+                   <div className="mt-1 text-[10px] text-gray-400 flex justify-between">
+                     <span>{importInfo.processed}/{importInfo.total}</span>
+                     <span>{importInfo.status === 'completed' ? 'Concluído' : importInfo.status === 'error' ? 'Erro' : importInfo.status === 'canceled' ? 'Cancelado' : 'Processando...'}</span>
+                   </div>
+                   {importInfo.status === 'running' && (
+                     <button
+                       onClick={async () => {
+                         try {
+                           setActionLoading(prev => ({ ...prev, [`cancel_${session.id}`]: true }));
+                           const resp = await apiFetch(`/api/sessions/${session.id}/cancel-import`, { method: 'POST' });
+                           if (!resp.ok) {
+                             const j = await resp.json().catch(()=>({}));
+                             setError(j.error || 'Falha ao cancelar importação');
+                           }
+                         } catch (e) {
+                           setError('Erro ao solicitar cancelamento');
+                         } finally {
+                           setActionLoading(prev => ({ ...prev, [`cancel_${session.id}`]: false }));
+                         }
+                       }}
+                       disabled={canceling}
+                       className="mt-2 w-full bg-red-600 hover:bg-red-700 disabled:bg-red-900 text-white rounded-lg py-1.5 text-[11px] font-medium transition-colors flex items-center justify-center gap-1"
+                     >
+                       {canceling ? <ClockIcon className="h-3 w-3 animate-spin"/> : <XCircleIcon className="h-3 w-3"/>}
+                       {canceling ? 'Cancelando...' : 'Cancelar Importação'}
+                     </button>
+                   )}
+                 </div>
+     )}
               <button
                 onClick={() => openEditModal(session)}
                 className="w-full mt-2 bg-neutral-700/60 hover:bg-neutral-600 text-neutral-200 text-xs font-medium px-3 py-2 rounded-lg transition flex items-center justify-center gap-1"
@@ -923,7 +999,7 @@ export default function SessionsComponent() {
               )}
             </div>
           </div>
-        ))}
+   )})}
       </div>
 
       {/* Empty State */}
@@ -1019,6 +1095,49 @@ export default function SessionsComponent() {
                     <input type="password" value={newSession.fbPass} onChange={e=>setNewSession({...newSession, fbPass:e.target.value})} className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600/50 text-white rounded-xl focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500/50 text-sm" />
                   </div>
                   <p className="text-xs text-amber-400 sm:col-span-2">Use conta secundária. API não oficial pode gerar bloqueios.</p>
+                </div>
+              )}
+
+              {newSession.channel === 'whatsapp' && (
+                <div className="space-y-4">
+                  <div className="flex items-start gap-3 bg-slate-700/30 border border-slate-600/40 rounded-xl p-4">
+                    <div>
+                      <input
+                        id="importAllChats"
+                        type="checkbox"
+                        checked={newSession.importAllChats}
+                        onChange={(e) => setNewSession(prev => ({ ...prev, importAllChats: e.target.checked }))}
+                        className="mt-1 w-4 h-4 text-yellow-500 rounded border-slate-500 bg-slate-800 focus:ring-yellow-500/60 focus:ring-offset-0"
+                      />
+                    </div>
+                    <label htmlFor="importAllChats" className="flex-1 cursor-pointer">
+                      <span className="block font-semibold text-sm text-gray-200">Importar histórico de chats</span>
+                      <span className="block text-xs text-gray-400 mt-1 leading-relaxed">Ao conectar, cria tickets básicos para cada conversa 1:1 encontrada na conta. Não importa mensagens (apenas contatos) nesta versão. Pode aumentar o tempo de conexão.</span>
+                    </label>
+                  </div>
+                  {newSession.importAllChats && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-300 mb-1">De (data inicial)</label>
+                        <input
+                          type="date"
+                          value={newSession.importFromDate}
+                          onChange={e => setNewSession(prev => ({ ...prev, importFromDate: e.target.value }))}
+                          className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600/50 text-white rounded-lg focus:ring-2 focus:ring-yellow-500/40 focus:border-yellow-500/50 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-300 mb-1">Até (data final)</label>
+                        <input
+                          type="date"
+                          value={newSession.importToDate}
+                          onChange={e => setNewSession(prev => ({ ...prev, importToDate: e.target.value }))}
+                          className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600/50 text-white rounded-lg focus:ring-2 focus:ring-yellow-500/40 focus:border-yellow-500/50 text-sm"
+                        />
+                      </div>
+                      <p className="text-[10px] text-amber-400 sm:col-span-2">Se deixar em branco, importa sem limite de data correspondente. Datas são filtradas de forma aproximada (baseadas na última atividade da conversa).</p>
+                    </div>
+                  )}
                 </div>
               )}
 

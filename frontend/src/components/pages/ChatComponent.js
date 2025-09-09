@@ -287,6 +287,27 @@ useEffect(() => {
     socket.on('message-sent', handleMessageSent);
     socket.on('message-error', handleMessageError);
 
+    // Novo: eventos de auto-recebimento e auto-atribuição
+    const handleTicketAutoReceived = (data) => {
+      console.log('🤖 Evento ticket-auto-received:', data);
+      // Refresh rápido para garantir visualização do ticket atualizado
+      fetchTickets(true).then(() => {
+        // Se ainda não apareceu, tentar novamente em 500ms (possível race com atualização de última mensagem)
+        setTimeout(() => {
+          if (!tickets.some(t => t.id === data.ticketId)) {
+            console.log('⏳ Re-tentando fetchTickets após auto-receive (race condition)');
+            fetchTickets(true);
+          }
+        }, 500);
+      });
+    };
+    const handleTicketAutoAssigned = (data) => {
+      console.log('🤖 Evento ticket-auto-assigned:', data);
+      fetchTickets(true);
+    };
+    socket.on('ticket-auto-received', handleTicketAutoReceived);
+    socket.on('ticket-auto-assigned', handleTicketAutoAssigned);
+
     console.log('✅ Listeners WebSocket registrados:', {
       'tickets-update': true,
       'new-message': true,
@@ -316,7 +337,9 @@ useEffect(() => {
       socket.off('message-update', handleMessageUpdate);
       socket.off('message-sent', handleMessageSent);
       socket.off('message-error', handleMessageError);
-      socket.off('test-event');
+  socket.off('test-event');
+  socket.off('ticket-auto-received', handleTicketAutoReceived);
+  socket.off('ticket-auto-assigned', handleTicketAutoAssigned);
     };
   }, [socket, isConnected, selectedTicket, joinTicket]);
 

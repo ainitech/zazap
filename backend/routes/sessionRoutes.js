@@ -12,6 +12,7 @@ import {
   restartBaileysSession,
   listBaileysSessions
 } from '../services/baileysService.js';
+import { cancelSessionImport } from '../services/baileysService.js';
 import { getSessionsStatus, reactivateSession } from '../controllers/sessionStatusController.js';
 
 // Importar estado global das sessões
@@ -64,7 +65,7 @@ router.get('/', authMiddleware, async (req, res) => {
 // POST /api/sessions - Criar nova sessão
 router.post('/', authMiddleware, async (req, res) => {
   try {
-  const { whatsappId, library, name } = req.body;
+  const { whatsappId, library, name, importAllChats, importFromDate, importToDate } = req.body;
 
     if (!whatsappId || !library) {
       return res.status(400).json({ error: 'whatsappId e library são obrigatórios' });
@@ -85,7 +86,10 @@ router.post('/', authMiddleware, async (req, res) => {
       whatsappId,
       name: name || null,
       library,
-      status: 'disconnected'
+      status: 'disconnected',
+      importAllChats: !!importAllChats,
+      importFromDate: importFromDate || null,
+      importToDate: importToDate || null
     });
 
     // Emitir atualização de sessões via WebSocket
@@ -102,7 +106,7 @@ router.post('/', authMiddleware, async (req, res) => {
 router.put('/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
-    const { defaultQueueId, status } = req.body;
+  const { defaultQueueId, status, importAllChats, importFromDate, importToDate } = req.body;
     console.log(`🛠️ [PUT /sessions/${id}] User=${req.user?.id} Body=`, req.body);
 
     const session = await Session.findOne({ where: { id, userId: req.user.id } });
@@ -113,7 +117,10 @@ router.put('/:id', authMiddleware, async (req, res) => {
 
     const payload = {};
     if (typeof defaultQueueId !== 'undefined') payload.defaultQueueId = defaultQueueId || null;
-    if (typeof status !== 'undefined') payload.status = status;
+  if (typeof status !== 'undefined') payload.status = status;
+  if (typeof importAllChats !== 'undefined') payload.importAllChats = !!importAllChats;
+  if (typeof importFromDate !== 'undefined') payload.importFromDate = importFromDate || null;
+  if (typeof importToDate !== 'undefined') payload.importToDate = importToDate || null;
 
     await session.update(payload);
 
@@ -229,6 +236,21 @@ router.post('/:id/start', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error('Erro ao iniciar sessão:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+// POST /api/sessions/:id/cancel-import - Cancelar importação em andamento
+router.post('/:id/cancel-import', authMiddleware, async (req, res) => {
+  try {
+    const session = await Session.findOne({ where: { id: req.params.id, userId: req.user.id } });
+    if (!session) {
+      return res.status(404).json({ error: 'Sessão não encontrada' });
+    }
+    cancelSessionImport(session.whatsappId);
+    return res.json({ message: 'Cancelamento solicitado' });
+  } catch (err) {
+    console.error('Erro ao cancelar importação:', err);
+    return res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 

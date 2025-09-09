@@ -1,7 +1,7 @@
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import Jimp from 'jimp';
+import * as Jimp from 'jimp';
 import ffmpeg from 'fluent-ffmpeg';
 
 const storage = multer.diskStorage({

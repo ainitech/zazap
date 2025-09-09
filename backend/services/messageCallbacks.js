@@ -206,7 +206,7 @@ const handleBaileysMessage = async (message, sessionId) => {
         channel: 'whatsapp'
       });
       isNewTicket = true;
-      console.log(`🎫 [BAILEYS] Novo ticket criado: #${ticket.id}`);
+      console.log(`🎫 [BAILEYS] Novo ticket criado: #${ticket.id} com chatStatus: ${ticket.chatStatus}`);
       if (defaultQueueId) {
         console.log(`🧪[MSG] defaultQueueId aplicado na criação: ${defaultQueueId}`);
       }
@@ -253,6 +253,78 @@ const handleBaileysMessage = async (message, sessionId) => {
 
     // Verificar se é resposta de enquete
     const pollResponse = await detectPollResponse(messageContent, ticket.id);
+
+    // Capturar NPS quando ticket fechado. Reabrir depois de capturar, e também
+    // se cliente mandar outra mensagem após já ter respondido.
+    try {
+      if (ticket.chatStatus === 'closed' || ticket.chatStatus === 'resolved') {
+        const trimmed = (messageContent || '').trim();
+        const isStrictNumeric = /^\d{1,2}$/.test(trimmed);
+  console.log(`[NPS] Avaliando mensagem para NPS -> ticket #${ticket.id} status=${ticket.chatStatus} npsScore=${ticket.npsScore} trimmed='${trimmed}' isStrictNumeric=${isStrictNumeric}`);
+        // Caso ainda não tenha NPS e seja nota puramente numérica => registra, NÃO reabre
+  if (ticket.npsScore == null && isStrictNumeric) {
+          const score = parseInt(trimmed, 10);
+          if (score >= 0 && score <= 10) {
+            const npsUserId = ticket.assignedUserId || null;
+            await ticket.update({ npsScore: score, npsUserId });
+            console.log(`⭐ NPS registrado para ticket #${ticket.id}: ${score}`);
+            // Mensagem de agradecimento
+            let thanksContent = `Obrigado! Sua nota ${score} foi registrada.`;
+            try {
+              const { Setting } = await import('../models/index.js');
+              const thanksSetting = await Setting.findOne({ where: { key: 'chat_nps_thanks_template' } });
+              if (thanksSetting && thanksSetting.value) {
+                thanksContent = thanksSetting.value.replace(/\{nota\}/g, String(score));
+              }
+            } catch (templErr) {
+              console.warn('⚠️ Não foi possível carregar template de agradecimento NPS:', templErr.message);
+            }
+            try {
+              const thanksMsg = await TicketMessage.create({
+                ticketId: ticket.id,
+                sender: 'system',
+                content: thanksContent,
+                timestamp: new Date(),
+                isFromGroup: false,
+                messageType: 'text',
+                channel: 'system'
+              });
+              emitToAll('new-message', { id: thanksMsg.id, ticketId: ticket.id, content: thanksContent, sender: 'system', channel: 'system', messageType: 'text', createdAt: thanksMsg.createdAt });
+              if (!ticket.queueId && ticket.sessionId) {
+                try {
+                  const { sendText } = await import('./baileysService.js');
+                  await sendText(ticket.sessionId, ticket.contact, thanksContent);
+                } catch (extErr) {
+                  console.warn('⚠️ Falha ao enviar agradecimento NPS externamente:', extErr.message);
+                }
+              }
+            } catch (ackErr) {
+              console.warn('⚠️ Falha ao salvar/enviar mensagem de agradecimento NPS:', ackErr.message);
+            }
+            // NÃO reabrir se for somente número
+          }
+        } else {
+          // Se já existe NPS e usuário envia novamente apenas número, ignorar silenciosamente (sem reabrir)
+          if (ticket.npsScore != null && isStrictNumeric) {
+            console.log(`🔒 Nota NPS já registrada para ticket #${ticket.id}; ignorando nova nota '${trimmed}'.`);
+            // segue fluxo normal para salvar mensagem como histórico sem alterar status
+          }
+          // Mensagem não é somente número. Se já existe NPS ou se ainda não temos (comentário adicional), reabrir.
+          const shouldReopen = !isStrictNumeric; // explicitamente texto / não só números
+          if (shouldReopen && (ticket.chatStatus === 'closed' || ticket.chatStatus === 'resolved')) {
+            try {
+              await ticket.update({ chatStatus: 'waiting' });
+              await emitTicketsUpdate();
+              console.log(`🔄 Ticket #${ticket.id} reaberto (waiting) por mensagem textual pós-encerramento.`);
+            } catch (reopenErr) {
+              console.warn('⚠️ Falha ao reabrir ticket após mensagem textual:', reopenErr.message);
+            }
+          }
+        }
+      }
+    } catch (npsErr) {
+      console.warn('⚠️ Erro no fluxo de NPS:', npsErr.message);
+    }
     
     // Extrair participant (para mensagens de grupo)
   const rawParticipant = message.key?.participant;
@@ -346,6 +418,7 @@ const handleBaileysMessage = async (message, sessionId) => {
     }
 
     console.log(`🎯 [BAILEYS] Processamento completo da mensagem para ticket #${ticket.id} - ID da mensagem: ${savedMessage.id}`);
+    console.log(`🎯 [BAILEYS] Estado final do ticket: status=${ticket.status}, chatStatus=${ticket.chatStatus}, queueId=${ticket.queueId}`);
 
   } catch (error) {
     console.error(`❌ [BAILEYS] Erro ao processar mensagem Baileys:`, error);

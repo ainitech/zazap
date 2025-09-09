@@ -4,7 +4,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { createServer } from 'http';
 import { initializeSocket } from './services/socket.js';
-import { autoReconnectSessions, startSessionHealthCheck } from './services/sessionManager.js';
+import { autoReconnectSessions, startSessionHealthCheck, startStartupWarmup } from './services/sessionManager.js';
 import RedisService from './services/redisService.js';
 // Removed whatsappjs and selection routes; using only Baileys
 import baileysRoutes from './routes/baileysRoutes.js';
@@ -141,6 +141,11 @@ server.listen(PORT, HOST, async () => {
   console.log(`   - Network: http://192.168.1.100:${PORT} (replace with your IP)`);
   console.log(`   - All interfaces: http://${HOST}:${PORT}`);
   console.log(`Socket.IO server initialized`);
+  if (process.env.pm_id !== undefined) {
+    console.log(`🟢 Executando sob PM2 (pm_id=${process.env.pm_id}) instâncias=${process.env.instances || '1'}`);
+  } else {
+    console.log('ℹ️ PM2 não detectado (executando diretamente via node / npm).');
+  }
   
   // Inicializar Redis para sistema ultra leve
   console.log('🔥 Inicializando Redis para sistema ultra leve...');
@@ -150,11 +155,14 @@ server.listen(PORT, HOST, async () => {
   setTimeout(async () => {
     console.log('🚀 Iniciando sistemas automáticos...');
     
-    // Reconectar sessões que estavam conectadas
-    await autoReconnectSessions();
-    
-    // Iniciar verificação de saúde das sessões
-    startSessionHealthCheck();
+  // Reconectar sessões que estavam conectadas
+  await autoReconnectSessions();
+
+  // Warmup (reanalisar e tentar reativar sessões nos primeiros 60s)
+  startStartupWarmup();
+
+  // Iniciar verificação de saúde (execução a cada 5 min)
+  startSessionHealthCheck();
 
     // Iniciar despachante de agendamentos
     try {

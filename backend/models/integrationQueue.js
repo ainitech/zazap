@@ -21,4 +21,9 @@ const IntegrationQueue = sequelize.define('IntegrationQueue', {
   timestamps: true,
 });
 
+IntegrationQueue.associate = (models) => {
+  IntegrationQueue.belongsTo(models.Integration, { foreignKey: 'integrationId', as: 'Integration' });
+  IntegrationQueue.belongsTo(models.Queue, { foreignKey: 'queueId', as: 'Queue' });
+};
+
 export default IntegrationQueue;

@@ -43,6 +43,22 @@ const Session = sequelize.define('Session', {
     allowNull: false,
     defaultValue: 'disconnected',
   },
+  importAllChats: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+    comment: 'Se verdadeiro, ao conectar a sessão Baileys fará importação de todo histórico de chats.'
+  },
+  importFromDate: {
+    type: DataTypes.DATEONLY,
+    allowNull: true,
+    comment: 'Data inicial para filtro de importação (inclusive)'
+  },
+  importToDate: {
+    type: DataTypes.DATEONLY,
+    allowNull: true,
+    comment: 'Data final para filtro de importação (inclusive)'
+  },
   defaultQueueId: {
     type: DataTypes.INTEGER,
     allowNull: true,

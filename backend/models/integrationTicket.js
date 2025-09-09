@@ -21,4 +21,10 @@ const IntegrationTicket = sequelize.define('IntegrationTicket', {
   timestamps: true,
 });
 
+// Definir associações explícitas para permitir include: [Integration]
+IntegrationTicket.associate = (models) => {
+  IntegrationTicket.belongsTo(models.Integration, { foreignKey: 'integrationId', as: 'Integration' });
+  IntegrationTicket.belongsTo(models.Ticket, { foreignKey: 'ticketId', as: 'Ticket' });
+};
+
 export default IntegrationTicket;

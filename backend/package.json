@@ -4,7 +4,10 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
+  "start": "node index.js",
+  "start:pm2": "pm2 start ecosystem.config.cjs --env production",
+  "restart:pm2": "pm2 restart zazap-backend || pm2 start ecosystem.config.cjs --env production",
+  "stop:pm2": "pm2 delete zazap-backend || true",
     "dev": "nodemon --legacy-watch -e js --watch index.js --watch routes --watch controllers --watch services --watch models --watch middleware --watch config --ignore privated --ignore uploads --ignore **/*.json --ignore **/creds.json --ignore **/pre-key-*.json --ignore **/sender-key-*.json --ignore **/session-*.json --ignore **/app-state-sync-key-*.json --delay 2000 index.js",
     "dev:server": "ts-node-dev --respawn --transpile-only --poll --ignore-watch privated --ignore-watch uploads --ignore-watch dist --watch src src/server.ts",
     "db:create": "npx sequelize-cli db:create",
