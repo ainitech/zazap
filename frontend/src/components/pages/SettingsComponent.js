@@ -36,6 +36,16 @@ export default function SettingsComponent() {
   const [formValues, setFormValues] = useState({});
   const fileInputRef = useRef(null);
 
+  // Estados para alteração de perfil
+  const [profileData, setProfileData] = useState({
+    name: user?.name || '',
+    email: user?.email || '',
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+  const [profileLoading, setProfileLoading] = useState(false);
+
   // Configurações de grupos
   const [groupSettings, setGroupSettings] = useState({
     showGroups: false, // Desativado por padrão
@@ -47,8 +57,15 @@ export default function SettingsComponent() {
 
   // Persistência em localStorage removida por motivos de segurança / política
   useEffect(() => {
-    // Poderia buscar do backend futuramente
-  }, []);
+    // Carregar dados do usuário no formulário
+    if (user) {
+      setProfileData(prev => ({
+        ...prev,
+        name: user.name || '',
+        email: user.email || ''
+      }));
+    }
+  }, [user]);
 
   // Salvar configurações (apenas em memória agora)
   const saveGroupSettings = (newSettings) => {
@@ -78,27 +95,144 @@ export default function SettingsComponent() {
     }, 3000);
   };
 
+  // Função para atualizar dados do perfil
+  const handleProfileUpdate = async (e) => {
+    e.preventDefault();
+    
+    if (!profileData.name.trim()) {
+      showMessage('Nome é obrigatório.', 'error');
+      return;
+    }
+
+    if (!profileData.email.trim()) {
+      showMessage('Email é obrigatório.', 'error');
+      return;
+    }
+
+    try {
+      setProfileLoading(true);
+      
+      const updateData = {
+        name: profileData.name.trim(),
+        email: profileData.email.trim()
+      };
+
+      const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/users/profile`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify(updateData)
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        showMessage('Perfil atualizado com sucesso!');
+        
+        // Atualizar contexto de auth se disponível
+        // window.location.reload(); // Opcional para recarregar dados
+      } else {
+        const error = await response.json();
+        showMessage(error.message || 'Erro ao atualizar perfil.', 'error');
+      }
+    } catch (error) {
+      console.error('Erro ao atualizar perfil:', error);
+      showMessage('Erro ao conectar com o servidor.', 'error');
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  // Função para alterar senha
+  const handlePasswordChange = async (e) => {
+    e.preventDefault();
+
+    if (!profileData.currentPassword) {
+      showMessage('Senha atual é obrigatória.', 'error');
+      return;
+    }
+
+    if (!profileData.newPassword) {
+      showMessage('Nova senha é obrigatória.', 'error');
+      return;
+    }
+
+    if (profileData.newPassword.length < 6) {
+      showMessage('Nova senha deve ter pelo menos 6 caracteres.', 'error');
+      return;
+    }
+
+    if (profileData.newPassword !== profileData.confirmPassword) {
+      showMessage('Confirmação de senha não confere.', 'error');
+      return;
+    }
+
+    try {
+      setProfileLoading(true);
+      
+      const passwordData = {
+        currentPassword: profileData.currentPassword,
+        newPassword: profileData.newPassword
+      };
+
+      const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/users/change-password`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify(passwordData)
+      });
+
+      if (response.ok) {
+        showMessage('Senha alterada com sucesso!');
+        setProfileData(prev => ({
+          ...prev,
+          currentPassword: '',
+          newPassword: '',
+          confirmPassword: ''
+        }));
+      } else {
+        const error = await response.json();
+        showMessage(error.message || 'Erro ao alterar senha.', 'error');
+      }
+    } catch (error) {
+      console.error('Erro ao alterar senha:', error);
+      showMessage('Erro ao conectar com o servidor.', 'error');
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
   // Função para upload de logo
   const handleLogoUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
 
-    // Validar tipo de arquivo
-    if (!file.type.startsWith('image/')) {
-      showMessage('Por favor, selecione apenas arquivos de imagem.', 'error');
+    // Validação mais flexível - aceitar qualquer arquivo de imagem
+    const validImageTypes = [
+      'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 
+      'image/bmp', 'image/svg+xml', 'image/tiff', 'image/ico', 'image/heic'
+    ];
+    
+    const isValidImage = file.type.startsWith('image/') || validImageTypes.includes(file.type);
+    
+    if (!isValidImage) {
+      showMessage('Por favor, selecione um arquivo de imagem válido.', 'error');
       return;
     }
 
-    // Validar tamanho (5MB máximo)
-    if (file.size > 5 * 1024 * 1024) {
-      showMessage('O arquivo deve ter no máximo 5MB.', 'error');
+    // Validar tamanho aumentado para 10MB para aceitar imagens maiores
+    if (file.size > 10 * 1024 * 1024) {
+      showMessage('O arquivo deve ter no máximo 10MB.', 'error');
       return;
     }
 
     try {
       setLogoUploading(true);
       await uploadLogo(file);
-      showMessage('Logo atualizado com sucesso!');
+      showMessage('Logo atualizado com sucesso! O sistema ajustou automaticamente o tamanho e qualidade.');
     } catch (error) {
       showMessage('Erro ao fazer upload do logo: ' + error.message, 'error');
     } finally {
@@ -167,33 +301,140 @@ export default function SettingsComponent() {
     switch (activeTab) {
       case 'profile':
         return (
-          <div className="space-y-6">
-            <div>
+          <div className="space-y-8">
+            {/* Informações do Perfil */}
+            <div className="bg-white p-6 rounded-lg border border-gray-200">
               <h3 className="text-lg font-medium text-gray-900 mb-4">Informações do Perfil</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <form onSubmit={handleProfileUpdate}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Nome *</label>
+                    <input
+                      type="text"
+                      value={profileData.name}
+                      onChange={(e) => setProfileData(prev => ({ ...prev, name: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+                    <input
+                      type="email"
+                      value={profileData.email}
+                      onChange={(e) => setProfileData(prev => ({ ...prev, email: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <button
+                    type="submit"
+                    disabled={profileLoading}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+                  >
+                    {profileLoading ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                        Salvando...
+                      </>
+                    ) : (
+                      'Salvar Alterações'
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* Alteração de Senha */}
+            <div className="bg-white p-6 rounded-lg border border-gray-200">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Alterar Senha</h3>
+              <form onSubmit={handlePasswordChange}>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Senha Atual *</label>
+                    <input
+                      type="password"
+                      value={profileData.currentPassword}
+                      onChange={(e) => setProfileData(prev => ({ ...prev, currentPassword: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Digite sua senha atual"
+                      required
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Nova Senha *</label>
+                      <input
+                        type="password"
+                        value={profileData.newPassword}
+                        onChange={(e) => setProfileData(prev => ({ ...prev, newPassword: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="Digite a nova senha"
+                        minLength="6"
+                        required
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Mínimo de 6 caracteres</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Confirmar Nova Senha *</label>
+                      <input
+                        type="password"
+                        value={profileData.confirmPassword}
+                        onChange={(e) => setProfileData(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="Confirme a nova senha"
+                        minLength="6"
+                        required
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <button
+                    type="submit"
+                    disabled={profileLoading}
+                    className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+                  >
+                    {profileLoading ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                        Alterando...
+                      </>
+                    ) : (
+                      'Alterar Senha'
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* Informações da Conta */}
+            <div className="bg-gray-50 p-6 rounded-lg border border-gray-200">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Informações da Conta</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Nome</label>
-                  <input
-                    type="text"
-                    defaultValue={user?.name || ''}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
+                  <span className="font-medium text-gray-700">ID do Usuário:</span>
+                  <span className="ml-2 text-gray-600">{user?.id}</span>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                  <input
-                    type="email"
-                    defaultValue={user?.email || ''}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
+                  <span className="font-medium text-gray-700">Criado em:</span>
+                  <span className="ml-2 text-gray-600">
+                    {user?.createdAt ? new Date(user.createdAt).toLocaleDateString('pt-BR') : 'N/A'}
+                  </span>
+                </div>
+                <div>
+                  <span className="font-medium text-gray-700">Último acesso:</span>
+                  <span className="ml-2 text-gray-600">
+                    {user?.lastLogin ? new Date(user.lastLogin).toLocaleDateString('pt-BR') : 'N/A'}
+                  </span>
+                </div>
+                <div>
+                  <span className="font-medium text-gray-700">Status:</span>
+                  <span className="ml-2 text-green-600 font-medium">Ativo</span>
                 </div>
               </div>
-              <button
-                className="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-                onClick={() => showMessage('Perfil atualizado com sucesso!')}
-              >
-                Salvar Alterações
-              </button>
             </div>
           </div>
         );
@@ -410,10 +651,11 @@ export default function SettingsComponent() {
                     </div>
                     <div className="flex-1">
                       <p className="text-sm text-gray-600 mb-2">
-                        Logo atual da empresa. Este logo aparecerá na tela de login, barra de menu e PWA.
+                        Logo da empresa. Este logo aparecerá na tela de login, barra de menu e PWA.
                       </p>
                       <p className="text-xs text-gray-500">
-                        Formatos suportados: JPEG, PNG, GIF, WebP. Tamanho máximo: 5MB.
+                        Aceita qualquer formato de imagem (JPEG, PNG, GIF, WebP, BMP, SVG, etc.). 
+                        O sistema ajusta automaticamente o tamanho e qualidade. Máximo: 10MB.
                       </p>
                     </div>
                   </div>
@@ -454,7 +696,7 @@ export default function SettingsComponent() {
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/*"
+                    accept="image/*,.jpg,.jpeg,.png,.gif,.webp,.bmp,.svg,.tiff,.ico,.heic"
                     onChange={handleLogoUpload}
                     className="hidden"
                   />

@@ -3,6 +3,7 @@ import authMiddleware from '../middleware/authMiddleware.js';
 import {
   getProfile,
   updateProfile,
+  changePassword,
   getUsers,
   getUserById,
   createUser,
@@ -14,7 +15,8 @@ const router = express.Router();
 
 // Rotas para o perfil do usuário logado
 router.get('/me', authMiddleware, getProfile);
-router.put('/me', authMiddleware, updateProfile);
+router.put('/profile', authMiddleware, updateProfile);
+router.put('/change-password', authMiddleware, changePassword);
 
 // Rotas para gerenciamento de usuários (apenas administradores)
 router.get('/', authMiddleware, getUsers);

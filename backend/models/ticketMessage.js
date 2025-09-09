@@ -40,6 +40,23 @@ const TicketMessage = sequelize.define('TicketMessage', {
     type: DataTypes.STRING,
     allowNull: true,
   },
+  mimeType: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  fileSize: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  duration: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  isPtt: {
+    type: DataTypes.BOOLEAN,
+    allowNull: true,
+    defaultValue: false,
+  },
   isQuickReply: {
     type: DataTypes.BOOLEAN,
     allowNull: true,

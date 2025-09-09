@@ -152,6 +152,16 @@ export const uploadLogo = async (req, res) => {
       return res.status(400).json({ error: 'Nenhum arquivo enviado' });
     }
 
+    // Validação mais flexível do tipo de arquivo
+    const validMimeTypes = [
+      'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
+      'image/bmp', 'image/svg+xml', 'image/tiff', 'image/ico', 'image/heic'
+    ];
+
+    if (!req.file.mimetype.startsWith('image/') && !validMimeTypes.includes(req.file.mimetype)) {
+      return res.status(400).json({ error: 'Formato de arquivo não suportado. Use apenas imagens.' });
+    }
+
     const logoSetting = await Setting.findOne({ where: { key: 'system_logo' } });
     
     if (!logoSetting) {
@@ -174,9 +184,11 @@ export const uploadLogo = async (req, res) => {
     });
 
     res.json({
-      message: 'Logo atualizado com sucesso',
+      message: 'Logo atualizado com sucesso! O sistema otimizou automaticamente a imagem.',
       filename: req.file.filename,
-      path: `/uploads/${req.file.filename}`
+      path: `/uploads/${req.file.filename}`,
+      originalSize: req.file.size,
+      processedMimetype: req.file.mimetype
     });
   } catch (error) {
     console.error('Erro ao fazer upload do logo:', error);

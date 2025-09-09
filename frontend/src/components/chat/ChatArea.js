@@ -8,6 +8,7 @@ import TransferModal from './TransferModal';
 import { FileText } from 'lucide-react';
 import PriorityModal from './PriorityModal';
 import TagSelector from '../TagSelector';
+import WhatsAppAudioPlayer from './WhatsAppAudioPlayer';
 import { 
   ChatBubbleBottomCenterTextIcon,
   EllipsisVerticalIcon,
@@ -1876,8 +1877,13 @@ return (
                                                 ❌ Erro ao carregar vídeo: {message.fileName}
                                             </div>
                                         </video>
-                                    ) : message.fileType && message.fileType.startsWith('audio') ? (
-                                        <WhatsAppAudioPlayer src={getFileUrl(message.fileUrl)} />
+                                    ) : (message.fileType && message.fileType.startsWith('audio')) || 
+                                         (message.mimeType && message.mimeType.startsWith('audio')) ? (
+                                        <WhatsAppAudioPlayer 
+                                            src={getFileUrl(message.fileUrl)} 
+                                            duration={message.duration}
+                                            isPtt={message.isPtt || false}
+                                        />
                                     ) : (
                                         <div className="flex items-center space-x-3 p-3 bg-black/10 rounded-lg border border-white/10">
                                             <button

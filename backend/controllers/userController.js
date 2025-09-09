@@ -11,18 +11,105 @@ export const getProfile = async (req, res) => {
   }
 };
 
-// Atualizar perfil do usuário logado
+// Atualizar perfil do usuário logado (apenas nome e email)
 export const updateProfile = async (req, res) => {
-  const { name, password } = req.body;
+  const { name, email } = req.body;
+  
   try {
+    // Validações básicas
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Nome é obrigatório.' });
+    }
+
+    if (!email || !email.trim()) {
+      return res.status(400).json({ error: 'Email é obrigatório.' });
+    }
+
+    // Validação de email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: 'Email inválido.' });
+    }
+
     const user = await User.findByPk(req.user.id);
-    if (!user) return res.status(404).json({ error: 'Usuário não encontrado.' });
-    if (name) user.name = name;
-    if (password) user.password = await bcrypt.hash(password, 10);
+    if (!user) {
+      return res.status(404).json({ error: 'Usuário não encontrado.' });
+    }
+
+    // Verificar se o email já está em uso por outro usuário
+    if (email !== user.email) {
+      const existingUser = await User.findOne({ where: { email } });
+      if (existingUser && existingUser.id !== user.id) {
+        return res.status(400).json({ error: 'Este email já está em uso por outro usuário.' });
+      }
+    }
+
+    // Atualizar dados
+    user.name = name.trim();
+    user.email = email.trim();
     await user.save();
-    res.json({ success: true, user: { id: user.id, name: user.name, email: user.email } });
+
+    res.json({ 
+      success: true, 
+      message: 'Perfil atualizado com sucesso!',
+      user: { 
+        id: user.id, 
+        name: user.name, 
+        email: user.email 
+      } 
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Erro ao atualizar perfil:', err);
+    res.status(500).json({ error: 'Erro interno do servidor.' });
+  }
+};
+
+// Alterar senha do usuário logado
+export const changePassword = async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  
+  try {
+    // Validações básicas
+    if (!currentPassword) {
+      return res.status(400).json({ error: 'Senha atual é obrigatória.' });
+    }
+
+    if (!newPassword) {
+      return res.status(400).json({ error: 'Nova senha é obrigatória.' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'Nova senha deve ter pelo menos 6 caracteres.' });
+    }
+
+    const user = await User.findByPk(req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: 'Usuário não encontrado.' });
+    }
+
+    // Verificar senha atual
+    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    if (!isCurrentPasswordValid) {
+      return res.status(400).json({ error: 'Senha atual incorreta.' });
+    }
+
+    // Verificar se a nova senha é diferente da atual
+    const isSamePassword = await bcrypt.compare(newPassword, user.password);
+    if (isSamePassword) {
+      return res.status(400).json({ error: 'A nova senha deve ser diferente da senha atual.' });
+    }
+
+    // Atualizar senha
+    user.password = await bcrypt.hash(newPassword, 12);
+    await user.save();
+
+    res.json({ 
+      success: true, 
+      message: 'Senha alterada com sucesso!' 
+    });
+  } catch (err) {
+    console.error('Erro ao alterar senha:', err);
+    res.status(500).json({ error: 'Erro interno do servidor.' });
   }
 };
 

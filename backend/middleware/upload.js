@@ -1,7 +1,7 @@
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { Jimp } from 'jimp';
+import Jimp from 'jimp';
 import ffmpeg from 'fluent-ffmpeg';
 
 const storage = multer.diskStorage({
@@ -47,7 +47,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-// Middleware para comprimir imagens após upload
+// Middleware para comprimir e otimizar imagens após upload
 export const compressImageMiddleware = async (req, res, next) => {
   if (!req.file) return next();
   
@@ -58,21 +58,91 @@ export const compressImageMiddleware = async (req, res, next) => {
     
   const mime = req.file.mimetype;
   
-  // Compressão de imagem
+  // Processamento de imagem mais robusto
   if (mime.startsWith('image/')) {
     try {
-      const image = await Jimp.read(filePath);
-      image.resize(1280, Jimp.AUTO);
-      if (mime === 'image/jpeg' || mime === 'image/jpg') {
-        await image.quality(80).writeAsync(filePath);
-      } else if (mime === 'image/png') {
-        await image.deflateLevel(6).writeAsync(filePath);
-      } else {
-        await image.writeAsync(filePath);
+      console.log('🖼️ Processando imagem:', filePath);
+      
+      // Verificar se o arquivo existe antes de processar
+      if (!fs.existsSync(filePath)) {
+        console.error('❌ Arquivo não encontrado:', filePath);
+        return cb(null, file);
       }
-      req.file.size = fs.statSync(filePath).size;
+      
+      // Ler a imagem com Jimp (suporta vários formatos)
+      const image = await Jimp.read(filePath);
+      
+      // Verificar se a imagem foi carregada corretamente
+      if (!image || typeof image.getWidth !== 'function') {
+        console.error('❌ Falha ao carregar imagem com Jimp');
+        return cb(null, file);
+      }
+      
+      console.log('📏 Dimensões originais:', image.getWidth(), 'x', image.getHeight());
+      
+      // Redimensionar mantendo proporção - máximo 512px para logos
+      const maxSize = 512;
+      if (image.getWidth() > maxSize || image.getHeight() > maxSize) {
+        console.log('🔄 Redimensionando imagem...');
+        if (image.getWidth() > image.getHeight()) {
+          image.resize(maxSize, Jimp.AUTO);
+        } else {
+          image.resize(Jimp.AUTO, maxSize);
+        }
+        console.log('✅ Nova dimensão:', image.getWidth(), 'x', image.getHeight());
+      }
+      
+      // Para logos, converter SVG ou outros formatos para PNG de alta qualidade
+      if (mime === 'image/svg+xml' || mime === 'image/bmp' || mime === 'image/tiff') {
+        // Converter para PNG para melhor compatibilidade
+        const pngPath = filePath.replace(/\.[^/.]+$/, '.png');
+        await image.writeAsync(pngPath);
+        
+        // Remover arquivo original se for diferente
+        if (pngPath !== filePath && fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+        
+        // Atualizar informações do arquivo
+        req.file.filename = path.basename(pngPath);
+        req.file.path = req.file.path.replace(/\.[^/.]+$/, '.png');
+        req.file.mimetype = 'image/png';
+        req.file.originalname = req.file.originalname.replace(/\.[^/.]+$/, '.png');
+        req.file.size = fs.statSync(pngPath).size;
+      } else {
+        // Aplicar compressão baseada no formato
+        if (mime === 'image/jpeg' || mime === 'image/jpg') {
+          await image.quality(85).writeAsync(filePath);
+        } else if (mime === 'image/png') {
+          await image.deflateLevel(6).writeAsync(filePath);
+        } else {
+          // Para outros formatos, salvar como PNG
+          const pngPath = filePath.replace(/\.[^/.]+$/, '.png');
+          await image.writeAsync(pngPath);
+          
+          if (pngPath !== filePath && fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+          }
+          
+          req.file.filename = path.basename(pngPath);
+          req.file.path = req.file.path.replace(/\.[^/.]+$/, '.png');
+          req.file.mimetype = 'image/png';
+          req.file.originalname = req.file.originalname.replace(/\.[^/.]+$/, '.png');
+        }
+        
+        // Atualizar tamanho do arquivo
+        const finalPath = req.file.path.includes('.png') ? req.file.path.replace(/\.[^/.]+$/, '.png') : filePath;
+        if (fs.existsSync(finalPath)) {
+          req.file.size = fs.statSync(finalPath).size;
+        }
+      }
+      
+      console.log('✅ Imagem processada com sucesso');
     } catch (err) {
-      console.error('Erro ao comprimir imagem:', err);
+      console.error('❌ Erro ao processar imagem:', err.message);
+      console.error('📁 Arquivo:', filePath);
+      console.error('🗂️ MIME type:', mime);
+      // Se falhar, continuar sem processar - arquivo original será mantido
     }
     return next();
   }

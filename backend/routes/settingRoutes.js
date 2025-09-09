@@ -1,6 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import path from 'path';
+import { compressImageMiddleware } from '../middleware/upload.js';
 import {
   getSettings,
   getPublicSettings,
@@ -28,14 +29,14 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB
+    fileSize: 10 * 1024 * 1024, // 10MB - aumentado para aceitar imagens maiores
   },
   fileFilter: (req, file, cb) => {
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-    if (allowedTypes.includes(file.mimetype)) {
+    // Aceitar qualquer arquivo de imagem
+    if (file.mimetype.startsWith('image/')) {
       cb(null, true);
     } else {
-      cb(new Error('Apenas imagens são permitidas (JPEG, PNG, GIF, WebP)'), false);
+      cb(new Error('Apenas arquivos de imagem são permitidos'), false);
     }
   }
 });
@@ -50,7 +51,7 @@ router.put('/:key', authMiddleware, updateSetting);
 router.put('/', authMiddleware, updateSettings);
 
 // Upload e remoção de logo
-router.post('/logo/upload', authMiddleware, upload.single('logo'), uploadLogo);
+router.post('/logo/upload', authMiddleware, upload.single('logo'), compressImageMiddleware, uploadLogo);
 router.delete('/logo', authMiddleware, removeLogo);
 
 export default router;

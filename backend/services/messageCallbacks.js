@@ -5,6 +5,7 @@ import { getBaileysSession } from './baileysService.js';
 import { Session, Ticket, Queue, User, TicketMessage, Contact } from '../models/index.js';
 import emitTicketsUpdate from './ticketBroadcast.js';
 import { detectBaileysMessageType, extractBaileysMessageContent } from '../utils/baileysMessageDetector.js';
+import { downloadAndProcessMedia, canDownloadMedia } from './mediaDownloadService.js';
 import {
   processQueueRules,
   processHumanTransfer,
@@ -240,6 +241,16 @@ const handleBaileysMessage = async (message, sessionId) => {
     console.log(`💬 [BAILEYS] Conteúdo da mensagem extraído: "${messageContent}"`);
     console.log(`🔍 [BAILEYS] Tipo de mensagem detectado: "${messageType}"`);
 
+    // Processar mídia se presente
+    let mediaInfo = null;
+    if (canDownloadMedia(message)) {
+      console.log(`📥 [BAILEYS] Detectada mídia na mensagem, iniciando download...`);
+      mediaInfo = await downloadAndProcessMedia(message, sessionId);
+      if (mediaInfo) {
+        console.log(`✅ [BAILEYS] Mídia processada:`, mediaInfo);
+      }
+    }
+
     // Verificar se é resposta de enquete
     const pollResponse = await detectPollResponse(messageContent, ticket.id);
     
@@ -260,7 +271,14 @@ const handleBaileysMessage = async (message, sessionId) => {
       senderLid: message.key?.senderLid,
       participantLid: message.key?.participantLid,
       senderPn: message.key?.senderPn,
-      participantId: participantIdNorm || null
+      participantId: participantIdNorm || null,
+      // Campos de mídia
+      fileUrl: mediaInfo?.filePath || null,
+      fileName: mediaInfo?.fileName || null,
+      mimeType: mediaInfo?.mimeType || null,
+      fileSize: mediaInfo?.size || null,
+      duration: mediaInfo?.duration || null,
+      isPtt: mediaInfo?.isPtt || false
     };
 
     console.log(`💾 [BAILEYS] Dados da mensagem para salvar:`, messageData);
@@ -295,13 +313,19 @@ const handleBaileysMessage = async (message, sessionId) => {
       pollMessageId: savedMessage.pollMessageId,
       senderLid: savedMessage.senderLid,
       participantLid: savedMessage.participantLid,
-  senderPn: savedMessage.senderPn,
-  lastMessage: messageContent,
-  ticketUpdatedAt: ticket.updatedAt,
-  channel: 'whatsapp'
-    };
-    
-    console.log(`🚀 [BAILEYS] Emitindo evento new-message para ticket #${ticket.id}:`);
+      senderPn: savedMessage.senderPn,
+      lastMessage: messageContent,
+      ticketUpdatedAt: ticket.updatedAt,
+      channel: 'whatsapp',
+      // Campos de mídia - incluir no evento para o frontend
+      fileUrl: savedMessage.fileUrl,
+      fileName: savedMessage.fileName,
+      mimeType: savedMessage.mimeType,
+      fileSize: savedMessage.fileSize,
+      duration: savedMessage.duration,
+      isPtt: savedMessage.isPtt,
+      fileType: savedMessage.mimeType // Para compatibilidade
+    };    console.log(`🚀 [BAILEYS] Emitindo evento new-message para ticket #${ticket.id}:`);
     console.log(`📡 [BAILEYS] Dados do evento:`, JSON.stringify(eventData, null, 2));
     
     // Emitir para todos (global) e especificamente para a sala do ticket

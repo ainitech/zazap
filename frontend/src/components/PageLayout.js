@@ -261,9 +261,10 @@ export default function PageLayout({ children, title, subtitle }) {
       if (!user) return;
       
       try {
-        // Usar authService para fazer requisição autenticada
+        // Importar API_BASE_URL e usar authService para fazer requisição autenticada
+        const { API_BASE_URL } = await import('../utils/apiClient');
         const { default: authService } = await import('../services/authService');
-        const response = await authService.request('/api/schedules/counts');
+        const response = await authService.request(`${API_BASE_URL}/api/schedules/counts`);
         const data = await response.json();
         setScheduleCount(data?.total || 0);
       } catch (e) {

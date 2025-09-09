@@ -200,7 +200,7 @@ export const SettingsProvider = ({ children }) => {
     if (!logoFilename) return null;
     
     // Usar a URL base da API
-    const baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+    const baseUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
     return `${baseUrl}/uploads/${logoFilename}`;
   };
 
