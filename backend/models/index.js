@@ -19,6 +19,7 @@ import TicketTag from './ticketTag.js';
 import Campaign from './campaign.js';
 import CampaignMessage from './campaignMessage.js';
 import refreshTokenFactory from './refreshToken.js';
+import Setting from './setting.js';
 
 // Definir associações
 User.hasMany(Session, { foreignKey: 'userId' });
@@ -144,5 +145,6 @@ export {
   Tag,
   TicketTag,
   Campaign,
-  CampaignMessage
+  CampaignMessage,
+  Setting
 };

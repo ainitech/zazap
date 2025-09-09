@@ -1,0 +1,146 @@
+/* Variáveis CSS dinâmicas para cores primárias */
+:root {
+  --primary-color: #eab308;
+  --primary-color-10: rgba(234, 179, 8, 0.1);
+  --primary-color-20: rgba(234, 179, 8, 0.2);
+  --primary-color-30: rgba(234, 179, 8, 0.3);
+  --primary-color-40: rgba(234, 179, 8, 0.4);
+  --primary-color-50: rgba(234, 179, 8, 0.5);
+  --primary-color-dark: rgb(210, 161, 7);
+  --primary-color-darker: rgb(187, 143, 6);
+  --primary-color-light: rgb(238, 187, 34);
+  --primary-color-lighter: rgb(242, 196, 60);
+}
+
+/* Classes utilitárias para usar as cores dinâmicas */
+.bg-primary {
+  background-color: var(--primary-color) !important;
+}
+
+.bg-primary-10 {
+  background-color: var(--primary-color-10) !important;
+}
+
+.bg-primary-20 {
+  background-color: var(--primary-color-20) !important;
+}
+
+.bg-primary-30 {
+  background-color: var(--primary-color-30) !important;
+}
+
+.bg-primary-dark {
+  background-color: var(--primary-color-dark) !important;
+}
+
+.bg-primary-darker {
+  background-color: var(--primary-color-darker) !important;
+}
+
+.bg-primary-light {
+  background-color: var(--primary-color-light) !important;
+}
+
+.bg-primary-lighter {
+  background-color: var(--primary-color-lighter) !important;
+}
+
+.text-primary {
+  color: var(--primary-color) !important;
+}
+
+.text-primary-dark {
+  color: var(--primary-color-dark) !important;
+}
+
+.text-primary-darker {
+  color: var(--primary-color-darker) !important;
+}
+
+.text-primary-light {
+  color: var(--primary-color-light) !important;
+}
+
+.text-primary-lighter {
+  color: var(--primary-color-lighter) !important;
+}
+
+.border-primary {
+  border-color: var(--primary-color) !important;
+}
+
+.border-primary-20 {
+  border-color: var(--primary-color-20) !important;
+}
+
+.border-primary-30 {
+  border-color: var(--primary-color-30) !important;
+}
+
+/* Aplicar cores dinâmicas aos elementos existentes */
+.btn-primary,
+.bg-yellow-500,
+.bg-yellow-600,
+.hover\:bg-yellow-700:hover {
+  background-color: var(--primary-color) !important;
+}
+
+.hover\:bg-yellow-700:hover {
+  background-color: var(--primary-color-dark) !important;
+}
+
+.text-yellow-600,
+.text-yellow-500,
+.text-yellow-400 {
+  color: var(--primary-color) !important;
+}
+
+.border-yellow-500,
+.border-yellow-400 {
+  border-color: var(--primary-color) !important;
+}
+
+.focus\:ring-yellow-500:focus {
+  --tw-ring-color: var(--primary-color-30) !important;
+}
+
+.ring-yellow-500 {
+  --tw-ring-color: var(--primary-color-30) !important;
+}
+
+/* Cores específicas para elementos do sistema */
+.bg-yellow-500\/10 {
+  background-color: var(--primary-color-10) !important;
+}
+
+.bg-yellow-500\/20 {
+  background-color: var(--primary-color-20) !important;
+}
+
+.border-yellow-500\/20 {
+  border-color: var(--primary-color-20) !important;
+}
+
+/* Animações e efeitos */
+.animate-pulse-primary {
+  background-color: var(--primary-color) !important;
+}
+
+/* Hover states dinâmicos */
+.hover-primary:hover {
+  background-color: var(--primary-color) !important;
+}
+
+.hover-primary-dark:hover {
+  background-color: var(--primary-color-dark) !important;
+}
+
+.hover-primary-light:hover {
+  background-color: var(--primary-color-light) !important;
+}
+
+/* Focus states dinâmicos */
+.focus-primary:focus {
+  border-color: var(--primary-color) !important;
+  box-shadow: 0 0 0 3px var(--primary-color-20) !important;
+}

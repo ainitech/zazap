@@ -389,12 +389,16 @@ export const sendMediaMessage = async (req, res) => {
           const channel = ticket.channel || 'whatsapp';
           console.log(`🔍 Tentando enviar arquivo para ${ticket.contact} - Sessão: ${session.whatsappId} - Canal: ${channel}`);
           
+          // Ler o arquivo em buffer para todos os canais
+          const filePath = path.isAbsolute(file.path) ? file.path : path.join(process.cwd(), file.path);
+          const fileBuffer = fs.readFileSync(filePath);
+          
           let fileSent = false;
           
           if (channel === 'instagram') {
             try {
               console.log(`📤 Tentando envio de mídia via Instagram`);
-              await sendInstagramMedia(session.whatsappId, ticket.contact, fileBuffer, file.mimetype, ticket.id);
+              await sendInstagramMedia(session.whatsappId, ticket.contact, fileBuffer, file.mimetype, ticket.id, file.originalname);
               console.log(`✅ Mídia enviada com sucesso via Instagram`);
               fileSent = true;
             } catch (instagramError) {
@@ -413,8 +417,6 @@ export const sendMediaMessage = async (req, res) => {
             // Canal WhatsApp (padrão)
             const sock = getBaileysSession(session.whatsappId);
             if (sock && sock.user) {
-              const filePath = path.isAbsolute(file.path) ? file.path : path.join(process.cwd(), file.path);
-              const fileBuffer = fs.readFileSync(filePath);
               await sendMediaBaileys(session.whatsappId, ticket.contact, fileBuffer, file.mimetype);
               console.log(`✅ Arquivo enviado com sucesso via Baileys`);
               fileSent = true;

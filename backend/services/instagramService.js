@@ -1,12 +1,305 @@
 // Integração NÃO OFICIAL com Instagram usando instagram-private-api
 // ATENÇÃO: Pode violar termos da plataforma. Use por sua conta e risco.
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
+import ffmpeg from 'fluent-ffmpeg';
 import { IgApiClient } from 'instagram-private-api';
 import { ingestInboundMessage } from './multiChannelIngest.js';
 import { emitToTicket, emitToAll } from './socket.js';
 
 const sessions = new Map(); // sessionId -> { ig, username, createdAt, pollTimer, lastThreadItemIds }
+
+// Função helper para determinar formato de entrada do FFmpeg
+const getInputFormat = (mimetype) => {
+  if (mimetype.includes('mp4')) return 'mp4';
+  if (mimetype.includes('mpeg')) return 'mpeg';
+  if (mimetype.includes('wav')) return 'wav';
+  if (mimetype.includes('ogg')) return 'ogg';
+  if (mimetype.includes('webm')) return 'webm';
+  return 'auto'; // Deixar FFmpeg detectar automaticamente
+};
+
+// Função para converter áudio para formato compatível com Instagram (MP4 com AAC para voice notes)
+const convertAudioForInstagram = (inputBuffer, originalMimetype) => {
+  return new Promise((resolve, reject) => {
+    console.log(`[Instagram] Convertendo áudio ${originalMimetype} para MP4 com AAC...`);
+    
+    // Criar arquivo temporário de entrada
+    const tempDir = path.resolve(process.cwd(), 'uploads', 'temp');
+    const timestamp = Date.now();
+    const randomId = Math.random().toString(36).substring(7);
+    const inputPath = path.join(tempDir, `input_${timestamp}_${randomId}.audio`);
+    const outputPath = path.join(tempDir, `output_${timestamp}_${randomId}.m4a`);
+    
+    // Garantir que o diretório temp existe
+    try {
+      if (!fsSync.existsSync(tempDir)) {
+        fsSync.mkdirSync(tempDir, { recursive: true });
+      }
+    } catch (err) {
+      console.error(`[Instagram] Erro ao criar diretório temp: ${err.message}`);
+      return reject(err);
+    }
+    
+    try {
+      // Escrever buffer no arquivo temporário
+      fsSync.writeFileSync(inputPath, inputBuffer);
+      
+      // Converter usando FFmpeg para M4A com codec AAC (formato esperado pelo Instagram para voice notes)
+      ffmpeg(inputPath)
+        .toFormat('mp4')
+        .audioCodec('aac')
+        .audioChannels(1) // Mono é obrigatório para voice notes
+        .audioFrequency(44100) // 44.1kHz é o padrão do Instagram
+        .audioBitrate('64k') // Bitrate otimizado para voice notes
+        .outputOptions([
+          '-movflags', '+faststart', // Otimização para streaming
+          '-fflags', '+genpts' // Gerar timestamps se não existirem
+        ])
+        .on('start', (command) => {
+          console.log(`[Instagram] Iniciando conversão FFmpeg para voice note: ${command}`);
+        })
+        .on('progress', (progress) => {
+          if (progress.percent) {
+            console.log(`[Instagram] Progresso da conversão: ${Math.round(progress.percent)}%`);
+          }
+        })
+        .on('end', () => {
+          try {
+            console.log(`[Instagram] Conversão para voice note concluída, lendo arquivo convertido...`);
+            const convertedBuffer = fsSync.readFileSync(outputPath);
+            
+            // Limpar arquivos temporários
+            fsSync.unlinkSync(inputPath);
+            fsSync.unlinkSync(outputPath);
+            
+            console.log(`[Instagram] Áudio convertido com sucesso para voice note M4A (${convertedBuffer.length} bytes)`);
+            resolve({
+              buffer: convertedBuffer,
+              mimetype: 'audio/mp4' // Mimetype correto para voice notes
+            });
+          } catch (readError) {
+            console.error(`[Instagram] Erro ao ler arquivo convertido: ${readError.message}`);
+            reject(readError);
+          }
+        })
+        .on('error', (err) => {
+          console.error(`[Instagram] Erro na conversão FFmpeg: ${err.message}`);
+          
+          // Limpar arquivos temporários em caso de erro
+          try {
+            if (fsSync.existsSync(inputPath)) fsSync.unlinkSync(inputPath);
+            if (fsSync.existsSync(outputPath)) fsSync.unlinkSync(outputPath);
+          } catch (cleanupError) {
+            console.error(`[Instagram] Erro ao limpar arquivos temp: ${cleanupError.message}`);
+          }
+          
+          // Verificar se é erro de FFmpeg não encontrado
+          if (err.message.includes('spawn') || err.message.includes('ENOENT')) {
+            reject(new Error('FFmpeg não encontrado no sistema. Instale o FFmpeg para conversão de áudio.'));
+          } else {
+            reject(new Error(`Conversão falhou: ${err.message}`));
+          }
+        })
+        .save(outputPath);
+        
+    } catch (writeError) {
+      console.error(`[Instagram] Erro ao escrever arquivo temporário: ${writeError.message}`);
+      reject(writeError);
+    }
+  });
+};
+
+// Converter áudio para vídeo MP4 com imagem estática (única forma de enviar áudio no Instagram)
+const convertAudioToVideoMP4 = (audioBuffer, originalMimetype) => {
+  return new Promise((resolve, reject) => {
+    console.log(`[Instagram] Convertendo áudio ${originalMimetype} para vídeo MP4...`);
+    
+    // Criar arquivo temporário de entrada
+    const tempDir = path.resolve(process.cwd(), 'uploads', 'temp');
+    const timestamp = Date.now();
+    const randomId = Math.random().toString(36).substring(7);
+    const audioPath = path.join(tempDir, `audio_${timestamp}_${randomId}.audio`);
+    const videoPath = path.join(tempDir, `video_${timestamp}_${randomId}.mp4`);
+    
+    // Criar uma imagem preta como placeholder para o vídeo
+    const imagePath = path.join(tempDir, `image_${timestamp}_${randomId}.jpg`);
+    
+    // Garantir que o diretório temp existe
+    try {
+      if (!fsSync.existsSync(tempDir)) {
+        fsSync.mkdirSync(tempDir, { recursive: true });
+      }
+    } catch (err) {
+      console.error(`[Instagram] Erro ao criar diretório temp: ${err.message}`);
+      return reject(err);
+    }
+    
+    try {
+      // Escrever buffer do áudio no arquivo temporário
+      fsSync.writeFileSync(audioPath, audioBuffer);
+      
+      // Criar uma imagem preta de 640x640 (quadrado para Instagram)
+      const createBlackImage = () => {
+        return new Promise((resolveImg, rejectImg) => {
+          ffmpeg()
+            .input('color=black:s=640x640')
+            .inputOptions(['-f', 'lavfi'])
+            .outputOptions(['-vframes', '1'])
+            .on('end', () => resolveImg())
+            .on('error', rejectImg)
+            .save(imagePath);
+        });
+      };
+      
+      // Primeiro criar a imagem preta
+      createBlackImage().then(() => {
+        // Converter áudio + imagem em vídeo MP4
+        const inputFormat = getInputFormat(originalMimetype);
+        const ffmpegCommand = ffmpeg()
+          .input(imagePath)
+          .inputOptions(['-loop', '1']) // Loop a imagem
+          .input(audioPath);
+        
+        // Se soubermos o formato, especificar
+        if (inputFormat !== 'auto') {
+          ffmpegCommand.inputOptions([`-f`, inputFormat]);
+        }
+        
+        ffmpegCommand
+          .videoCodec('libx264') // Codec de vídeo H.264
+          .audioCodec('aac') // Codec de áudio AAC
+          .audioBitrate('128k')
+          .audioChannels(2) // Stereo
+          .audioFrequency(44100) // 44.1kHz
+          .outputOptions([
+            '-pix_fmt', 'yuv420p', // Formato de pixel compatível
+            '-shortest', // Terminar quando o áudio acabar
+            '-movflags', '+faststart', // Otimização para streaming
+            '-preset', 'fast', // Velocidade de encoding
+            '-crf', '28' // Qualidade (menor = melhor qualidade)
+          ])
+          .on('start', (command) => {
+            console.log(`[Instagram] Iniciando conversão áudio->vídeo FFmpeg: ${command}`);
+          })
+          .on('progress', (progress) => {
+            if (progress.percent) {
+              console.log(`[Instagram] Progresso da conversão: ${Math.round(progress.percent)}%`);
+            }
+          })
+          .on('end', () => {
+            try {
+              console.log(`[Instagram] Conversão áudio->vídeo concluída, lendo arquivo...`);
+              const videoBuffer = fsSync.readFileSync(videoPath);
+              
+              // Limpar arquivos temporários
+              try {
+                if (fsSync.existsSync(audioPath)) fsSync.unlinkSync(audioPath);
+                if (fsSync.existsSync(imagePath)) fsSync.unlinkSync(imagePath);
+                if (fsSync.existsSync(videoPath)) fsSync.unlinkSync(videoPath);
+              } catch (cleanErr) {
+                console.error(`[Instagram] Erro ao limpar arquivos temp: ${cleanErr.message}`);
+              }
+              
+              console.log(`[Instagram] Vídeo MP4 criado com sucesso (${videoBuffer.length} bytes)`);
+              resolve({
+                buffer: videoBuffer,
+                mimetype: 'video/mp4'
+              });
+            } catch (readError) {
+              console.error(`[Instagram] Erro ao ler vídeo convertido: ${readError.message}`);
+              reject(readError);
+            }
+          })
+          .on('error', (err) => {
+            console.error(`[Instagram] Erro na conversão FFmpeg: ${err.message}`);
+            
+            // Limpar arquivos temporários em caso de erro
+            try {
+              if (fsSync.existsSync(audioPath)) fsSync.unlinkSync(audioPath);
+              if (fsSync.existsSync(imagePath)) fsSync.unlinkSync(imagePath);
+              if (fsSync.existsSync(videoPath)) fsSync.unlinkSync(videoPath);
+            } catch (cleanupError) {
+              console.error(`[Instagram] Erro ao limpar arquivos temp: ${cleanupError.message}`);
+            }
+            
+            reject(err);
+          })
+          .save(videoPath);
+      }).catch(err => {
+        console.error(`[Instagram] Erro ao criar imagem placeholder: ${err.message}`);
+        reject(err);
+      });
+      
+    } catch (writeError) {
+      console.error(`[Instagram] Erro ao escrever arquivo temporário: ${writeError.message}`);
+      reject(writeError);
+    }
+  });
+};
+
+// Função helper para validar tipos de arquivo suportados pelo Instagram
+const validateInstagramMediaType = (mimetype, fileName = '') => {
+  // Verificar se é um arquivo de áudio disfarçado (comum no Instagram/Facebook)
+  const isAudioFile = fileName.includes('audioclip') || fileName.includes('audio') || 
+                      (mimetype === 'video/mp4' && fileName.includes('audioclip')) ||
+                      (mimetype === 'video/mpeg' && fileName.includes('audioclip')) ||
+                      mimetype === 'audio/mpeg' || mimetype === 'audio/mp3';
+  
+  if (isAudioFile) {
+    console.log(`[Instagram] Detectado arquivo de áudio: ${fileName} (${mimetype})`);
+    return 'audio';
+  }
+  
+  if ((mimetype || '').startsWith('image/')) {
+    const supportedImageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/webp'];
+    if (!supportedImageTypes.includes(mimetype.toLowerCase())) {
+      throw new Error(`Tipo de imagem não suportado pelo Instagram: ${mimetype}. Tipos aceitos: JPEG, PNG, GIF, BMP, WebP`);
+    }
+    return 'image';
+  } else if ((mimetype || '').startsWith('video/')) {
+    const supportedVideoTypes = ['video/mp4', 'video/avi', 'video/mov', 'video/mkv'];
+    if (!supportedVideoTypes.includes(mimetype.toLowerCase())) {
+      throw new Error(`Tipo de vídeo não suportado pelo Instagram: ${mimetype}. Tipos aceitos: MP4, AVI, MOV, MKV`);
+    }
+    return 'video';
+  } else if ((mimetype || '').startsWith('audio/')) {
+    // Aceitar vários tipos de áudio para conversão automática
+    const supportedForConversion = [
+      'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 
+      'audio/mp3', 'audio/aac', 'audio/flac', 'audio/wma',
+      'audio/webm', 'audio/opus'
+    ];
+    
+    if (!supportedForConversion.includes(mimetype.toLowerCase())) {
+      throw new Error(`Tipo de áudio não suportado para conversão: ${mimetype}. Tipos aceitos: MP3, WAV, OGG, mp3, AAC, FLAC, WMA, WebM, Opus`);
+    }
+    return 'audio';
+  } else {
+    throw new Error(`Tipo de arquivo não suportado pelo Instagram: ${mimetype}. Instagram suporta apenas imagens (JPEG, PNG, GIF, BMP, WebP), vídeos (MP4, AVI, MOV, MKV) e áudios (MP3, WAV, OGG, mp3, AAC, FLAC, WMA, WebM, Opus - com conversão automática)`);
+  }
+};
+
+// Função de fallback para conversão simples sem FFmpeg
+const convertAudioSimple = (inputBuffer, originalMimetype) => {
+  return new Promise((resolve, reject) => {
+    console.log(`[Instagram] FFmpeg não disponível, tentando conversão simples...`);
+    
+    // Para alguns formatos, apenas mudar a extensão/mimetype pode funcionar
+    if (originalMimetype.includes('mp4') || originalMimetype.includes('mpeg') || 
+        originalMimetype.includes('mp3') || originalMimetype === 'audio/mpeg' || 
+        originalMimetype === 'audio/mp3') {
+      console.log(`[Instagram] Áudio compatível, convertendo mimetype para MP4`);
+      resolve({
+        buffer: inputBuffer,
+        mimetype: 'video/mp4'
+      });
+    } else {
+      reject(new Error('Conversão não disponível. Instale FFmpeg ou envie arquivo em formato MP4/MPEG.'));
+    }
+  });
+};
 
 const getRoot = () => path.resolve(process.cwd(), 'privated', 'instagram');
 const stateFile = (sessionId) => path.resolve(getRoot(), `${sessionId}.json`);
@@ -484,7 +777,7 @@ export const sendInstagramText = async (sessionId, to, text, ticketId = null) =>
   }
 };
 
-export const sendInstagramMedia = async (sessionId, to, buffer, mimetype, ticketId = null) => {
+export const sendInstagramMedia = async (sessionId, to, buffer, mimetype, ticketId = null, fileName = '') => {
   let ig;
   try { ig = requireSession(sessionId); } catch { ig = await ensureInstagramSession(sessionId); }
   
@@ -492,7 +785,7 @@ export const sendInstagramMedia = async (sessionId, to, buffer, mimetype, ticket
   const cleanToId = to.replace(/^ig:/, '');
   
   try {
-    console.log(`[Instagram] Enviando mídia para ${cleanToId}, tipo: ${mimetype}`);
+    console.log(`[Instagram] Enviando mídia para ${cleanToId}, tipo: ${mimetype}, arquivo: ${fileName}`);
     
     // Buscar thread existente com o usuário
     const inboxFeed = ig.feed.directInbox();
@@ -513,12 +806,55 @@ export const sendInstagramMedia = async (sessionId, to, buffer, mimetype, ticket
       const thread = ig.entity.directThread(threadId);
       
       if (!buffer) throw new Error('Arquivo vazio');
-      if ((mimetype || '').startsWith('image/')) {
+      
+      // Validar e determinar tipo de mídia (incluindo detecção de áudio disfarçado)
+      const mediaType = validateInstagramMediaType(mimetype, fileName);
+      
+      if (mediaType === 'image') {
         await thread.broadcastPhoto({ file: buffer });
-      } else if ((mimetype || '').startsWith('video/')) {
+        console.log(`[Instagram] Imagem enviada com sucesso`);
+      } else if (mediaType === 'video') {
         await thread.broadcastVideo({ video: buffer });
-      } else {
-        await thread.broadcastText('[Arquivo enviado - tipo não suportado diretamente]');
+        console.log(`[Instagram] Vídeo enviado com sucesso`);
+      } else if (mediaType === 'audio') {
+        // Instagram não suporta mais áudio direto - converter para vídeo MP4
+        console.log(`[Instagram] Áudio detectado. Convertendo para vídeo MP4...`);
+        
+        try {
+          // Para arquivos que são na verdade áudio, ajustar o mimetype
+          let actualMimetype = mimetype;
+          if ((mimetype === 'video/mp4' || mimetype === 'video/mpeg') && fileName.includes('audioclip')) {
+            actualMimetype = mimetype.replace('video/', 'audio/');
+            console.log(`[Instagram] Arquivo ${mimetype} detectado como áudio: ${fileName} → ${actualMimetype}`);
+          }
+          
+          // Converter áudio para vídeo MP4
+          const converted = await convertAudioToVideoMP4(buffer, actualMimetype);
+          
+          // Enviar como vídeo
+          await thread.broadcastVideo({ video: converted.buffer });
+          console.log(`[Instagram] Áudio enviado como vídeo MP4 com sucesso!`);
+          
+        } catch (conversionError) {
+          console.error(`[Instagram] Erro na conversão áudio->vídeo: ${conversionError.message}`);
+          
+          // Se a conversão falhar, tentar fallback simples
+          try {
+            console.log(`[Instagram] Tentando conversão simples...`);
+            const converted = await convertAudioSimple(buffer, mimetype);
+            await thread.broadcastVideo({ video: converted.buffer });
+            console.log(`[Instagram] Áudio enviado com conversão simples`);
+          } catch (fallbackError) {
+            // Se tudo falhar, enviar mensagem informativa
+            await thread.broadcastText(
+              `🎵 Áudio recebido\n\n` +
+              `⚠️ Não foi possível converter o áudio para envio.\n` +
+              `Erro: ${conversionError.message}\n\n` +
+              `Por favor, envie o áudio em formato MP3 ou MP4.`
+            );
+            console.log(`[Instagram] Enviada mensagem informativa sobre áudio`);
+          }
+        }
       }
     } else {
       // Criar nova thread
@@ -526,16 +862,59 @@ export const sendInstagramMedia = async (sessionId, to, buffer, mimetype, ticket
       const thread = ig.entity.directThread([cleanToId]);
       
       if (!buffer) throw new Error('Arquivo vazio');
-      if ((mimetype || '').startsWith('image/')) {
+      
+      // Validar e determinar tipo de mídia (incluindo detecção de áudio disfarçado)
+      const mediaType = validateInstagramMediaType(mimetype, fileName);
+      
+      if (mediaType === 'image') {
         await thread.broadcastPhoto({ file: buffer });
-      } else if ((mimetype || '').startsWith('video/')) {
+        console.log(`[Instagram] Imagem enviada com sucesso`);
+      } else if (mediaType === 'video') {
         await thread.broadcastVideo({ video: buffer });
-      } else {
-        await thread.broadcastText('[Arquivo enviado - tipo não suportado diretamente]');
+        console.log(`[Instagram] Vídeo enviado com sucesso`);
+      } else if (mediaType === 'audio') {
+        // Instagram não suporta mais áudio direto - converter para vídeo MP4
+        console.log(`[Instagram] Áudio detectado. Convertendo para vídeo MP4...`);
+        
+        try {
+          // Para arquivos que são na verdade áudio, ajustar o mimetype
+          let actualMimetype = mimetype;
+          if ((mimetype === 'video/mp4' || mimetype === 'video/mpeg') && fileName.includes('audioclip')) {
+            actualMimetype = mimetype.replace('video/', 'audio/');
+            console.log(`[Instagram] Arquivo ${mimetype} detectado como áudio: ${fileName} → ${actualMimetype}`);
+          }
+          
+          // Converter áudio para vídeo MP4
+          const converted = await convertAudioToVideoMP4(buffer, actualMimetype);
+          
+          // Enviar como vídeo
+          await thread.broadcastVideo({ video: converted.buffer });
+          console.log(`[Instagram] Áudio enviado como vídeo MP4 com sucesso!`);
+          
+        } catch (conversionError) {
+          console.error(`[Instagram] Erro na conversão áudio->vídeo: ${conversionError.message}`);
+          
+          // Se a conversão falhar, tentar fallback simples
+          try {
+            console.log(`[Instagram] Tentando conversão simples...`);
+            const converted = await convertAudioSimple(buffer, mimetype);
+            await thread.broadcastVideo({ video: converted.buffer });
+            console.log(`[Instagram] Áudio enviado com conversão simples`);
+          } catch (fallbackError) {
+            // Se tudo falhar, enviar mensagem informativa
+            await thread.broadcastText(
+              `🎵 Áudio recebido\n\n` +
+              `⚠️ Não foi possível converter o áudio para envio.\n` +
+              `Erro: ${conversionError.message}\n\n` +
+              `Por favor, envie o áudio em formato MP3 ou MP4.`
+            );
+            console.log(`[Instagram] Enviada mensagem informativa sobre áudio`);
+          }
+        }
       }
     }
     
-    console.log(`[Instagram] Mídia enviada com sucesso para ${cleanToId}`);
+    console.log(`[Instagram] Mídia processada com sucesso para ${cleanToId}`);
     
     // Emitir evento instantâneo para o frontend se temos ticketId
     if (ticketId) {
@@ -543,10 +922,12 @@ export const sendInstagramMedia = async (sessionId, to, buffer, mimetype, ticket
         ticketId: parseInt(ticketId),
         sender: 'user',
         content: (mimetype || '').startsWith('image/') ? '[Imagem]' : 
-                 (mimetype || '').startsWith('video/') ? '[Vídeo]' : '[Arquivo]',
+                 (mimetype || '').startsWith('video/') ? '[Vídeo]' : 
+                 (mimetype || '').startsWith('audio/') ? '[Áudio enviado como vídeo]' : '[Arquivo]',
         timestamp: new Date(),
         messageType: (mimetype || '').startsWith('image/') ? 'image' : 
-                     (mimetype || '').startsWith('video/') ? 'video' : 'document',
+                     (mimetype || '').startsWith('video/') ? 'video' :
+                     (mimetype || '').startsWith('audio/') ? 'video' : 'document',
         channel: 'instagram',
         status: 'sent'
       };

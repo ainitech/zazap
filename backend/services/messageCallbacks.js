@@ -171,6 +171,9 @@ const handleBaileysMessage = async (message, sessionId) => {
       }
     }
 
+  // Extrair conteúdo da mensagem cedo para poder usar ao criar ticket
+  const incomingContent = extractBaileysMessageContent(message);
+
   // Buscar ticket existente ou criar novo (diagnóstico detalhado)
   console.log('🧪[MSG] Iniciando busca de ticket para contato', contactId, 'remoteNorm', remoteNorm, 'session', sessionId);
   let ticket = await Ticket.findOne({
@@ -193,10 +196,13 @@ const handleBaileysMessage = async (message, sessionId) => {
       ticket = await Ticket.create({
         contact: contactId,
         contactId: contact.id,
-        status: 'pending',
+        status: 'open',            // alinhar com criação manual
+        chatStatus: 'waiting',      // necessário para aparecer em "aguardando"
         unreadCount: 1,
         sessionId: sessionId,
-        queueId: defaultQueueId
+        queueId: defaultQueueId,
+        lastMessage: incomingContent || null,
+        channel: 'whatsapp'
       });
       isNewTicket = true;
       console.log(`🎫 [BAILEYS] Novo ticket criado: #${ticket.id}`);
@@ -214,18 +220,19 @@ const handleBaileysMessage = async (message, sessionId) => {
         await ticket.update({ contact: pnNorm, contactId: contact.id });
       }
       // Atualizar ticket existente
-      const messageText = extractBaileysMessageContent(message);
+  const messageText = incomingContent;
       
       await ticket.update({
         unreadCount: ticket.unreadCount + 1,
         lastMessage: messageText,
-        updatedAt: new Date()
+        updatedAt: new Date(),
+        channel: ticket.channel || 'whatsapp'
       });
       console.log(`🎫 [BAILEYS] Ticket existente atualizado: #${ticket.id} (unread: ${ticket.unreadCount + 1})`);
     }
 
-    // Extrair conteúdo da mensagem usando função especializada
-    const messageContent = extractBaileysMessageContent(message);
+  // Conteúdo da mensagem já extraído
+  const messageContent = incomingContent;
     
     // Detectar tipo de mensagem corretamente
     const messageType = detectBaileysMessageType(message);
@@ -248,6 +255,7 @@ const handleBaileysMessage = async (message, sessionId) => {
       timestamp: new Date(),
       isFromGroup: (remoteNorm || '').includes('@g.us'),
       messageType: messageType, // Usar tipo detectado corretamente
+      channel: 'whatsapp',
       // LID support if provided by Baileys (v6.7.19+)
       senderLid: message.key?.senderLid,
       participantLid: message.key?.participantLid,
@@ -289,7 +297,8 @@ const handleBaileysMessage = async (message, sessionId) => {
       participantLid: savedMessage.participantLid,
   senderPn: savedMessage.senderPn,
   lastMessage: messageContent,
-  ticketUpdatedAt: ticket.updatedAt
+  ticketUpdatedAt: ticket.updatedAt,
+  channel: 'whatsapp'
     };
     
     console.log(`🚀 [BAILEYS] Emitindo evento new-message para ticket #${ticket.id}:`);

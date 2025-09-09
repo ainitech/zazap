@@ -4,6 +4,7 @@
 
 /* Import custom styles */
 @import './styles/custom.css';
+@import './styles/dynamic-colors.css';
 
 /* Custom animations for futuristic dashboard */
 @keyframes blob {

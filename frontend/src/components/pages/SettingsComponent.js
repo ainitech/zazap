@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Cog6ToothIcon,
   UserIcon,
@@ -8,16 +8,33 @@ import {
   ServerIcon,
   UserGroupIcon,
   CheckIcon,
-  ExclamationTriangleIcon
+  ExclamationTriangleIcon,
+  PhotoIcon,
+  TrashIcon,
+  CloudArrowUpIcon
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../../context/AuthContext';
+import { useSettings } from '../../context/SettingsContext';
 
 export default function SettingsComponent() {
   const { user } = useAuth();
+  const { 
+    settings, 
+    loading: settingsLoading, 
+    updateSetting, 
+    uploadLogo, 
+    removeLogo, 
+    getSetting, 
+    getLogoUrl 
+  } = useSettings();
+  
   const [activeTab, setActiveTab] = useState('profile');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('');
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [formValues, setFormValues] = useState({});
+  const fileInputRef = useRef(null);
 
   // Configurações de grupos
   const [groupSettings, setGroupSettings] = useState({
@@ -45,10 +62,10 @@ export default function SettingsComponent() {
 
   const tabs = [
     { id: 'profile', label: 'Perfil', icon: UserIcon },
+    { id: 'appearance', label: 'Aparência', icon: PaintBrushIcon },
     { id: 'groups', label: 'Grupos', icon: UserGroupIcon },
     { id: 'notifications', label: 'Notificações', icon: BellIcon },
     { id: 'security', label: 'Segurança', icon: ShieldCheckIcon },
-    { id: 'appearance', label: 'Aparência', icon: PaintBrushIcon },
     { id: 'system', label: 'Sistema', icon: ServerIcon }
   ];
 
@@ -60,6 +77,91 @@ export default function SettingsComponent() {
       setMessageType('');
     }, 3000);
   };
+
+  // Função para upload de logo
+  const handleLogoUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // Validar tipo de arquivo
+    if (!file.type.startsWith('image/')) {
+      showMessage('Por favor, selecione apenas arquivos de imagem.', 'error');
+      return;
+    }
+
+    // Validar tamanho (5MB máximo)
+    if (file.size > 5 * 1024 * 1024) {
+      showMessage('O arquivo deve ter no máximo 5MB.', 'error');
+      return;
+    }
+
+    try {
+      setLogoUploading(true);
+      await uploadLogo(file);
+      showMessage('Logo atualizado com sucesso!');
+    } catch (error) {
+      showMessage('Erro ao fazer upload do logo: ' + error.message, 'error');
+    } finally {
+      setLogoUploading(false);
+      // Limpar input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  // Função para remover logo
+  const handleLogoRemove = async () => {
+    if (!window.confirm('Tem certeza que deseja remover o logo?')) {
+      return;
+    }
+
+    try {
+      setLogoUploading(true);
+      await removeLogo();
+      showMessage('Logo removido com sucesso!');
+    } catch (error) {
+      showMessage('Erro ao remover logo: ' + error.message, 'error');
+    } finally {
+      setLogoUploading(false);
+    }
+  };
+
+  // Função para atualizar configurações de aparência
+  const handleAppearanceUpdate = async (key, value) => {
+    try {
+      console.log(`🎨 Atualizando ${key} para:`, value);
+      await updateSetting(key, value);
+      showMessage('Configuração atualizada com sucesso!');
+    } catch (error) {
+      showMessage('Erro ao atualizar configuração: ' + error.message, 'error');
+    }
+  };
+
+  // Função com debounce para atualizações automáticas
+  const debouncedUpdate = useRef(null);
+  const handleInputChange = (key, value) => {
+    setFormValues(prev => ({ ...prev, [key]: value }));
+    
+    // Cancelar timeout anterior
+    if (debouncedUpdate.current) {
+      clearTimeout(debouncedUpdate.current);
+    }
+    
+    // Agendar nova atualização
+    debouncedUpdate.current = setTimeout(() => {
+      handleAppearanceUpdate(key, value);
+    }, 1000); // 1 segundo de delay
+  };
+
+  // Limpar timeout ao desmontar componente
+  useEffect(() => {
+    return () => {
+      if (debouncedUpdate.current) {
+        clearTimeout(debouncedUpdate.current);
+      }
+    };
+  }, []);
 
   const renderTabContent = () => {
     switch (activeTab) {
@@ -113,7 +215,7 @@ export default function SettingsComponent() {
                 ))}
                 <div className="mt-4">
                   <button
-                    className="bg-yellow-500 text-white px-4 py-2 rounded-lg hover:bg-yellow-600 transition-colors"
+                    className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-dark transition-colors"
                     onClick={async () => {
                       try {
                         if (!window.zazapSubscribeToPush) {
@@ -278,6 +380,138 @@ export default function SettingsComponent() {
                 <button className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
                   Alterar Senha
                 </button>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'appearance':
+        return (
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Configurações de Aparência</h3>
+              
+              {/* Logo do Sistema */}
+              <div className="bg-gray-50 p-6 rounded-lg">
+                <h4 className="text-md font-medium text-gray-900 mb-4">Logo da Empresa</h4>
+                <div className="space-y-4">
+                  {/* Preview do Logo */}
+                  <div className="flex items-center space-x-4">
+                    <div className="w-20 h-20 bg-white border-2 border-gray-200 rounded-lg flex items-center justify-center overflow-hidden">
+                      {getLogoUrl() ? (
+                        <img 
+                          src={getLogoUrl()} 
+                          alt="Logo da empresa" 
+                          className="max-w-full max-h-full object-contain"
+                        />
+                      ) : (
+                        <PhotoIcon className="w-8 h-8 text-gray-400" />
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm text-gray-600 mb-2">
+                        Logo atual da empresa. Este logo aparecerá na tela de login, barra de menu e PWA.
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        Formatos suportados: JPEG, PNG, GIF, WebP. Tamanho máximo: 5MB.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Botões de Ação */}
+                  <div className="flex space-x-3">
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={logoUploading}
+                      className="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {logoUploading ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                          Enviando...
+                        </>
+                      ) : (
+                        <>
+                          <CloudArrowUpIcon className="w-4 h-4 mr-2" />
+                          {getLogoUrl() ? 'Alterar Logo' : 'Enviar Logo'}
+                        </>
+                      )}
+                    </button>
+                    
+                    {getLogoUrl() && (
+                      <button
+                        onClick={handleLogoRemove}
+                        disabled={logoUploading}
+                        className="inline-flex items-center px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <TrashIcon className="w-4 h-4 mr-2" />
+                        Remover Logo
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Input de arquivo oculto */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleLogoUpload}
+                    className="hidden"
+                  />
+                </div>
+              </div>
+
+              {/* Nome da Empresa */}
+              <div className="bg-gray-50 p-6 rounded-lg">
+                <h4 className="text-md font-medium text-gray-900 mb-4">Informações da Empresa</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Nome da Empresa</label>
+                    <input
+                      type="text"
+                      value={formValues.company_name ?? getSetting('company_name', 'Zazap')}
+                      onChange={(e) => handleInputChange('company_name', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Nome da sua empresa"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Título do Sistema</label>
+                    <input
+                      type="text"
+                      value={formValues.system_title ?? getSetting('system_title', 'Zazap - Sistema de Atendimento')}
+                      onChange={(e) => handleInputChange('system_title', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Título que aparece no sistema"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Cor Primária */}
+              <div className="bg-gray-50 p-6 rounded-lg">
+                <h4 className="text-md font-medium text-gray-900 mb-4">Cores do Sistema</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Cor Primária</label>
+                    <div className="flex items-center space-x-3">
+                      <input
+                        type="color"
+                        value={formValues.primary_color ?? getSetting('primary_color', '#eab308')}
+                        onChange={(e) => handleInputChange('primary_color', e.target.value)}
+                        className="color-picker"
+                      />
+                      <input
+                        type="text"
+                        value={formValues.primary_color ?? getSetting('primary_color', '#eab308')}
+                        onChange={(e) => handleInputChange('primary_color', e.target.value)}
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="#eab308"
+                      />
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">Cor principal usada em botões e destaques</p>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

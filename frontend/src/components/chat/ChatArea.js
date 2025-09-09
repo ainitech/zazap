@@ -8,7 +8,6 @@ import TransferModal from './TransferModal';
 import { FileText } from 'lucide-react';
 import PriorityModal from './PriorityModal';
 import TagSelector from '../TagSelector';
-import ButtonModal from '../modals/ButtonModal';
 import { 
   ChatBubbleBottomCenterTextIcon,
   EllipsisVerticalIcon,
@@ -267,9 +266,6 @@ export default function ChatArea({
   
   // Tags state
   const [ticketTags, setTicketTags] = useState([]);
-
-  // Button modal state
-  const [buttonModalOpen, setButtonModalOpen] = useState(false);
 
   // Reações disponíveis
   const availableReactions = ['👍', '❤️', '😂', '😮', '😢', '😡', '👏', '🙏'];
@@ -1664,7 +1660,7 @@ return (
 
         {/* Messages Area */}
         <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-4 sm:space-y-6 bg-gradient-to-b from-slate-600 to-slate-700 custom-scrollbar touch-manipulation">
-            {messages.map((message, index) => {
+            {messages.filter(message => message && message.sender).map((message, index) => {
                 const messageAnimation = `message-enter ${message.sender === 'user' || message.sender === 'system' ? 'message-my' : 'message-other'}`;
                 
                 return (
@@ -2203,17 +2199,7 @@ return (
                                       </svg>
                                     </button>
 
-                                {/* Interactive Buttons Button */}
-                                <button
-                                  className="hidden sm:block p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700/50 transition-colors duration-200"
-                                  onClick={() => setButtonModalOpen(true)}
-                                  type="button"
-                                  title="Botões interativos"
-                                >
-                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                                    <path fillRule="evenodd" d="M4 3a1 1 0 000 2h12a1 1 0 100-2H4zm0 4a1 1 0 000 2h12a1 1 0 100-2H4zm0 4a1 1 0 000 2h8a1 1 0 100-2H4z" clipRule="evenodd" />
-                                  </svg>
-                                </button>
+
                                     {qrOpen && (
                                       <div className="absolute bottom-12 right-0 w-72 sm:w-80 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl p-3 z-50 max-h-64 overflow-y-auto">
                                         <div className="flex items-center gap-2 mb-2">
@@ -2331,16 +2317,7 @@ return (
             </div>
         )}
 
-        {/* Button Modal */}
-        <ButtonModal
-          isOpen={buttonModalOpen}
-          onClose={() => setButtonModalOpen(false)}
-          ticketId={selectedTicket?.id}
-          onSendSuccess={(result) => {
-            console.log('✅ Botões enviados com sucesso:', result);
-            // Opcional: atualizar mensagens ou mostrar notificação
-          }}
-        />
+
     </div>
 );
 }

@@ -27,6 +27,7 @@ import tagRoutes from './routes/tagRoutes.js';
 import campaignRoutes from './routes/campaignRoutes.js';
 import buttonRoutes from './routes/buttonRoutes.js';
 import multiChannelRoutes from './routes/multiChannelRoutes.js';
+import settingRoutes from './routes/settingRoutes.js';
 import path from 'path';
 
 dotenv.config();
@@ -120,6 +121,7 @@ app.use('/api/campaigns', campaignRoutes);
 app.use('/api/buttons', buttonRoutes);
 app.use('/api/mc', multiChannelRoutes); // multi-channel (whatsapp/instagram/facebook)
 app.use('/api/integrations', integrationRoutes);
+app.use('/api/settings', settingRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/contacts', contactRoutes);

@@ -92,7 +92,7 @@ export default function PriorityModal({
       <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center space-x-2">
-            <FlagIcon className="w-5 h-5 text-yellow-400" />
+            <FlagIcon className="w-5 h-5 text-primary-light" />
             <h2 className="text-white text-lg font-semibold">Definir Prioridade</h2>
           </div>
           <button
@@ -145,7 +145,7 @@ export default function PriorityModal({
                     </div>
                   </div>
                   {selectedPriority === priority.value && (
-                    <CheckIcon className="w-5 h-5 text-yellow-400" />
+                    <CheckIcon className="w-5 h-5 text-primary-light" />
                   )}
                 </div>
               </label>
@@ -162,7 +162,7 @@ export default function PriorityModal({
           <textarea
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 focus:outline-none focus:border-yellow-500"
+            className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 focus:outline-none focus:border-primary"
             rows="3"
             placeholder="Explique o motivo da alteração de prioridade..."
           />
@@ -180,7 +180,7 @@ export default function PriorityModal({
           <button
             onClick={handleSave}
             disabled={loading}
-            className="flex items-center space-x-2 px-4 py-2 bg-yellow-500 text-slate-900 rounded hover:bg-yellow-400 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center space-x-2 px-4 py-2 bg-primary text-slate-900 rounded hover:bg-primary-dark transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? (
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-slate-900"></div>

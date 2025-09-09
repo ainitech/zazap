@@ -158,7 +158,7 @@ export default function TransferModal({
             <select
               value={selectedUser}
               onChange={(e) => setSelectedUser(e.target.value)}
-              className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 focus:outline-none focus:border-yellow-500"
+              className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 focus:outline-none focus:border-primary"
               required
             >
               <option value="">Escolha um agente...</option>
@@ -176,7 +176,7 @@ export default function TransferModal({
             <select
               value={selectedQueue}
               onChange={(e) => setSelectedQueue(e.target.value)}
-              className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 focus:outline-none focus:border-yellow-500"
+              className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 focus:outline-none focus:border-primary"
               required
             >
               <option value="">Escolha uma fila...</option>
@@ -193,7 +193,7 @@ export default function TransferModal({
           <textarea
             value={transferNote}
             onChange={(e) => setTransferNote(e.target.value)}
-            className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 focus:outline-none focus:border-yellow-500"
+            className="w-full bg-slate-700 text-white px-3 py-2 rounded border border-slate-600 focus:outline-none focus:border-primary"
             rows="3"
             placeholder="Adicione informações relevantes para o próximo agente..."
           />
@@ -211,7 +211,7 @@ export default function TransferModal({
           <button
             onClick={handleTransfer}
             disabled={loading || (!selectedUser && transferType === 'user') || (!selectedQueue && transferType === 'queue')}
-            className="flex items-center space-x-2 px-4 py-2 bg-yellow-500 text-slate-900 rounded hover:bg-yellow-400 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center space-x-2 px-4 py-2 bg-primary text-slate-900 rounded hover:bg-primary-dark transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? (
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-slate-900"></div>

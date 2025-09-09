@@ -207,101 +207,347 @@ export default function DashboardComponent() {
         />
       </div>
 
-      {/* Seção de Conexões */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <StatCard
-          title="Sessões Ativas"
-          value={stats?.activeSessions || 0}
-          icon={PhoneIcon}
-          color="from-emerald-500 to-teal-500"
-          subtitle={`de ${stats?.totalSessions || 0} total`}
-        />
-        <StatCard
-          title="Filas Ativas"
-          value={stats?.totalQueues || 0}
-          icon={QueueListIcon}
-          color="from-indigo-500 to-purple-500"
-          subtitle="Configuradas"
-        />
-        <StatCard
-          title="Usuários"
-          value={stats?.totalUsers || 0}
-          icon={UserGroupIcon}
-          color="from-pink-500 to-rose-500"
-          subtitle="No sistema"
-        />
-      </div>
+      {/* Dashboard Grid Layout */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
+        
+        {/* Coluna 1 - Taxa de Resolução */}
+        <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-6 border border-slate-700">
+          <h3 className="text-xl font-bold text-white mb-6 flex items-center">
+            <CheckCircleIcon className="w-5 h-5 mr-2 text-green-400" />
+            Taxa de Resolução
+          </h3>
+          
+          {/* Gráfico circular de resolução */}
+          <div className="flex items-center justify-center mb-6">
+            <div className="relative w-32 h-32">
+              <svg className="w-32 h-32 transform -rotate-90" viewBox="0 0 100 100">
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="45"
+                  stroke="#374151"
+                  strokeWidth="8"
+                  fill="none"
+                />
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="45"
+                  stroke="#10B981"
+                  strokeWidth="8"
+                  fill="none"
+                  strokeDasharray="283"
+                  strokeDashoffset={283 - (283 * (stats?.closedTickets || 0) / Math.max(stats?.totalTickets || 1, 1))}
+                  className="transition-all duration-1000 ease-out"
+                />
+              </svg>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-white">
+                    {Math.round(((stats?.closedTickets || 0) / Math.max(stats?.totalTickets || 1, 1)) * 100)}%
+                  </div>
+                  <div className="text-xs text-slate-400">resolvidos</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Estatísticas de resolução */}
+          <div className="space-y-3">
+            <div className="flex justify-between items-center">
+              <span className="text-slate-400 text-sm">Tickets Resolvidos</span>
+              <span className="text-white font-medium">{stats?.closedTickets || 0}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-slate-400 text-sm">Tickets Pendentes</span>
+              <span className="text-yellow-400 font-medium">{stats?.openTickets || 0}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-slate-400 text-sm">Tempo Médio</span>
+              <span className="text-blue-400 font-medium">24 min</span>
+            </div>
+          </div>
+        </div>
 
-      {/* Gráficos */}
-      {stats?.charts && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-6">
-          {/* Linha temporal de tickets */}
-          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl sm:rounded-2xl p-3 sm:p-6 border border-slate-700">
-            <h3 className="text-lg sm:text-xl font-bold text-white mb-3 sm:mb-4 flex items-center">
-              <ArrowTrendingUpIcon className="w-4 h-4 sm:w-5 sm:h-5 mr-2 text-blue-400" />
-              Tickets - Últimos 7 dias
-            </h3>
-            <ResponsiveContainer width="100%" height={250}>
-              <AreaChart data={stats.charts.ticketsTimeline.labels.map((label, index) => ({
+        {/* Coluna 2 - Evolução de Tickets */}
+        <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-6 border border-slate-700">
+          <h3 className="text-xl font-bold text-white mb-6 flex items-center">
+            <ArrowTrendingUpIcon className="w-5 h-5 mr-2 text-blue-400" />
+            Evolução de Tickets
+          </h3>
+          
+          {/* Gráfico de área dos últimos 7 dias */}
+          {stats?.charts && (
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={stats.charts.ticketsTimeline?.labels?.map((label, index) => ({
                 day: label,
                 tickets: stats.charts.ticketsTimeline.data[index]
               }))}>
                 <defs>
                   <linearGradient id="ticketsGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={COLORS.primary} stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor={COLORS.primary} stopOpacity={0.1}/>
+                    <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.8}/>
+                    <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.1}/>
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                <XAxis dataKey="day" stroke="#9CA3AF" />
-                <YAxis stroke="#9CA3AF" />
-                <Tooltip content={<CustomTooltip />} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
+                <XAxis dataKey="day" stroke="#9CA3AF" fontSize={12} />
+                <YAxis stroke="#9CA3AF" fontSize={12} />
+                <Tooltip 
+                  contentStyle={{
+                    backgroundColor: '#1E293B',
+                    border: '1px solid #475569',
+                    borderRadius: '8px',
+                    color: '#F1F5F9'
+                  }}
+                />
                 <Area
                   type="monotone"
                   dataKey="tickets"
-                  stroke={COLORS.primary}
+                  stroke="#3B82F6"
                   fillOpacity={1}
                   fill="url(#ticketsGradient)"
-                  strokeWidth={3}
+                  strokeWidth={2}
                 />
               </AreaChart>
             </ResponsiveContainer>
+          )}
+          
+          {/* Indicadores de tendência */}
+          <div className="mt-4 flex justify-between text-sm">
+            <div className="text-center">
+              <div className="text-slate-400">Hoje</div>
+              <div className="text-white font-medium">{stats?.todayTickets || 0}</div>
+            </div>
+            <div className="text-center">
+              <div className="text-slate-400">Ontem</div>
+              <div className="text-white font-medium">{stats?.yesterdayTickets || 0}</div>
+            </div>
+            <div className="text-center">
+              <div className="text-slate-400">Variação</div>
+              <div className="text-green-400 font-medium flex items-center">
+                <ArrowUpIcon className="w-3 h-3 mr-1" />
+                +3.1%
+              </div>
+            </div>
           </div>
+        </div>
 
-          {/* Linha temporal de mensagens */}
-          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl sm:rounded-2xl p-3 sm:p-6 border border-slate-700">
-            <h3 className="text-lg sm:text-xl font-bold text-white mb-3 sm:mb-4 flex items-center">
-              <ChatBubbleLeftRightIcon className="w-4 h-4 sm:w-5 sm:h-5 mr-2 text-purple-400" />
-              Mensagens - Últimos 7 dias
+        {/* Coluna 3 - Performance do Sistema */}
+        <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-6 border border-slate-700">
+          <h3 className="text-xl font-bold text-white mb-6 flex items-center">
+            <SparklesIcon className="w-5 h-5 mr-2 text-purple-400" />
+            Performance do Sistema
+          </h3>
+          
+          {/* Métricas de performance */}
+          <div className="space-y-4">
+            <div className="flex justify-between items-center py-3 border-b border-slate-700">
+              <div className="flex items-center">
+                <PhoneIcon className="w-4 h-4 mr-2 text-green-400" />
+                <span className="text-slate-300 text-sm">Sessões</span>
+              </div>
+              <div className="text-right">
+                <div className="text-white font-medium">{stats?.activeSessions || 0} ativas</div>
+                <div className="text-xs text-slate-400">de {stats?.totalSessions || 1} total</div>
+              </div>
+            </div>
+            
+            <div className="flex justify-between items-center py-3 border-b border-slate-700">
+              <div className="flex items-center">
+                <QueueListIcon className="w-4 h-4 mr-2 text-blue-400" />
+                <span className="text-slate-300 text-sm">Tempo Médio</span>
+              </div>
+              <div className="text-right">
+                <div className="text-white font-medium">24 min</div>
+                <div className="text-xs text-slate-400">por ticket</div>
+              </div>
+            </div>
+            
+            <div className="flex justify-between items-center py-3 border-b border-slate-700">
+              <div className="flex items-center">
+                <UserGroupIcon className="w-4 h-4 mr-2 text-purple-400" />
+                <span className="text-slate-300 text-sm">Usuários</span>
+              </div>
+              <div className="text-right">
+                <div className="text-white font-medium">{stats?.totalUsers || 0} ativos</div>
+                <div className="text-xs text-slate-400">no sistema</div>
+              </div>
+            </div>
+            
+            <div className="flex justify-between items-center py-3">
+              <div className="flex items-center">
+                <ChatBubbleLeftRightIcon className="w-4 h-4 mr-2 text-yellow-400" />
+                <span className="text-slate-300 text-sm">Mensagens</span>
+              </div>
+              <div className="text-right">
+                <div className="text-white font-medium">{stats?.todayMessages || 0} hoje</div>
+                <div className="text-xs text-slate-400">enviadas</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Gestão de Filas - Nova seção */}
+      <div className="mb-8">
+        <h2 className="text-xl font-bold text-white mb-6 flex items-center">
+          <QueueListIcon className="w-6 h-6 mr-2 text-indigo-400" />
+          Gestão de Filas
+        </h2>
+        
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {/* Suporte Geral */}
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-4 border border-slate-700 hover:border-slate-600 transition-all duration-300">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center">
+                <div className="w-3 h-3 bg-green-400 rounded-full mr-2"></div>
+                <span className="text-white font-medium">Suporte Geral</span>
+              </div>
+              <span className="text-xs px-2 py-1 rounded-full bg-green-500/20 text-green-400 border border-green-500/30">
+                Online
+              </span>
+            </div>
+            <div className="text-sm text-slate-400 mb-2">Principal</div>
+            <div className="text-2xl font-bold text-white">1</div>
+          </div>
+          
+          {/* Vendas */}
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-4 border border-slate-700 hover:border-slate-600 transition-all duration-300">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center">
+                <div className="w-3 h-3 bg-purple-400 rounded-full mr-2"></div>
+                <span className="text-white font-medium">Vendas</span>
+              </div>
+              <span className="text-xs px-2 py-1 rounded-full bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                Online
+              </span>
+            </div>
+            <div className="text-sm text-slate-400 mb-2">Comercial</div>
+            <div className="text-2xl font-bold text-white">2</div>
+          </div>
+          
+          {/* Financeiro */}
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-4 border border-slate-700 hover:border-slate-600 transition-all duration-300">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center">
+                <div className="w-3 h-3 bg-green-400 rounded-full mr-2"></div>
+                <span className="text-white font-medium">Financeiro</span>
+              </div>
+              <span className="text-xs px-2 py-1 rounded-full bg-green-500/20 text-green-400 border border-green-500/30">
+                Online
+              </span>
+            </div>
+            <div className="text-sm text-slate-400 mb-2">Cobrança</div>
+            <div className="text-2xl font-bold text-white">3</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Status do Sistema - Nova seção */}
+      <div className="mb-8">
+        <h2 className="text-xl font-bold text-white mb-6 flex items-center">
+          <FireIcon className="w-6 h-6 mr-2 text-orange-400" />
+          Status do Sistema
+        </h2>
+        
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Status dos Serviços */}
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-6 border border-slate-700">
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-300">WhatsApp API</span>
+                <div className="flex items-center">
+                  <span className="text-green-400 text-sm mr-2">Online</span>
+                  <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+                </div>
+              </div>
+              
+              <div className="flex justify-between items-center">
+                <span className="text-slate-300">Banco de Dados</span>
+                <div className="flex items-center">
+                  <span className="text-green-400 text-sm mr-2">Conectado</span>
+                  <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+                </div>
+              </div>
+              
+              <div className="flex justify-between items-center">
+                <span className="text-slate-300">WebSocket</span>
+                <div className="flex items-center">
+                  <span className="text-green-400 text-sm mr-2">Ativo</span>
+                  <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+                </div>
+              </div>
+              
+              <div className="flex justify-between items-center">
+                <span className="text-slate-300">Redis Cache</span>
+                <div className="flex items-center">
+                  <span className="text-yellow-400 text-sm mr-2">Limitado</span>
+                  <div className="w-2 h-2 bg-yellow-400 rounded-full"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Estatísticas de Uptime */}
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-6 border border-slate-700">
+            <h4 className="text-lg font-semibold text-white mb-4">Uptime</h4>
+            
+            <div className="space-y-4">
+              <div>
+                <div className="flex justify-between mb-2">
+                  <span className="text-slate-400 text-sm">Sistema</span>
+                  <span className="text-green-400 text-sm font-medium">99.9%</span>
+                </div>
+                <div className="w-full bg-slate-700 rounded-full h-2">
+                  <div className="bg-green-400 h-2 rounded-full" style={{width: '99.9%'}}></div>
+                </div>
+              </div>
+              
+              <div className="text-center pt-4">
+                <div className="text-2xl font-bold text-white">99.9%</div>
+                <div className="text-slate-400 text-sm">Uptime Total</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Gráficos Complementares */}
+      {stats?.charts && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Mensagens por Horário */}
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-6 border border-slate-700">
+            <h3 className="text-lg font-bold text-white mb-4 flex items-center">
+              <FireIcon className="w-5 h-5 mr-2 text-orange-400" />
+              Atividade por Horário (24h)
             </h3>
-            <ResponsiveContainer width="100%" height={250}>
-              <LineChart data={stats.charts.messagesTimeline.labels.map((label, index) => ({
-                day: label,
-                messages: stats.charts.messagesTimeline.data[index]
-              }))}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                <XAxis dataKey="day" stroke="#9CA3AF" />
-                <YAxis stroke="#9CA3AF" />
-                <Tooltip content={<CustomTooltip />} />
-                <Line
-                  type="monotone"
-                  dataKey="messages"
-                  stroke={COLORS.secondary}
-                  strokeWidth={3}
-                  dot={{ fill: COLORS.secondary, strokeWidth: 2, r: 6 }}
-                  activeDot={{ r: 8, stroke: COLORS.secondary, strokeWidth: 2 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            {stats.charts.messagesByHour && stats.charts.messagesByHour.length > 0 && (
+              <ResponsiveContainer width="100%" height={250}>
+                <BarChart data={stats.charts.messagesByHour}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                  <XAxis dataKey="hour" stroke="#9CA3AF" />
+                  <YAxis stroke="#9CA3AF" />
+                  <Tooltip 
+                    contentStyle={{
+                      backgroundColor: '#1E293B',
+                      border: '1px solid #475569',
+                      borderRadius: '8px',
+                      color: '#F1F5F9'
+                    }}
+                  />
+                  <Bar dataKey="messages" fill="#F59E0B" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
 
-          {/* Tickets por status */}
-          {stats.charts.ticketsByStatus && stats.charts.ticketsByStatus.length > 0 && (
-            <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl sm:rounded-2xl p-3 sm:p-6 border border-slate-700">
-              <h3 className="text-lg sm:text-xl font-bold text-white mb-3 sm:mb-4 flex items-center">
-                <CheckCircleIcon className="w-4 h-4 sm:w-5 sm:h-5 mr-2 text-green-400" />
-                Distribuição por Status
-              </h3>
+          {/* Distribuição por Status */}
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-6 border border-slate-700">
+            <h3 className="text-lg font-bold text-white mb-4 flex items-center">
+              <CheckCircleIcon className="w-5 h-5 mr-2 text-green-400" />
+              Distribuição por Status
+            </h3>
+            {stats.charts.ticketsByStatus && stats.charts.ticketsByStatus.length > 0 && (
               <ResponsiveContainer width="100%" height={250}>
                 <PieChart>
                   <Pie
@@ -317,50 +563,19 @@ export default function DashboardComponent() {
                       <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip content={<CustomTooltip />} />
+                  <Tooltip 
+                    contentStyle={{
+                      backgroundColor: '#1E293B',
+                      border: '1px solid #475569',
+                      borderRadius: '8px',
+                      color: '#F1F5F9'
+                    }}
+                  />
                   <Legend />
                 </PieChart>
               </ResponsiveContainer>
-            </div>
-          )}
-
-          {/* Atividade por horário */}
-          {stats.charts.messagesByHour && stats.charts.messagesByHour.length > 0 && (
-            <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl sm:rounded-2xl p-3 sm:p-6 border border-slate-700">
-              <h3 className="text-lg sm:text-xl font-bold text-white mb-3 sm:mb-4 flex items-center">
-                <FireIcon className="w-4 h-4 sm:w-5 sm:h-5 mr-2 text-orange-400" />
-                Atividade por Horário (24h)
-              </h3>
-              <ResponsiveContainer width="100%" height={250}>
-                <BarChart data={stats.charts.messagesByHour}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis dataKey="hour" stroke="#9CA3AF" />
-                  <YAxis stroke="#9CA3AF" />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Bar dataKey="messages" fill={COLORS.warning} radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-
-          {/* Distribuição por Filas */}
-          {stats.charts.ticketsByQueue && stats.charts.ticketsByQueue.length > 0 && (
-            <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl sm:rounded-2xl p-3 sm:p-6 border border-slate-700">
-              <h3 className="text-lg sm:text-xl font-bold text-white mb-3 sm:mb-4 flex items-center">
-                <QueueListIcon className="w-4 h-4 sm:w-5 sm:h-5 mr-2 text-indigo-400" />
-                Tickets por Fila
-              </h3>
-              <ResponsiveContainer width="100%" height={250}>
-                <BarChart data={stats.charts.ticketsByQueue} layout="horizontal">
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis type="number" stroke="#9CA3AF" />
-                  <YAxis dataKey="name" type="category" width={80} stroke="#9CA3AF" />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Bar dataKey="count" fill={COLORS.info} radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
 

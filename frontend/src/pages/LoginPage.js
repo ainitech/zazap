@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useSettings } from '../context/SettingsContext';
 import { useNavigate } from 'react-router-dom';
+import { ChatBubbleBottomCenterTextIcon } from '@heroicons/react/24/solid';
 
 export default function LoginPage() {
   const { login, isAuthenticated } = useAuth();
+  const { getSetting, getLogoUrl } = useSettings();
   const navigate = useNavigate();
   const [isRegister, setIsRegister] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', password: '' });
@@ -71,14 +74,22 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
         <div>
-          <div className="mx-auto h-12 w-12 flex items-center justify-center bg-yellow-500 rounded-xl">
-            <span className="text-xl font-bold text-slate-900">Z</span>
+          <div className="mx-auto h-16 w-16 flex items-center justify-center bg-yellow-500 rounded-xl overflow-hidden">
+            {getLogoUrl() ? (
+              <img 
+                src={getLogoUrl()} 
+                alt={getSetting('company_name', 'Zazap')} 
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <ChatBubbleBottomCenterTextIcon className="w-8 h-8 text-slate-900" />
+            )}
           </div>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
             {isRegister ? 'Criar conta' : 'Entrar na sua conta'}
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
-            ZaZap - Sistema de Atendimento
+            {getSetting('system_title', 'Zazap - Sistema de Atendimento')}
           </p>
         </div>
         

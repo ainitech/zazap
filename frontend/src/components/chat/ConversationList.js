@@ -313,7 +313,41 @@ export default function ConversationList({
     } catch (err) {
       console.error('Erro ao copiar link:', err);
     }
-  };    return (
+  };
+
+    const channel = ticket.channel || 'whatsapp';
+    const channelIcon = (() => {
+      if (channel === 'instagram') {
+        return (
+          <div className="flex-shrink-0 w-6 h-6 rounded-full bg-gradient-to-br from-pink-500 via-red-500 to-yellow-500 p-1 shadow-sm">
+            <svg viewBox="0 0 24 24" className="w-full h-full text-white" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
+              <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
+              <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
+            </svg>
+          </div>
+        );
+      }
+      if (channel === 'facebook') {
+        return (
+          <div className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 shadow-sm flex items-center justify-center">
+            <svg viewBox="0 0 24 24" className="w-4 h-4 text-white" fill="currentColor">
+              <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+            </svg>
+          </div>
+        );
+      }
+      // whatsapp (default)
+      return (
+        <div className="flex-shrink-0 w-6 h-6 rounded-full bg-green-500 shadow-sm flex items-center justify-center">
+          <svg viewBox="0 0 24 24" className="w-4 h-4 text-white" fill="currentColor">
+            <path d="M20.52 3.48A11.8 11.8 0 0 0 12.04 0C5.5.05.32 5.27.28 11.81c0 2.08.54 4.11 1.57 5.9L0 24l6.43-1.63a11.77 11.77 0 0 0 5.6 1.43h.01c6.53 0 11.8-5.27 11.84-11.78A11.77 11.77 0 0 0 20.52 3.48ZM12.05 21.3h-.01a9.5 9.5 0 0 1-4.85-1.33l-.35-.21-3.82.97 1.02-3.73-.23-.38a9.52 9.52 0 0 1-1.45-5.04c.04-5.23 4.3-9.48 9.53-9.48 2.54.01 4.92.99 6.71 2.79a9.42 9.42 0 0 1 2.77 6.69c-.04 5.24-4.3 9.5-9.52 9.52Zm5.23-7.13c-.29-.15-1.7-.84-1.96-.94-.26-.1-.45-.15-.64.15-.19.29-.74.94-.9 1.13-.17.2-.33.22-.62.07-.29-.15-1.23-.45-2.34-1.44-.86-.76-1.44-1.7-1.61-1.99-.17-.29-.02-.45.13-.6.13-.13.29-.33.43-.49.15-.17.2-.29.29-.48.1-.19.05-.36-.02-.5-.07-.15-.64-1.54-.88-2.1-.23-.55-.47-.48-.64-.49-.17-.01-.36-.01-.55-.01-.19 0-.5.07-.76.36-.26.29-1 1-1 2.45 0 1.45 1.03 2.85 1.18 3.05.15.19 2.03 3.1 4.94 4.35.69.3 1.23.48 1.65.62.69.22 1.32.19 1.82.12.56-.08 1.7-.69 1.94-1.35.24-.67.24-1.25.17-1.35-.07-.1-.26-.17-.55-.31Z" />
+          </svg>
+        </div>
+      );
+    })();
+
+    return (
       <div
         key={ticket.id}
         onClick={() => onTicketSelect(ticket)}
@@ -324,7 +358,7 @@ export default function ConversationList({
               ? 'bg-slate-700/50 border-l-2 border-l-green-400' 
               : ''
         }`}
-      >
+  >
         <div className="flex items-center space-x-2 sm:space-x-3">
           {/* Avatar */}
           <div className="relative">
@@ -376,8 +410,15 @@ export default function ConversationList({
           {/* Content */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center space-x-2 flex-1 min-w-0">
-                <h3 className="text-white font-medium truncate">{displayName}</h3>
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                {/* Ícone do canal */}
+                {channelIcon}
+                
+                {/* Nome completo */}
+                <h3 className="text-white font-medium flex-1 min-w-0 whitespace-nowrap overflow-hidden">
+                  <span className="inline">{displayName}</span>
+                </h3>
+                
                 {ticket.Contact?.isGroup && (
                   <span className="bg-purple-500 text-white text-xs px-1.5 py-0.5 rounded-full flex-shrink-0">GRUPO</span>
                 )}
@@ -517,7 +558,7 @@ export default function ConversationList({
   };
 
   return (
-    <div className="w-full lg:w-80 bg-slate-800 flex flex-col border-r border-slate-700 h-full">
+    <div className="w-full lg:w-90 bg-slate-800 flex flex-col border-r border-slate-700 h-full">
       {/* Header */}
       <div className="p-3 sm:p-4 border-b border-slate-700 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0">
         <div className="flex items-center gap-3 w-full sm:w-auto">

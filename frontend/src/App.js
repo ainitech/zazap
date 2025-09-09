@@ -19,7 +19,11 @@ import TagsPage from './pages/TagsPage';
 import AgentsPage from './pages/AgentsPage';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SocketProvider } from './context/SocketContext';
+import { SettingsProvider } from './context/SettingsContext';
 import { ProtectedRoute } from './components/PageLayout';
+import DynamicManifest from './components/DynamicManifest';
+import DynamicColors from './components/DynamicColors';
+import useDynamicColors from './hooks/useDynamicColors';
 
 function AppRoutes() {
   const { isAuthenticated, loading } = useAuth();
@@ -119,6 +123,8 @@ function AppRoutes() {
 function MainApp() {
   return (
     <BrowserRouter>
+      <DynamicManifest />
+      <DynamicColors />
       <AppRoutes />
     </BrowserRouter>
   );
@@ -127,9 +133,11 @@ function MainApp() {
 export default function App() {
   return (
     <AuthProvider>
-      <SocketProvider>
-        <MainApp />
-      </SocketProvider>
+      <SettingsProvider>
+        <SocketProvider>
+          <MainApp />
+        </SocketProvider>
+      </SettingsProvider>
     </AuthProvider>
   );
 }
