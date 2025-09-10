@@ -19,7 +19,8 @@ import {
   Cog6ToothIcon,
   UsersIcon,
   ChevronDownIcon,
-  ChevronRightIcon
+  ChevronRightIcon,
+  CpuChipIcon
 } from '@heroicons/react/24/outline';
 import { 
   ChatBubbleBottomCenterTextIcon as ChatBubbleBottomCenterTextIconSolid
@@ -106,6 +107,7 @@ const sidebarMenus = [
     permissions: ['admin'],
     items: [
       { icon: UsersIcon, label: 'Agentes', route: '/agents', description: 'Gerenciar usuários', permissions: ['admin'] },
+      { icon: CpuChipIcon, label: 'Gerenciador de Bibliotecas', route: '/library-manager', description: 'Sistema inteligente de bibliotecas', permissions: ['admin'] },
       { icon: Cog6ToothIcon, label: 'Configurações', route: '/settings', description: 'Configurações do sistema', permissions: ['admin'] }
     ]
   }

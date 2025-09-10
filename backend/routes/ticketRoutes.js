@@ -69,32 +69,80 @@ router.post('/:id/recording-status', authMiddleware, async (req, res) => {
     const sessionId = ticket.sessionId;
     
     try {
-      // Tentar Baileys como fallback
-      const baileysService = await import('../services/baileysService.js');
-      const baileysClient = baileysService.getBaileysSession(sessionId);
+      // Usar o Gerenciador Inteligente para enviar status de presença
+      const intelligentLibraryManager = (await import('../services/intelligentLibraryManager.js')).default;
+      const { Session } = await import('../models/index.js');
       
-      if (baileysClient && baileysClient.user) {
-        console.log(`🎵 Cliente Baileys encontrado para sessão ${sessionId}`);
-        console.log(`🎵 Status atual do cliente:`, baileysClient.user?.id);
+      // Buscar informações da sessão
+      const sessionRecord = await Session.findByPk(sessionId);
+      if (!sessionRecord) {
+        return res.status(400).json({ error: 'Registro de sessão não encontrado' });
+      }
+      
+      console.log(`🎵 Enviando status via Gerenciador Inteligente para ${phoneNumber}`);
+      
+      const presenceStatus = isRecording ? 'recording' : 'available';
+      
+  // Usar Gerenciador Inteligente primeiro
+      try {
+        const statusResult = await intelligentLibraryManager.sendPresenceUpdate(
+          sessionRecord.whatsappId,
+          phoneNumber,
+          presenceStatus
+        );
         
-        if (isRecording) {
-          // Enviar status "gravando áudio" via Baileys
-          console.log(`🎵 Enviando status 'recording' para ${phoneNumber}`);
-          await baileysClient.sendPresenceUpdate('recording', phoneNumber);
-          console.log(`✅ Status "gravando áudio" enviado via Baileys para ${phoneNumber}`);
-        } else {
-          // Parar status de gravação
-          console.log(`🎵 Enviando status 'available' para ${phoneNumber}`);
-          await baileysClient.sendPresenceUpdate('available', phoneNumber);
-          console.log(`✅ Status "disponível" enviado via Baileys para ${phoneNumber}`);
+        console.log(`✅ Status "${presenceStatus}" enviado via ${statusResult.library} (Gerenciador Inteligente)`);
+        return res.json({ success: true, library: statusResult.library });
+        
+      } catch (intelligentError) {
+        console.log('❌ Gerenciador Inteligente falhou:', intelligentError.message);
+        
+        // Fallback: tentar com a biblioteca específica da sessão
+        if (sessionRecord.library === 'baileys') {
+          const baileysService = await import('../services/baileysService.js');
+          const baileysClient = baileysService.getBaileysSession(sessionRecord.whatsappId);
+          
+          if (baileysClient && baileysClient.user) {
+            await baileysClient.sendPresenceUpdate(presenceStatus, phoneNumber);
+            console.log(`✅ Status "${presenceStatus}" enviado via Baileys (fallback)`);
+            return res.json({ success: true, library: 'baileys' });
+          }
+        } else if (sessionRecord.library === 'whatsappjs') {
+          const wwebjsService = await import('../services/wwebjsService.js');
+          const wwebjsClient = wwebjsService.default.getWwebjsSession(sessionRecord.whatsappId);
+          
+          if (wwebjsClient) {
+            // WWebJS tem método próprio para presença
+            await wwebjsClient.sendPresenceUpdate?.(presenceStatus);
+            console.log(`✅ Status "${presenceStatus}" enviado via WWebJS (fallback)`);
+            return res.json({ success: true, library: 'whatsappjs' });
+          }
         }
         
-  return res.json({ success: true, library: 'baileys' });
-      } else {
-        console.log(`❌ Cliente Baileys não encontrado ou não conectado para sessão ${sessionId}`);
+        throw new Error(`Nenhuma biblioteca disponível para sessão ${sessionRecord.whatsappId}`);
       }
-    } catch (baileysError) {
-      console.log('❌ Baileys não disponível:', baileysError.message);
+      
+    } catch (error) {
+      console.log('❌ Gerenciador Inteligente falhou:', error.message);
+      
+      // Fallback para Baileys direto
+      try {
+        const baileysService = await import('../services/baileysService.js');
+        const { Session } = await import('../models/index.js');
+        const sessionRecord = await Session.findByPk(sessionId);
+        
+        if (sessionRecord) {
+          const baileysClient = baileysService.getBaileysSession(sessionRecord.whatsappId);
+          if (baileysClient && baileysClient.user) {
+            const presenceStatus = isRecording ? 'recording' : 'available';
+            await baileysClient.sendPresenceUpdate(presenceStatus, phoneNumber);
+            console.log(`✅ Status "${presenceStatus}" enviado via fallback Baileys`);
+            return res.json({ success: true, library: 'baileys' });
+          }
+        }
+      } catch (fallbackError) {
+        console.log('❌ Fallback Baileys também falhou:', fallbackError.message);
+      }
     }
     
     // Se chegou aqui, nenhuma biblioteca está funcionando
@@ -137,39 +185,81 @@ router.post('/:id/typing-status', authMiddleware, async (req, res) => {
     const sessionId = ticket.sessionId;
     
     try {
-      // Tentar Baileys
-      const baileysService = await import('../services/baileysService.js');
-      const baileysClient = baileysService.getBaileysSession(sessionId);
+      // Usar o Gerenciador Inteligente para enviar status de digitação
+      const intelligentLibraryManager = (await import('../services/intelligentLibraryManager.js')).default;
+      const { Session } = await import('../models/index.js');
       
-      if (baileysClient && baileysClient.user) {
-        console.log(`⌨️ Cliente Baileys encontrado para sessão ${sessionId}`);
+      // Buscar informações da sessão
+      const sessionRecord = await Session.findByPk(sessionId);
+      if (!sessionRecord) {
+        return res.status(400).json({ error: 'Registro de sessão não encontrado' });
+      }
+      
+      console.log(`⌨️ Enviando status de digitação via Gerenciador Inteligente para ${phoneNumber}`);
+      
+      const presenceStatus = isTyping ? 'composing' : 'available';
+      
+      // Usar Gerenciador Inteligente primeiro
+      try {
+        const statusResult = await intelligentLibraryManager.sendPresenceUpdate(
+          sessionRecord.whatsappId,
+          phoneNumber,
+          presenceStatus
+        );
         
-        if (isTyping) {
-          // Enviar status "digitando" via Baileys
-          console.log(`⌨️ Enviando status 'composing' para ${phoneNumber}`);
-          await baileysClient.sendPresenceUpdate('composing', phoneNumber);
-          console.log(`✅ Status "digitando" enviado via Baileys para ${phoneNumber}`);
-        } else {
-          // Parar status de digitação
-          console.log(`⌨️ Enviando status 'available' para ${phoneNumber}`);
-          await baileysClient.sendPresenceUpdate('available', phoneNumber);
-          console.log(`✅ Status "disponível" enviado via Baileys para ${phoneNumber}`);
+        console.log(`✅ Status de digitação "${presenceStatus}" enviado via ${statusResult.library} (Gerenciador Inteligente)`);
+        return res.json({ success: true, library: statusResult.library });
+        
+      } catch (intelligentError) {
+        console.log('❌ Gerenciador Inteligente falhou para digitação:', intelligentError.message);
+        
+        // Fallback: tentar com a biblioteca específica da sessão
+        if (sessionRecord.library === 'baileys') {
+          const baileysService = await import('../services/baileysService.js');
+          const baileysClient = baileysService.getBaileysSession(sessionRecord.whatsappId);
+          
+          if (baileysClient && baileysClient.user) {
+            await baileysClient.sendPresenceUpdate(presenceStatus, phoneNumber);
+            console.log(`✅ Status de digitação "${presenceStatus}" enviado via Baileys (fallback)`);
+            return res.json({ success: true, library: 'baileys' });
+          }
+        } else if (sessionRecord.library === 'whatsappjs') {
+          const wwebjsService = await import('../services/wwebjsService.js');
+          const wwebjsClient = wwebjsService.default.getWwebjsSession(sessionRecord.whatsappId);
+          
+          if (wwebjsClient) {
+            // WWebJS tem método próprio para presença
+            await wwebjsClient.sendPresenceUpdate?.(presenceStatus);
+            console.log(`✅ Status de digitação "${presenceStatus}" enviado via WWebJS (fallback)`);
+            return res.json({ success: true, library: 'whatsappjs' });
+          }
         }
         
-        return res.json({ success: true, library: 'baileys' });
-      } else {
-        console.log(`❌ Cliente Baileys não encontrado ou não conectado para sessão ${sessionId}`);
+        throw new Error(`Nenhuma biblioteca disponível para sessão ${sessionRecord.whatsappId}`);
       }
-    } catch (baileysError) {
-      console.log('❌ Baileys não disponível:', baileysError.message);
+      
+    } catch (error) {
+      console.log('❌ Gerenciador Inteligente falhou para digitação:', error.message);
+      
+      // Fallback para Baileys direto
+      try {
+        const baileysService = await import('../services/baileysService.js');
+        const { Session } = await import('../models/index.js');
+        const sessionRecord = await Session.findByPk(sessionId);
+        
+        if (sessionRecord) {
+          const baileysClient = baileysService.getBaileysSession(sessionRecord.whatsappId);
+          if (baileysClient && baileysClient.user) {
+            const presenceStatus = isTyping ? 'composing' : 'available';
+            await baileysClient.sendPresenceUpdate(presenceStatus, phoneNumber);
+            console.log(`✅ Status de digitação "${presenceStatus}" enviado via fallback Baileys`);
+            return res.json({ success: true, library: 'baileys' });
+          }
+        }
+      } catch (fallbackError) {
+        console.log('❌ Fallback Baileys para digitação também falhou:', fallbackError.message);
+      }
     }
-    
-    return res.json({ 
-      success: false,
-      error: 'Sessão indisponível',
-      warning: 'Status de digitação não foi enviado ao WhatsApp'
-    });
-    
   } catch (error) {
     console.error('Erro ao notificar status de digitação:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });

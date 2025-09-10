@@ -242,12 +242,17 @@ export const SocketProvider = ({ children }) => {
           ticketId: message.ticketId,
           content: message.content,
           sender: message.sender,
-          channel: message.channel
+          channel: message.channel,
+          messageType: message.messageType
         });
         
         // Verificar se o frontend está conectado à sala do ticket
-        if (message.ticketId && window.testJoinTicket) {
+        if (message.ticketId) {
           console.log(`🧪 SocketContext: Verificando conexão à sala do ticket ${message.ticketId}`);
+          // Forçar entrada na sala do ticket se não estivermos conectados
+          if (window.testJoinTicket) {
+            window.testJoinTicket(message.ticketId);
+          }
         }
         
         // Este evento será capturado pelo ChatComponent também

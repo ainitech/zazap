@@ -17,6 +17,7 @@ import QuickRepliesPage from './pages/QuickRepliesPage';
 import SchedulesPage from './pages/SchedulesPage';
 import TagsPage from './pages/TagsPage';
 import AgentsPage from './pages/AgentsPage';
+import LibraryManagerPage from './pages/LibraryManagerPage';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SocketProvider } from './context/SocketContext';
 import { SettingsProvider } from './context/SettingsContext';
@@ -108,6 +109,7 @@ function AppRoutes() {
       
       {/* Páginas de administração - Apenas Admin */}
       <Route path="/agents" element={<ProtectedRoute requiredPermissions={['admin']}><AgentsPage /></ProtectedRoute>} />
+      <Route path="/library-manager" element={<ProtectedRoute requiredPermissions={['admin']}><LibraryManagerPage /></ProtectedRoute>} />
       <Route path="/integrations" element={<ProtectedRoute requiredPermissions={['admin']}><IntegrationsPage /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute requiredPermissions={['admin']}><SettingsPage /></ProtectedRoute>} />
       

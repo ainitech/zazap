@@ -4,10 +4,12 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { createServer } from 'http';
 import { initializeSocket } from './services/socket.js';
-import { autoReconnectSessions, startSessionHealthCheck, startStartupWarmup } from './services/sessionManager.js';
+import { autoReconnectSessions, startSessionHealthCheck } from './services/sessionManager.js';
 import RedisService from './services/redisService.js';
 // Removed whatsappjs and selection routes; using only Baileys
 import baileysRoutes from './routes/baileysRoutes.js';
+import whatsappjsRoutes from './routes/whatsappjsRoutes.js';
+import wwebjsAdvancedRoutes from './routes/wwebjsAdvanced.js';
 import authRoutes from './routes/authRoutes.js';
 import queueRoutes from './routes/queueRoutes.js';
 import ticketRoutes from './routes/ticketRoutes.js';
@@ -19,6 +21,8 @@ import ticketMessageFileRoutes from './routes/ticketMessageFileRoutes.js';
 import integrationRoutes from './routes/integrationRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
 import sessionRoutes from './routes/sessionRoutes.js';
+import sessionLibraryRoutes from './routes/sessionLibrary.js';
+import libraryManagerRoutes from './routes/libraryManager.js';
 import contactRoutes from './routes/contactRoutes.js';
 import pushRoutes from './routes/pushRoutes.js';
 import quickReplyRoutes from './routes/quickReplyRoutes.js';
@@ -106,6 +110,8 @@ app.get('/test-file/:folder/:filename', (req, res) => {
 
 // Rotas principais
 app.use('/api/baileys', baileysRoutes);
+app.use('/api/wwebjs', whatsappjsRoutes);
+app.use('/api/wwebjs-advanced', wwebjsAdvancedRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/queues', queueRoutes);
 app.use('/api/tickets', ticketRoutes);
@@ -124,6 +130,8 @@ app.use('/api/integrations', integrationRoutes);
 app.use('/api/settings', settingRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/sessions', sessionRoutes);
+app.use('/api/session-library', sessionLibraryRoutes);
+app.use('/api/library-manager', libraryManagerRoutes);
 app.use('/api/contacts', contactRoutes);
 app.use('/api/push', pushRoutes);
 
@@ -157,9 +165,6 @@ server.listen(PORT, HOST, async () => {
     
   // Reconectar sessões que estavam conectadas
   await autoReconnectSessions();
-
-  // Warmup (reanalisar e tentar reativar sessões nos primeiros 60s)
-  startStartupWarmup();
 
   // Iniciar verificação de saúde (execução a cada 5 min)
   startSessionHealthCheck();

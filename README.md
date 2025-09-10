@@ -121,6 +121,19 @@ zazap/
 ├── PRODUCTION-README.md        # 🚀 Guia de produção
 ├── CHANGELOG.md     # 📋 Histórico de versões
 └── README.md        # 📖 Este arquivo
+
+## Conectores WhatsApp
+
+- Baileys (principal): `/api/baileys`
+- whatsapp-web.js (opcional e isolado): `/api/wwebjs`
+
+Os dois podem rodar lado a lado sem conflito. As credenciais do whatsapp-web.js ficam em `privated/wwebjs-sessions`.
+
+Endpoints (JWT obrigatório):
+
+- POST `/api/wwebjs/init` { sessionId } → retorna `{ qr: { qr, dataUrl } }` quando precisar escanear
+- POST `/api/wwebjs/send-text` { sessionId, to, text }
+- POST `/api/wwebjs/send-media` { sessionId, to, base64, mimetype, filename? }
 ```
 
 ## 📊 Sistema de Enquetes

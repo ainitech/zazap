@@ -4,6 +4,8 @@ import {
   getBaileysSession,
   listBaileysSessions 
 } from './baileysService.js';
+import wwebjsService from './wwebjsService.js';
+import intelligentLibraryManager from './intelligentLibraryManager.js';
 import { emitToAll } from './socket.js';
 import { 
   handleBaileysMessage 
@@ -89,12 +91,26 @@ const isSessionActuallyActive = async (whatsappId, library) => {
         return true;
       }
 
-      console.log(`❌ Nenhuma sessão ativa encontrada para ${baseNumber}`);
+      console.log(`❌ Nenhuma sessão Baileys ativa encontrada para ${baseNumber}`);
+      return false;
+  } else if (library === 'wwebjs' || library === 'whatsappjs') {
+      // Verificar sessão WWebJS de forma robusta (state CONNECTED)
+      const client = wwebjsService.getWwebjsSession(baseNumber);
+      let active = false;
+      try {
+        active = client ? ((await client.getState()) === 'CONNECTED') : false;
+      } catch {
+        active = false;
+      }
+
+      console.log(`📱 WWebJS - Sessão encontrada: ${!!client}`);
+      console.log(`📱 WWebJS - Status final: ${active ? 'ATIVA' : 'INATIVA'}`);
+      
+      return active;
+    } else {
+      console.log(`❌ Biblioteca não reconhecida: ${library}`);
       return false;
     }
-
-    console.log(`❌ Biblioteca não reconhecida: ${library}`);
-    return false;
   } catch (error) {
     console.error(`❌ Erro ao verificar sessão ${whatsappId}:`, error.message);
     return false;
@@ -129,7 +145,14 @@ const reactivateSession = async (session) => {
         }
       };
       // Baileys: (sessionId, onQR, onReady, onMessage)
-  await createBaileysSession(normalizeSessionId(session.whatsappId), null, null, onMessage);
+      await createBaileysSession(normalizeSessionId(session.whatsappId), null, null, onMessage);
+    } else if (session.library === 'wwebjs' || session.library === 'whatsappjs') {
+      // WWebJS: Criar sessão WWebJS (ESM)
+      const { createWwebjsSession } = await import('./wwebjsService.js');
+      await createWwebjsSession(normalizeSessionId(session.whatsappId));
+    } else {
+      console.log(`❌ Biblioteca não reconhecida para reativação: ${session.library}`);
+      return false;
     }
 
     console.log(`✅ Sessão ${session.whatsappId} reativada com sucesso com callbacks de mensagens e mídia`);
@@ -153,9 +176,9 @@ export const syncAllSessions = async () => {
     let reconnectedCount = 0;
     let disconnectedCount = 0;
 
-    // Primeiro, obter todas as sessões ativas do Baileys
-  const activeBaileysSessions = listBaileysSessions().filter(id => !!id); // array de strings válidas
-  console.log(`📋 Sessões ativas no Baileys: ${activeBaileysSessions.join(', ') || 'nenhuma'}`);
+    // Usar o gerenciador inteligente para obter informações do sistema
+    const systemInfo = await intelligentLibraryManager.getSystemInfo();
+    console.log(`🧠 Sistema Inteligente - Sessões ativas:`, systemInfo.activeInMemory);
 
     for (const session of sessions) {
       // Sempre usar o número base para verificações
@@ -164,34 +187,54 @@ export const syncAllSessions = async () => {
 
       const isActive = await isSessionActuallyActive(session.whatsappId, session.library);
 
-      // Verificar se existe uma sessão ativa com o mesmo base number
-      if (!isActive && session.library === 'baileys') {
-  const activeSessionWithSameBase = activeBaileysSessions.find(id => id && normalizeSessionId(id) === baseNumber);
-
-        if (activeSessionWithSameBase) {
-          console.log(`🔄 Encontrada sessão ativa com mesmo base number: ${activeSessionWithSameBase} para ${baseNumber}`);
-
-          // Atualizar o whatsappId na sessão do banco de dados para usar apenas o número base
-          await session.update({
-            whatsappId: baseNumber, // Sempre usar apenas o número base
-            status: 'connected'
-          });
-
-          console.log(`✅ Sessão ${session.whatsappId} atualizada para ${baseNumber}`);
-          reconnectedCount++;
-          continue;
+      // Usar o gerenciador inteligente para verificar o status da sessão
+      let sessionStatus = { active: isActive, status: isActive ? 'connected' : 'disconnected', library: session.library };
+      try {
+        // Derivar status pela existência do cliente
+        if (session.library === 'baileys') {
+          const sock = getBaileysSession(baseNumber);
+          sessionStatus = { active: !!(sock && sock.user), status: sock && sock.user ? 'connected' : 'disconnected', library: 'baileys' };
+        } else if (session.library === 'wwebjs' || session.library === 'whatsappjs') {
+          const client = wwebjsService.getWwebjsSession(baseNumber);
+          let active = false;
+          try { active = client ? ((await client.getState()) === 'CONNECTED') : false; } catch { active = false; }
+          sessionStatus = { active, status: active ? 'connected' : 'disconnected', library: 'whatsappjs' };
         }
+      } catch (e) {
+        console.warn('⚠️ Falha ao obter status unificado:', e.message);
       }
+      const isActiveUnified = sessionStatus.active;
+      
+      console.log(`📡 Status detectado: ${sessionStatus.status} (biblioteca: ${sessionStatus.library || 'desconhecida'})`);
 
-      if (session.status === 'connected' && !isActive) {
-        console.log(`⚠️ Sessão ${baseNumber} está marcada como conectada mas não está ativa`);
-        console.log(`⏳ Mantendo sessão Baileys ${baseNumber} (não reativar automaticamente)`);
-      } else if (session.status === 'connected' && isActive) {
-        console.log(`✅ Sessão ${baseNumber} está ativa e conectada`);
-      } else if (session.status === 'disconnected') {
-        console.log(`🔌 Sessão ${baseNumber} está desconectada (normal)`);
-      } else {
-        console.log(`📋 Sessão ${baseNumber} tem status: ${session.status}`);
+      if (isActiveUnified && session.status !== 'connected') {
+        // Sessão está ativa mas o banco mostra como desconectada - atualizar
+        await session.update({ 
+          status: 'connected',
+          library: sessionStatus.library // Atualizar biblioteca se necessário
+        });
+        console.log(`✅ Sessão ${baseNumber} reconectada (${sessionStatus.library})`);
+        reconnectedCount++;
+        
+      } else if (!isActiveUnified && session.status === 'connected') {
+        // Sessão mostra como conectada mas não está ativa - desconectar
+        await session.update({ status: 'disconnected' });
+        console.log(`❌ Sessão ${baseNumber} desconectada`);
+        disconnectedCount++;
+        
+      } else if (!isActiveUnified && sessionStatus.library && session.status === 'disconnected') {
+        // Sessão existe mas não está ativa - tentar reconectar se possível
+  console.log(`🔄 Tentando reconectar sessão ${baseNumber} (${sessionStatus.library})`);
+  const reconnectedResult = await intelligentLibraryManager.reconnectSession(baseNumber);
+  const reconnected = !!reconnectedResult?.success;
+        if (reconnected) {
+          await session.update({ 
+            status: 'connected',
+            library: sessionStatus.library 
+          });
+          console.log(`✅ Sessão ${baseNumber} reconectada automaticamente`);
+          reconnectedCount++;
+        }
       }
     }
 
@@ -318,35 +361,4 @@ export const autoReconnectSessions = async () => {
   }
 };
 
-// Warmup: reexecuta tentativas de ativação a cada 5s por ~60s após o boot
-export const startStartupWarmup = () => {
-  const WINDOW_MS = 60_000; // 1 minuto
-  const INTERVAL_MS = 5_000; // 5s
-  const startedAt = Date.now();
-  let running = false;
-  console.log('🔥 Iniciando warmup de sessões (5s interval por 60s)...');
-  const timer = setInterval(async () => {
-    if (running) return; // evitar sobreposição
-    if (Date.now() - startedAt > WINDOW_MS) {
-      clearInterval(timer);
-      console.log('✅ Warmup de sessões finalizado');
-      return;
-    }
-    running = true;
-    try {
-      const all = await Session.findAll();
-      const candidates = all.filter(s => s.library === 'baileys');
-      for (const s of candidates) {
-        const active = await isSessionActuallyActive(s.whatsappId, s.library);
-        if (active) continue;
-        console.log(`🛠️ [warmup] Sessão ${s.whatsappId} ainda inativa – reativando`);
-        try { await reactivateSession(s); } catch (e) { console.warn('[warmup] falha reativando', s.whatsappId, e.message); }
-        await new Promise(r => setTimeout(r, 400));
-      }
-    } catch (e) {
-      console.warn('⚠️ Erro no warmup de sessões:', e.message);
-    } finally {
-      running = false;
-    }
-  }, INTERVAL_MS);
-};
+

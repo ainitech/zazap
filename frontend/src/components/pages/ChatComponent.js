@@ -185,6 +185,14 @@ useEffect(() => {
       }
     };
 
+    // Auto-join ticket room quando mensagem chegar sem estarmos conectados
+    const autoJoinTicketOnMessage = (message) => {
+      if (message?.ticketId && selectedTicket?.id === message.ticketId) {
+        console.log(`🔧 Auto-join: Garantindo entrada na sala do ticket ${message.ticketId}`);
+        joinTicket(message.ticketId);
+      }
+    };
+
     // Listener para atualizações de mensagens
     const handleMessageUpdate = ({ ticketId, message }) => {
       try {
@@ -282,7 +290,10 @@ useEffect(() => {
     };
 
     socket.on('tickets-update', handleTicketsUpdate);
-    socket.on('new-message', handleNewMessage);
+    socket.on('new-message', (message) => {
+      autoJoinTicketOnMessage(message);
+      handleNewMessage(message);
+    });
     socket.on('message-update', handleMessageUpdate);
     socket.on('message-sent', handleMessageSent);
     socket.on('message-error', handleMessageError);

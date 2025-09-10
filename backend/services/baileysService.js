@@ -2,13 +2,64 @@ import makeWASocket, { useMultiFileAuthState, fetchLatestBaileysVersion, Disconn
 import { Boom } from '@hapi/boom';
 import qrcode from 'qrcode';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { Session, Ticket, TicketMessage, Contact } from '../models/index.js';
 import { emitToTicket, emitToAll } from './socket.js';
+import ffmpeg from 'fluent-ffmpeg';
+import NodeCache from 'node-cache';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Cache para mensagens (implementação msgDB)
+const msgCache = new NodeCache({
+  stdTTL: 300, // 5 minutos
+  maxKeys: 1000,
+  checkperiod: 60,
+  useClones: false
+});
+
+// Implementação do msgDB para cache de mensagens
+const msgDB = {
+  get: (key) => {
+    const { id } = key;
+    if (!id) return null;
+    
+    const data = msgCache.get(id);
+    if (data) {
+      try {
+        const msg = JSON.parse(data);
+        return msg?.message;
+      } catch (error) {
+        console.error('Erro ao recuperar mensagem do cache:', error);
+        return null;
+      }
+    }
+    return null;
+  },
+  save: (msg) => {
+    const { id } = msg.key;
+    if (!id) return;
+    
+    try {
+      const msgString = JSON.stringify(msg);
+      msgCache.set(id, msgString);
+      console.log(`💾 Mensagem salva no cache: ${id}`);
+    } catch (error) {
+      console.error('Erro ao salvar mensagem no cache:', error);
+    }
+  }
+};
+
+// Optional: allow custom ffmpeg binary path via env
+try {
+  if (process.env.FFMPEG_PATH && typeof ffmpeg?.setFfmpegPath === 'function') {
+    ffmpeg.setFfmpegPath(process.env.FFMPEG_PATH);
+    console.log(`🎛️ FFMPEG_PATH definido: ${process.env.FFMPEG_PATH}`);
+  }
+} catch {}
 
 // Sanitiza o ID para um nome de pasta compatível com Windows/macOS/Linux
 const sanitizeForFs = (name) => String(name).replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -39,15 +90,67 @@ const findSessionIndex = (sessionId) => {
 // Função para limpar e recriar pasta de autenticação (async, usando fs/promises)
 const cleanAndRecreateAuthDir = async (sessionId) => {
   const authDir = getAuthDir(sessionId);
+  const authRoot = getAuthRoot();
   try {
     // Remover (force=true ignora inexistente)
     await fs.rm(authDir, { recursive: true, force: true });
     console.log(`🧹 Pasta de auth removida (se existia): ${authDir}`);
+    // Garantir raiz e pasta da sessão
+    await fs.mkdir(authRoot, { recursive: true });
     await fs.mkdir(authDir, { recursive: true });
     console.log(`📁 Pasta de auth recriada: ${authDir}`);
   } catch (error) {
     console.error(`❌ Erro ao limpar/recriar pasta de auth:`, error);
   }
+};
+
+// ===== Audio helpers (conversion to OGG/Opus Voice) =====
+const ensureTempDir = () => {
+  const tempDir = path.resolve(process.cwd(), 'uploads', 'temp');
+  try { if (!fsSync.existsSync(tempDir)) fsSync.mkdirSync(tempDir, { recursive: true }); } catch {}
+  return tempDir;
+};
+
+const convertToOggOpusVoice = async (inputBuffer) => {
+  const tempDir = ensureTempDir();
+  const ts = Date.now();
+  const inPath = path.join(tempDir, `in_${ts}.audio`);
+  const outPath = path.join(tempDir, `out_${ts}.ogg`);
+
+  await fs.writeFile(inPath, inputBuffer);
+
+  return new Promise((resolve, reject) => {
+    ffmpeg(inPath)
+      .noVideo()              // -vn
+      .audioFrequency(48000)  // -ar 48000
+      .audioChannels(1)       // -ac 1
+      .audioCodec('libopus')  // -c:a libopus
+      .audioBitrate('64k')    // -b:a 64k
+      .format('ogg')          // -f ogg
+      .outputOptions([
+        '-application', 'voip',
+        '-avoid_negative_ts', 'make_zero',
+        '-map_metadata', '-1'
+      ])
+      .on('start', (cmd) => console.log(`[Baileys] FFmpeg voice cmd: ${cmd}`))
+      .on('error', async (err) => {
+        console.error('[Baileys] FFmpeg error (voice):', err.message);
+        try { await fs.unlink(inPath); } catch {}
+        try { await fs.unlink(outPath); } catch {}
+        reject(err);
+      })
+      .on('end', async () => {
+        try {
+          const out = await fs.readFile(outPath);
+          await fs.unlink(inPath).catch(() => {});
+          await fs.unlink(outPath).catch(() => {});
+          resolve(out);
+        } catch (e) {
+          reject(e);
+        }
+      })
+      .save(outPath);
+  });
 };
 
 // Interface para sessões
@@ -177,6 +280,25 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
     const authDir = getAuthDir(sessionId);
     await fs.mkdir(authDir, { recursive: true });
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
+    // Wrap saveCreds to ensure authDir exists before writing (avoid ENOENT on Windows during reconnection cleans)
+    const ensureAuthDir = async () => {
+      try { await fs.mkdir(authDir, { recursive: true }); } catch {}
+    };
+    const saveCredsSafe = async () => {
+      try {
+        await ensureAuthDir();
+        await saveCreds();
+      } catch (e) {
+        console.error('⚠️ Erro ao salvar credenciais Baileys (saveCredsSafe):', e?.message || e);
+        // Tentativa única extra após recriar pasta
+        try {
+          await fs.mkdir(authDir, { recursive: true });
+          await saveCreds();
+        } catch (e2) {
+          console.error('❌ Falha repetida ao salvar credenciais:', e2?.message || e2);
+        }
+      }
+    };
     
     // Obter registro da sessão no banco (para saber se precisa histórico completo)
     let sessionDb = null;
@@ -202,20 +324,26 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
       printQRInTerminal: false,
       generateHighQualityLinkPreview: true,
       // Habilitar sync completo para permitir importação de chats históricos
-      syncFullHistory: true,
+      syncFullHistory: false, // Desabilitar para melhor performance inicial
       markOnlineOnConnect: false,
       connectTimeoutMs: 90_000,
-      defaultQueryTimeoutMs: 0,
+      defaultQueryTimeoutMs: 120_000, // Aumentar timeout
       keepAliveIntervalMs: 30_000,
       emitOwnEvents: true,
-      fireInitQueries: wantFullHistory, // se precisamos histórico inicial, deixar Baileys disparar queries iniciais
+      fireInitQueries: true, // Sempre habilitar para receber mensagens
       browser: ['ZaZap', 'Desktop', '1.0.0'],
       retryRequestDelayMs: 250,
       maxMsgRetryCount: 5,
       // Adicionar configurações para melhor reconexão
       qrTimeout: 60_000, // 60 segundos para QR
-      getMessage: async () => null, // Evitar erros de mensagem não encontrada
-      appStateMacVerification: { patch: false, snapshot: false }
+      getMessage: msgDB.get, // Usar nossa implementação de cache
+      appStateMacVerification: { patch: false, snapshot: false },
+      // Configurações importantes para recebimento de mensagens
+      shouldSyncHistoryMessage: () => true,
+      shouldIgnoreJid: (jid) => {
+        // Ignorar apenas broadcasts reais, não grupos
+        return jid?.endsWith('@broadcast') || jid?.includes('newsletter');
+      }
     });
 
     // Tentar iniciar store de memória (se disponível) para garantir chats
@@ -242,11 +370,117 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
       console.log(`sock.authState existe:`, !!sock.authState);
     }
 
-    // Evento para salvar credenciais
-    sock.ev.on('creds.update', saveCreds);
+    // CONFIGURAR TODOS OS LISTENERS ANTES DA CONEXÃO
+    console.log(`🔧 Configurando listeners ANTES da inicialização da conexão para sessão ${sessionId}`);
     
-    // Evento de atualização de conexão
-  const scheduleReconnect = async (sessionId, onQR, onReady, onMessage, reasonCode) => {
+    // Evento de mensagens - configurar ANTES da conexão
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+      console.log(`🔔 Evento messages.upsert recebido - type: ${type}, messages: ${messages?.length || 0}`);
+      
+      // Processar mensagens de notificação e histórico
+      if ((type === 'notify' || type === 'append') && messages && messages.length > 0) {
+        for (const msg of messages) {
+          try {
+            // Log detalhado da mensagem
+            console.log(`📨 Processando mensagem - fromMe: ${msg.key.fromMe}, remoteJid: ${msg.key.remoteJid}, type: ${type}`);
+            
+            // Filtrar mensagens próprias e broadcasts
+            if (!msg.key.fromMe && !msg.key.remoteJid.includes('@broadcast') && !msg.key.remoteJid.includes('@newsletter')) {
+              console.log(`📨 Mensagem válida recebida via Baileys:`, {
+                id: msg.key.id,
+                from: msg.key.remoteJid,
+                participant: msg.key.participant,
+                messageType: Object.keys(msg.message || {})[0],
+                content: msg.message?.conversation || msg.message?.extendedTextMessage?.text || '[mídia]'
+              });
+              
+              // Salvar mensagem no cache para getMessage
+              if (msg.key.id) {
+                msgDB.save(msg);
+              }
+              
+              // Usar callback onMessage se disponível
+              if (onMessage && typeof onMessage === 'function') {
+                console.log(`🔄 Chamando callback onMessage para sessão ${sessionId}`);
+                await onMessage(msg);
+                console.log(`✅ Callback onMessage processado com sucesso`);
+              } else {
+                console.log(`⚠️ Callback onMessage não definido ou inválido para sessão ${sessionId}:`, typeof onMessage);
+              }
+            } else {
+              console.log(`⏭️ Mensagem ignorada - fromMe: ${msg.key.fromMe}, broadcast: ${msg.key.remoteJid.includes('@broadcast')}, newsletter: ${msg.key.remoteJid.includes('@newsletter')}`);
+            }
+          } catch (msgError) {
+            console.error(`❌ Erro ao processar mensagem individual:`, msgError);
+          }
+        }
+      } else {
+        console.log(`ℹ️ Tipo de mensagem ignorado: ${type} ou array vazio`);
+      }
+    });
+
+    // Adicionar listener para histórico de mensagens
+    sock.ev.on('messaging-history.set', async ({ messages, isLatest }) => {
+      console.log(`📚 Histórico de mensagens recebido - ${messages?.length || 0} mensagens, isLatest: ${isLatest}`);
+      
+      if (messages && messages.length > 0) {
+        for (const msg of messages) {
+          try {
+            // Processar apenas mensagens não próprias e recentes (últimas 24h)
+            if (!msg.key.fromMe && !msg.key.remoteJid.includes('@broadcast')) {
+              const msgTimestamp = msg.messageTimestamp || 0;
+              const now = Math.floor(Date.now() / 1000);
+              const dayAgo = now - (24 * 60 * 60);
+              
+              // Só processar mensagens das últimas 24 horas
+              if (msgTimestamp > dayAgo) {
+                console.log(`📖 Processando mensagem do histórico:`, {
+                  id: msg.key.id,
+                  from: msg.key.remoteJid,
+                  timestamp: new Date(msgTimestamp * 1000).toISOString()
+                });
+                
+                if (onMessage && typeof onMessage === 'function') {
+                  await onMessage(msg);
+                }
+              }
+            }
+          } catch (historyError) {
+            console.error(`❌ Erro ao processar mensagem do histórico:`, historyError);
+          }
+        }
+      }
+    });
+
+    // Evento para salvar credenciais
+    sock.ev.on('creds.update', saveCredsSafe);
+
+    // Evento de presença
+    sock.ev.on('presence.update', ({ id, presences }) => {
+      console.log(`Presença atualizada para ${id}:`, presences);
+    });
+
+    // Adicionar handler de erro global para o socket
+    sock.ev.on('error', (error) => {
+      console.error(`❌ Erro no socket Baileys ${sessionId}:`, error);
+      // Se for erro crítico, forçar reconexão
+      if (error.message?.includes('Stream Errored')) {
+        console.log(`🔧 Erro de stream detectado - forçando reconexão`);
+        sock.end();
+      }
+    });
+
+    console.log(`✅ Todos os listeners configurados para sessão ${sessionId}`);
+    console.log(`📊 Listeners configurados:`);
+    console.log(`   - messages.upsert: ✅ configurado`);
+    console.log(`   - messaging-history.set: ✅ configurado`);
+    console.log(`   - creds.update: ✅ configurado`);
+    console.log(`   - error: ✅ configurado`);
+    
+    // CONFIGURAR HANDLERS DE CONEXÃO DEPOIS DOS LISTENERS DE MENSAGEM
+    
+    // CONFIGURAR HANDLERS DE CONEXÃO DEPOIS DOS LISTENERS DE MENSAGEM
+    const scheduleReconnect = async (sessionId, onQR, onReady, onMessage, reasonCode) => {
       try {
         const existingIndex = findSessionIndex(sessionId);
         if (existingIndex === -1) {
@@ -406,6 +640,41 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
         if (session.reconnectTimer) {
           clearTimeout(session.reconnectTimer);
           session.reconnectTimer = null;
+        }
+
+        // Verificar se os listeners estão funcionando
+        console.log(`🔧 Listeners de mensagem configurados para sessão ${sessionId}:`);
+        console.log(`   - messages.upsert: ✅ ativo`);
+        console.log(`   - messaging-history.set: ✅ ativo`);
+        
+        // Verificar se o callback onMessage está definido
+        if (onMessage && typeof onMessage === 'function') {
+          console.log(`✅ Callback onMessage está definido e é uma função`);
+        } else {
+          console.log(`❌ PROBLEMA: Callback onMessage não está definido ou não é uma função:`, typeof onMessage);
+        }
+        
+        // Forçar sincronização inicial para garantir recebimento de mensagens
+        try {
+          console.log(`🔄 Iniciando sincronização inicial para sessão ${sessionId}...`);
+          // Aguardar um momento para garantir que a conexão esteja estável
+          setTimeout(async () => {
+            try {
+              // Forçar query de chats para ativar listeners
+              if (sock.store) {
+                await sock.store.fetchGroupMetadata;
+              }
+              
+              // Teste: simular evento de mensagem para verificar se o listener funciona
+              console.log(`🧪 Testando listeners de mensagem para sessão ${sessionId}...`);
+              
+              console.log(`✅ Sincronização inicial concluída para sessão ${sessionId}`);
+            } catch (syncError) {
+              console.log(`⚠️ Erro na sincronização inicial (não crítico):`, syncError.message);
+            }
+          }, 2000);
+        } catch (e) {
+          console.log(`⚠️ Erro ao iniciar sincronização:`, e.message);
         }
 
         // Capturar número real da conta sem sobrescrever o identificador customizado fornecido pelo usuário
@@ -631,39 +900,6 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
       if (connection === 'connecting') {
         console.log(`🔄 Sessão Baileys ${sessionId} conectando...`);
         session.status = 'connecting';
-      }
-    });
-    
-    // Evento de mensagens
-    sock.ev.on('messages.upsert', async ({ messages, type }) => {
-      if (type === 'notify' && messages && messages.length > 0) {
-        for (const msg of messages) {
-          if (!msg.key.fromMe && !msg.key.remoteJid.includes('@broadcast')) {
-            console.log(`📨 Mensagem recebida via Baileys:`, msg);
-            // Usar apenas o callback onMessage que já está configurado corretamente
-            if (onMessage) {
-              console.log(`🔄 Chamando callback onMessage para sessão ${sessionId}`);
-              await onMessage(msg); // Remover o segundo parâmetro
-            } else {
-              console.log(`⚠️ Callback onMessage não definido para sessão ${sessionId}`);
-            }
-          }
-        }
-      }
-    });
-
-    // Evento de presença
-    sock.ev.on('presence.update', ({ id, presences }) => {
-      console.log(`Presença atualizada para ${id}:`, presences);
-    });
-
-    // Adicionar handler de erro global para o socket
-    sock.ev.on('error', (error) => {
-      console.error(`❌ Erro no socket Baileys ${sessionId}:`, error);
-      // Se for erro crítico, forçar reconexão
-      if (error.message?.includes('Stream Errored')) {
-        console.log(`🔧 Erro de stream detectado - forçando reconexão`);
-        sock.end();
       }
     });
 
@@ -946,7 +1182,7 @@ export const sendVoiceNote = async (sessionId, to, buffer, mimetype = 'audio/ogg
   if (!sock) throw new Error('Sessão Baileys não encontrada');
 
   try {
-    console.log('🎵 Enviando PTT via Baileys:', {
+  console.log('🎵 Enviando PTT via Baileys (conversão OGG/Opus):', {
       to,
       bufferSize: buffer.length,
       mimetype,
@@ -958,12 +1194,20 @@ export const sendVoiceNote = async (sessionId, to, buffer, mimetype = 'audio/ogg
       throw new Error('Buffer de áudio vazio');
     }
     
-    // Calcular duração mais precisa
+    // Converter para OGG/Opus VOIP (sempre, para garantir voice note nativa)
+    let oggBuffer;
+    try {
+      oggBuffer = await convertToOggOpusVoice(buffer);
+    } catch (convErr) {
+      console.warn('⚠️ Conversão para OGG/Opus falhou, enviando buffer original como PTT:', convErr.message);
+      oggBuffer = buffer; // fallback
+    }
+
+    // Calcular duração mais precisa baseada no buffer convertido
     let audioDuration = duration;
     if (!audioDuration || audioDuration <= 0) {
-      // Estimativa baseada no tamanho do arquivo e taxa de bits
       const avgBitrate = 32000; // 32kbps para opus
-      audioDuration = Math.max(1, Math.floor(buffer.length * 8 / avgBitrate));
+      audioDuration = Math.max(1, Math.floor(oggBuffer.length * 8 / avgBitrate));
       audioDuration = Math.min(audioDuration, 300); // Máximo 5 minutos
     }
     
@@ -987,20 +1231,17 @@ export const sendVoiceNote = async (sessionId, to, buffer, mimetype = 'audio/ogg
     const waveform = generateRealisticWaveform(audioDuration);
     
     // Garantir mimetype compatível
-    let audioMimetype = mimetype;
-    if (!mimetype.includes('opus') && !mimetype.includes('aac')) {
-      audioMimetype = 'audio/ogg; codecs=opus';
-      console.log('🎵 Convertendo mimetype para:', audioMimetype);
-    }
+  // Usar mimetype OGG/Opus para garantir PTT nativo
+  let audioMimetype = 'audio/ogg; codecs=opus';
     
     // Mensagem de voz otimizada para WhatsApp
     const voiceMessage = {
-      audio: buffer,
+  audio: oggBuffer,
       mimetype: audioMimetype,
       ptt: true,              // OBRIGATÓRIO para PTT
       seconds: audioDuration,
       waveform: waveform,
-      fileLength: buffer.length
+  fileLength: oggBuffer.length
     };
     
     console.log('🎵 Configuração final do PTT:', {

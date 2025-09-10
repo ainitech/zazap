@@ -1,6 +1,6 @@
 import { createBaileysSession, sendText, sendMedia } from '../services/baileysService.js';
 import { Ticket, Session, TicketMessage } from '../models/index.js';
-const { handleBaileysMessage } = await import('../services/messageCallbacks.js');
+import { handleBaileysMessage } from '../services/messageCallbacks.js';
 
 // Função para normalizar sessionId (remover device ID)
 const normalizeSessionId = (sessionId) => {
@@ -30,7 +30,21 @@ export const initSession = async (req, res) => {
 
     // Criar callback para processamento de mensagens
     const onMessage = async (message) => {
-      await handleBaileysMessage(message, session.id);
+      try {
+        console.log(`📨 [CONTROLLER] Callback onMessage acionado para sessão ${session.id}`);
+        console.log(`📨 [CONTROLLER] Dados da mensagem:`, {
+          id: message.key?.id,
+          from: message.key?.remoteJid,
+          fromMe: message.key?.fromMe,
+          content: message.message?.conversation || message.message?.extendedTextMessage?.text || '[mídia]'
+        });
+        
+        // Usar o ID numérico da sessão do banco de dados
+        await handleBaileysMessage(message, session.id);
+        console.log(`✅ [CONTROLLER] handleBaileysMessage processado com sucesso para sessão ${session.id}`);
+      } catch (error) {
+        console.error(`❌ [CONTROLLER] Erro no callback onMessage para sessão ${session.id}:`, error);
+      }
     };
 
     await createBaileysSession(baseNumber, // Usar apenas o número base

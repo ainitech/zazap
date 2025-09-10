@@ -107,8 +107,34 @@ const normalizeSenderPn = (senderPn) => senderPn || null;
 // Função para processar mensagens do Baileys
 const handleBaileysMessage = async (message, sessionId) => {
   try {
-    console.log(`� [BAILEYS] handleBaileysMessage CHAMADO - sessionId: ${sessionId}`);
-    console.log(`�📨 [BAILEYS] Processando mensagem Baileys:`, JSON.stringify(message, null, 2));
+    console.log(`🟢 [BAILEYS] handleBaileysMessage INICIADO - sessionId: ${sessionId}, messageId: ${message.key?.id}`);
+    console.log(`📨 [BAILEYS] Processando mensagem Baileys - conteúdo:`, message.message?.conversation || message.message?.extendedTextMessage?.text || '[mídia/outro]');
+
+    // Buscar sessão no banco - pode ser por ID numérico ou whatsappId (string)
+    let sessionRecord = null;
+    
+    // Tentar buscar por ID numérico primeiro
+    const numericSessionId = Number(sessionId);
+    if (!isNaN(numericSessionId)) {
+      sessionRecord = await Session.findByPk(numericSessionId);
+      console.log(`🔍 [BAILEYS] Busca por ID numérico ${numericSessionId}:`, sessionRecord ? `encontrada (${sessionRecord.whatsappId})` : 'não encontrada');
+    }
+    
+    // Se não encontrou, buscar por whatsappId (string)
+    if (!sessionRecord) {
+      sessionRecord = await Session.findOne({ where: { whatsappId: sessionId } });
+      console.log(`🔍 [BAILEYS] Busca por whatsappId "${sessionId}":`, sessionRecord ? `encontrada (ID: ${sessionRecord.id})` : 'não encontrada');
+    }
+
+    if (!sessionRecord) {
+      console.error(`❌ [BAILEYS] Sessão não encontrada para sessionId: ${sessionId}`);
+      return;
+    }
+
+    console.log(`✅ [BAILEYS] Sessão encontrada: ID ${sessionRecord.id}, whatsappId: ${sessionRecord.whatsappId}`);
+
+    // Use the actual session ID from the database record
+    const actualSessionId = sessionRecord.id;
 
   // Determine primary JID for contact/ticket:
   // - For groups (@g.us): use the group JID (normalized).
@@ -138,15 +164,15 @@ const handleBaileysMessage = async (message, sessionId) => {
       
       contact = await Contact.create({
         whatsappId: contactId, // Mantém normalizado para consistência no banco
-        sessionId: sessionId,
+        sessionId: sessionRecord.id, // Usar ID numérico da sessão
         name: contactName,
         pushname: message.pushName, // Nome do WhatsApp
         formattedNumber: cleanNumber, // Número limpo sem @lid/@s.whatsapp.net
         isGroup: contactId.includes('@g.us')
       });
-      console.log(`👤 [BAILEYS] Novo contato criado: ${contactName} (${contactId})`);
+      console.log(`👤 [BAILEYS] Novo contato criado: ${contactName} (${contactId}) para sessão ${sessionRecord.id}`);
     } else {
-      console.log(`👤 [BAILEYS] Contato existente encontrado: ${contact.name} (${contactId})`);
+      console.log(`👤 [BAILEYS] Contato existente encontrado: ${contact.name} (${contactId}) para sessão ${sessionRecord.id}`);
       // Atualiza somente foto se ainda não houver e não for grupo
       if (!contact.profilePicUrl && !contact.isGroup) {
         try {
@@ -176,23 +202,24 @@ const handleBaileysMessage = async (message, sessionId) => {
   const incomingContent = extractBaileysMessageContent(message);
 
   // Buscar ticket existente ou criar novo (diagnóstico detalhado)
-  console.log('🧪[MSG] Iniciando busca de ticket para contato', contactId, 'remoteNorm', remoteNorm, 'session', sessionId);
+  console.log('🔍[TICKET-SEARCH] Iniciando busca de ticket para contato:', contactId, '| remoteNorm:', remoteNorm, '| sessionId:', sessionId);
   let ticket = await Ticket.findOne({
       where: {
         contact: { [Op.in]: [contactId, remoteNorm].filter(Boolean) },
-        status: ['open', 'pending']
+  status: { [Op.in]: ['open', 'pending'] }
       },
       order: [['createdAt', 'DESC']]
     });
 
-    console.log(`🎫 [BAILEYS] Busca de ticket para ${contactId}: ${ticket ? `encontrado #${ticket.id}` : 'não encontrado'}`);
+    console.log(`🎫 [TICKET-SEARCH] Resultado da busca para ${contactId}: ${ticket ? `ENCONTRADO #${ticket.id} (status: ${ticket.status}, chatStatus: ${ticket.chatStatus}, assignedUserId: ${ticket.assignedUserId})` : 'NÃO ENCONTRADO'}`);
 
     let isNewTicket = false;
     if (!ticket) {
-      console.log('🧪[MSG] Nenhum ticket aberto encontrado. Criando novo ticket...');
+      console.log('🆕[TICKET-CREATE] Nenhum ticket aberto encontrado. Criando novo ticket...');
       // Criar novo ticket
       // Buscar sessão para aplicar defaultQueueId se existir
-      const sess = await Session.findByPk(sessionId);
+      const sess = await Session.findByPk(actualSessionId);
+      console.log('🔧[TICKET-CREATE] Sessão encontrada:', sess ? `ID ${sess.id}, defaultQueueId: ${sess.defaultQueueId}` : 'NÃO ENCONTRADA');
       const defaultQueueId = sess?.defaultQueueId || null;
       ticket = await Ticket.create({
         contact: contactId,
@@ -200,24 +227,26 @@ const handleBaileysMessage = async (message, sessionId) => {
         status: 'open',            // alinhar com criação manual
         chatStatus: 'waiting',      // necessário para aparecer em "aguardando"
         unreadCount: 1,
-        sessionId: sessionId,
+        sessionId: actualSessionId,
         queueId: defaultQueueId,
         lastMessage: incomingContent || null,
         channel: 'whatsapp'
       });
       isNewTicket = true;
-      console.log(`🎫 [BAILEYS] Novo ticket criado: #${ticket.id} com chatStatus: ${ticket.chatStatus}`);
+      console.log(`✅ [TICKET-CREATE] Novo ticket criado: #${ticket.id} com chatStatus: ${ticket.chatStatus}, queueId: ${ticket.queueId}`);
       if (defaultQueueId) {
-        console.log(`🧪[MSG] defaultQueueId aplicado na criação: ${defaultQueueId}`);
+        console.log(`🔧[TICKET-CREATE] defaultQueueId aplicado na criação: ${defaultQueueId}`);
       }
 
       // Tentar auto-atribuir à fila
-      const assignResult = await autoAssignTicketToQueue(ticket, sessionId);
-      console.log('🧪[MSG] Resultado autoAssignTicketToQueue:', assignResult, 'queueId final=', ticket.queueId);
+      console.log('🔄[QUEUE-ASSIGN] Iniciando auto-atribuição à fila...');
+      const assignResult = await autoAssignTicketToQueue(ticket, actualSessionId);
+      console.log('✅[QUEUE-ASSIGN] Resultado autoAssignTicketToQueue:', assignResult, 'queueId final=', ticket.queueId);
     } else {
+      console.log(`🔄 [TICKET-UPDATE] Ticket existente encontrado #${ticket.id}. Atualizando...`);
       // Se ticket foi encontrado por remoteNorm e temos pnNorm (1:1), migrar o ticket para usar pnNorm como contato principal
       if (!isGroup && pnNorm && ticket.contact !== pnNorm) {
-        console.log(`🔁 [BAILEYS] Migrando ticket #${ticket.id} de contato ${ticket.contact} -> ${pnNorm}`);
+        console.log(`🔁 [TICKET-MIGRATE] Migrando ticket #${ticket.id} de contato ${ticket.contact} -> ${pnNorm}`);
         await ticket.update({ contact: pnNorm, contactId: contact.id });
       }
       // Atualizar ticket existente
@@ -229,7 +258,30 @@ const handleBaileysMessage = async (message, sessionId) => {
         updatedAt: new Date(),
         channel: ticket.channel || 'whatsapp'
       });
-      console.log(`🎫 [BAILEYS] Ticket existente atualizado: #${ticket.id} (unread: ${ticket.unreadCount + 1})`);
+      console.log(`✅ [TICKET-UPDATE] Ticket existente atualizado: #${ticket.id} (unread: ${ticket.unreadCount + 1})`);
+
+      // Garantir que tickets sem atendente voltem para "Aguardando"
+      try {
+        const needsWaiting = !ticket.assignedUserId || !ticket.chatStatus || ticket.chatStatus === 'pending' || ticket.chatStatus === 'open';
+        console.log(`🔍 [WAITING-CHECK] Ticket #${ticket.id} - assignedUserId: ${ticket.assignedUserId}, chatStatus: ${ticket.chatStatus}, needsWaiting: ${needsWaiting}`);
+        if (needsWaiting && ticket.chatStatus !== 'waiting') {
+          console.log(`⏳ [WAITING-SET] Alterando chatStatus do ticket #${ticket.id} de '${ticket.chatStatus}' para 'waiting'`);
+          await ticket.update({ chatStatus: 'waiting' });
+          console.log(`✅ [WAITING-SET] Ticket #${ticket.id} movido para 'waiting' (sem atendente)`);
+          try {
+            console.log('📡 [TICKETS-EMIT] Emitindo tickets-update imediato após mudança para waiting...');
+            const { emitTicketsUpdate } = await import('./ticketBroadcast.js');
+            await emitTicketsUpdate();
+            console.log('✅ [TICKETS-EMIT] tickets-update emitido com sucesso');
+          } catch (emitErr) {
+            console.warn('⚠️ [TICKETS-EMIT] Falha ao emitir tickets-update imediato (Baileys):', emitErr.message);
+          }
+        } else {
+          console.log(`ℹ️ [WAITING-SKIP] Ticket #${ticket.id} não precisa de mudança para waiting`);
+        }
+      } catch (stErr) {
+        console.warn('⚠️ [WAITING-ERROR] Falha ao ajustar chatStatus para waiting:', stErr.message);
+      }
     }
 
   // Conteúdo da mensagem já extraído
@@ -370,7 +422,7 @@ const handleBaileysMessage = async (message, sessionId) => {
 
     // Processar regras da fila se não for novo (novo já foi processado no autoAssignTicketToQueue)
     if (!isNewTicket && ticket.queueId) {
-      await processQueueRules(ticket, sessionId, false);
+      await processQueueRules(ticket, actualSessionId, false);
     }
 
     // Emitir evento - enviar mensagem diretamente com ticketId incluído
@@ -397,8 +449,15 @@ const handleBaileysMessage = async (message, sessionId) => {
       duration: savedMessage.duration,
       isPtt: savedMessage.isPtt,
       fileType: savedMessage.mimeType // Para compatibilidade
-    };    console.log(`🚀 [BAILEYS] Emitindo evento new-message para ticket #${ticket.id}:`);
+    };    
+    
+    console.log(`🚀 [BAILEYS] Emitindo evento new-message para ticket #${ticket.id}:`);
     console.log(`📡 [BAILEYS] Dados do evento:`, JSON.stringify(eventData, null, 2));
+    
+    // Verificar quantos clientes estão conectados na sala do ticket
+    const { getRoomInfo } = await import('./socket.js');
+    const roomInfo = getRoomInfo(`ticket-${ticket.id}`);
+    console.log(`📊 [BAILEYS] Info da sala ticket-${ticket.id}:`, roomInfo);
     
     // Emitir para todos (global) e especificamente para a sala do ticket
     emitToAll('new-message', eventData);
@@ -412,16 +471,18 @@ const handleBaileysMessage = async (message, sessionId) => {
     // Atualizar lista de tickets para frontend (Aguardando/Accepted tabs)
     // Evitar excesso: apenas ao criar ticket novo ou quando unreadCount muda.
     try {
+      console.log('📡 [FINAL-EMIT] Emitindo tickets-update final...');
       await emitTicketsUpdate();
+      console.log('✅ [FINAL-EMIT] tickets-update final emitido com sucesso');
     } catch (e) {
-      console.error('Erro ao emitir tickets-update após mensagem:', e.message);
+      console.error('❌ [FINAL-EMIT] Erro ao emitir tickets-update após mensagem:', e.message);
     }
 
-    console.log(`🎯 [BAILEYS] Processamento completo da mensagem para ticket #${ticket.id} - ID da mensagem: ${savedMessage.id}`);
-    console.log(`🎯 [BAILEYS] Estado final do ticket: status=${ticket.status}, chatStatus=${ticket.chatStatus}, queueId=${ticket.queueId}`);
+    console.log(`🎯 [BAILEYS-COMPLETE] Processamento completo da mensagem para ticket #${ticket.id} - ID da mensagem: ${savedMessage.id}`);
+    console.log(`🎯 [BAILEYS-COMPLETE] Estado final do ticket: status=${ticket.status}, chatStatus=${ticket.chatStatus}, queueId=${ticket.queueId}, assignedUserId=${ticket.assignedUserId}`);
 
   } catch (error) {
-    console.error(`❌ [BAILEYS] Erro ao processar mensagem Baileys:`, error);
+    console.error(`❌ [BAILEYS-ERROR] Erro ao processar mensagem Baileys:`, error);
   }
 };
 
@@ -429,4 +490,179 @@ export {
   autoAssignTicketToQueue,
   handleBaileysMessage,
   normalizeSenderPn
+};
+
+// ======================= whatsapp-web.js inbound =========================
+// Processamento simples e eficiente para mensagens do whatsapp-web.js
+export const handleWwebjsMessage = async (msg, sessionKey) => {
+  try {
+    console.log(`📨 [WWEBJS] Processando mensagem - sessionKey: ${sessionKey}`);
+    
+    // Filtrar apenas mensagens próprias - WhatsApp-web.js é mais estável que Baileys
+    if (msg.fromMe) {
+      console.log(`⏭️ [WWEBJS] Ignorando mensagem própria: ${msg.body?.substring(0, 50)}`);
+      return;
+    }
+    
+    // Localizar Sessão por whatsappId (sessionKey)
+    const session = await Session.findOne({ where: { whatsappId: sessionKey } });
+    if (!session) {
+      console.warn(`❌ [WWEBJS] Sessão não encontrada para chave: ${sessionKey}`);
+      return;
+    }
+
+    const isGroup = msg.from?.endsWith('@g.us');
+    const contactId = isGroup ? msg.from : (msg.from || null);
+    if (!contactId) {
+      console.warn(`❌ [WWEBJS] ContactId inválido:`, msg.from);
+      return;
+    }
+
+    console.log(`👤 [WWEBJS] Contact ID: ${contactId} (grupo: ${isGroup})`);
+
+    // Buscar/criar contato
+    let contact = await Contact.findOne({ where: { whatsappId: contactId } });
+    if (!contact) {
+      const clean = contactId.split('@')[0];
+      let contactName = clean;
+      
+      try {
+        // Tentar obter nome do contato de forma simples
+        contactName = msg._data?.notifyName || msg._data?.pushname || clean;
+      } catch (e) {
+        // Ignorar erros na obtenção do nome
+      }
+      
+      contact = await Contact.create({
+        whatsappId: contactId,
+        sessionId: session.id,
+        name: contactName,
+        pushname: contactName,
+        isGroup: isGroup,
+        formattedNumber: clean
+      });
+      console.log(`✅ [WWEBJS] Novo contato criado: ${contactName} (${contactId})`);
+      emitToAll('contact-updated', contact);
+    } else {
+      console.log(`👤 [WWEBJS] Contato existente: ${contact.name} (${contactId})`);
+    }
+
+    // Buscar ticket aberto ou criar novo
+    let ticket = await Ticket.findOne({
+      where: { contact: contactId, status: { [Op.in]: ['open', 'pending'] } },
+      order: [['createdAt', 'DESC']]
+    });
+    
+    let isNewTicket = false;
+    if (!ticket) {
+      const defaultQueueId = session?.defaultQueueId || null;
+      ticket = await Ticket.create({
+        contact: contactId,
+        contactId: contact.id,
+        sessionId: session.id,
+        status: 'open',
+        chatStatus: 'waiting',
+        unreadCount: 1,
+        channel: 'whatsapp',
+        queueId: defaultQueueId,
+        lastMessage: msg.body || '[mensagem sem conteúdo]'
+      });
+      isNewTicket = true;
+      console.log(`🎫 [WWEBJS] Novo ticket criado: #${ticket.id}`);
+      
+      // Tentar auto-atribuir à fila
+      try {
+        await autoAssignTicketToQueue(ticket, session.id);
+      } catch (e) {
+        console.warn(`⚠️ [WWEBJS] Erro na auto-atribuição de fila:`, e?.message);
+      }
+    } else {
+      await ticket.update({ 
+        unreadCount: ticket.unreadCount + 1,
+        lastMessage: msg.body || '[mensagem sem conteúdo]'
+      });
+      console.log(`🎫 [WWEBJS] Ticket existente atualizado: #${ticket.id} (unread: ${ticket.unreadCount + 1})`);
+
+      // Garantir visibilidade em "Aguardando" quando não há atendente
+      try {
+        const needsWaiting = !ticket.assignedUserId || !ticket.chatStatus || ticket.chatStatus === 'pending' || ticket.chatStatus === 'open';
+        if (needsWaiting && ticket.chatStatus !== 'waiting') {
+          await ticket.update({ chatStatus: 'waiting' });
+          console.log(`⏳ [WWEBJS] Ticket #${ticket.id} movido para 'waiting' (sem atendente)`);
+          try {
+            const { emitTicketsUpdate } = await import('./ticketBroadcast.js');
+            await emitTicketsUpdate();
+          } catch (emitErr) {
+            console.warn('⚠️ [WWEBJS] Falha ao emitir tickets-update imediato:', emitErr.message);
+          }
+        }
+      } catch (stErr) {
+        console.warn('⚠️ [WWEBJS] Falha ao ajustar chatStatus para waiting:', stErr.message);
+      }
+    }
+
+    const body = msg.body || '[mensagem sem conteúdo]';
+
+    // Detectar tipo de mensagem de forma simples
+    let messageType = 'text';
+    
+    try {
+      if (msg.hasMedia) {
+        messageType = 'media'; // Simples - não tentar baixar mídia por enquanto
+        console.log(`📎 [WWEBJS] Mídia detectada na mensagem`);
+      }
+    } catch (e) {
+      // Ignorar erros de mídia por enquanto
+    }
+
+    // Usar timestamp da mensagem se disponível, senão usar atual
+    const messageTimestamp = msg.timestamp ? new Date(msg.timestamp * 1000) : new Date();
+
+    const saved = await TicketMessage.create({
+      ticketId: ticket.id,
+      sender: 'contact',
+      content: body,
+      timestamp: messageTimestamp,
+      channel: 'whatsapp',
+      messageType: messageType,
+      messageId: msg.id?._serialized || null
+    });
+
+    console.log(`💾 [WWEBJS] Mensagem salva: #${saved.id} para ticket #${ticket.id}`);
+
+    // Processar regras da fila se não for novo ticket
+    if (!isNewTicket && ticket.queueId) {
+      try {
+        await processQueueRules(ticket, session.id, false);
+      } catch (e) {
+        console.warn(`⚠️ [WWEBJS] Erro ao processar regras da fila:`, e?.message);
+      }
+    }
+
+    const eventData = {
+      id: saved.id,
+      ticketId: ticket.id,
+      sender: 'contact',
+      content: body,
+      timestamp: saved.timestamp,
+      channel: 'whatsapp',
+      messageType: messageType,
+      lastMessage: body,
+      ticketUpdatedAt: ticket.updatedAt
+    };
+
+    console.log(`🚀 [WWEBJS] Emitindo evento new-message para ticket #${ticket.id}`);
+    emitToAll('new-message', eventData);
+    
+    // Atualizar lista de tickets
+    try {
+      await emitTicketsUpdate();
+    } catch (e) {
+      console.warn(`⚠️ [WWEBJS] Erro ao emitir tickets-update:`, e?.message);
+    }
+
+    console.log(`✅ [WWEBJS] Processamento completo da mensagem para ticket #${ticket.id}`);
+  } catch (e) {
+    console.error('[WWEBJS] handleWwebjsMessage erro:', e);
+  }
 };

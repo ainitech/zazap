@@ -28,8 +28,10 @@ const Session = sequelize.define('Session', {
     allowNull: true,
   },
   library: {
-    type: DataTypes.STRING,
+    type: DataTypes.ENUM('baileys', 'whatsappjs', 'instagram', 'facebook'),
     allowNull: false,
+    defaultValue: 'baileys',
+    comment: 'Biblioteca utilizada para esta sessão'
   },
   // Canal da sessão: whatsapp, instagram, facebook
   channel: {

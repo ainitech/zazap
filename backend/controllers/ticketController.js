@@ -189,7 +189,7 @@ export const moveTicket = async (req, res) => {
   const { ticketId, targetQueueId } = req.body;
   try {
     console.log(`🔄 Movendo ticket #${ticketId} para fila #${targetQueueId}`);
-    
+  const intelligentLibraryManager = (await import('../services/intelligentLibraryManager.js')).default;
     const ticket = await Ticket.findByPk(ticketId);
     if (!ticket) return res.status(404).json({ error: 'Ticket não encontrado.' });
     
@@ -294,30 +294,48 @@ export const acceptTicket = async (req, res) => {
 
         // Se não há fila (queueId null) e existir sessionId, enviar via WhatsApp automaticamente
         if (!ticket.queueId && ticket.sessionId) {
-          console.log('🔄 Enviando apresentação diretamente ao contato via sessão WhatsApp (sem fila)...');
+          console.log('🔄 Enviando apresentação via Gerenciador Inteligente...');
           try {
-            const { sendText } = await import('../services/baileysService.js');
-            // Tentar com ticket.sessionId, se falhar tentar mapear via Session.whatsappId
-            try {
-              await sendText(ticket.sessionId, ticket.contact, introMsg);
-            } catch(firstSendErr) {
-              console.warn('⚠️ Primeira tentativa falhou com sessionId direto, tentando mapear whatsappId da sessão:', firstSendErr.message);
-              try {
-                const { Session } = await import('../models/index.js');
-                const sessionRecord = await Session.findByPk(ticket.sessionId);
-                if (sessionRecord) {
-                  await sendText(sessionRecord.whatsappId, ticket.contact, introMsg);
-                } else {
-                  throw new Error('Session record não encontrado para fallback');
-                }
-              } catch(fallbackErr) {
-                console.warn('⚠️ Fallback para whatsappId da sessão falhou:', fallbackErr.message);
-                throw firstSendErr;
-              }
+            // Usar o gerenciador inteligente para envio automático
+            const intelligentLibraryManager = (await import('../services/intelligentLibraryManager.js')).default;
+            const { Session } = await import('../models/index.js');
+            
+            // Buscar informações da sessão
+            const sessionRecord = await Session.findByPk(ticket.sessionId);
+            if (!sessionRecord) {
+              throw new Error(`Sessão ${ticket.sessionId} não encontrada no banco`);
             }
-            console.log('📨 Apresentação enviada ao número do contato.');
+            
+            console.log(`🧠 Enviando apresentação via biblioteca ${sessionRecord.library} para ${ticket.contact}`);
+            
+            // Usar o gerenciador inteligente para envio
+            const result = await intelligentLibraryManager.sendMessage(
+              sessionRecord.whatsappId, 
+              ticket.contact, 
+              introMsg
+            );
+            
+            console.log(`✅ Apresentação enviada com sucesso via ${result.library} (Gerenciador Inteligente)`);
+            
           } catch (sendErr) {
-            console.warn('⚠️ Falha ao enviar apresentação para o contato:', sendErr.message);
+            console.warn('⚠️ Falha ao enviar apresentação via Gerenciador Inteligente:', sendErr.message);
+            
+            // Fallback para método antigo (Baileys direto)
+            console.log('🔄 Tentando fallback com Baileys direto...');
+            try {
+              const { sendText } = await import('../services/baileysService.js');
+              const { Session } = await import('../models/index.js');
+              const sessionRecord = await Session.findByPk(ticket.sessionId);
+              
+              if (sessionRecord) {
+                await sendText(sessionRecord.whatsappId, ticket.contact, introMsg);
+                console.log('📨 Apresentação enviada via fallback Baileys.');
+              } else {
+                throw new Error('Session record não encontrado para fallback');
+              }
+            } catch (fallbackErr) {
+              console.warn('⚠️ Fallback Baileys também falhou:', fallbackErr.message);
+            }
           }
         } else {
           if (ticket.queueId) {
@@ -429,10 +447,35 @@ export const resolveTicket = async (req, res) => {
         });
         if (!ticket.queueId && ticket.sessionId) {
           try {
-            const { sendText } = await import('../services/baileysService.js');
-            await sendText(ticket.sessionId, ticket.contact, farewell);
+            // Usar o gerenciador inteligente para envio de despedida
+            const intelligentLibraryManager = (await import('../services/intelligentLibraryManager.js')).default;
+            const { Session } = await import('../models/index.js');
+            
+            const sessionRecord = await Session.findByPk(ticket.sessionId);
+            if (sessionRecord) {
+              console.log(`🧠 Enviando despedida via biblioteca ${sessionRecord.library}`);
+              await intelligentLibraryManager.default.sendMessage(
+                sessionRecord.whatsappId, 
+                ticket.contact, 
+                farewell
+              );
+              console.log('✅ Despedida enviada via Gerenciador Inteligente');
+            }
           } catch (extErr) {
-            console.warn('⚠️ Falha ao enviar despedida externa (resolveTicket):', extErr.message);
+            console.warn('⚠️ Falha ao enviar despedida via Gerenciador Inteligente:', extErr.message);
+            
+            // Fallback para Baileys
+            try {
+              const { sendText } = await import('../services/baileysService.js');
+              const { Session } = await import('../models/index.js');
+              const sessionRecord = await Session.findByPk(ticket.sessionId);
+              if (sessionRecord) {
+                await sendText(sessionRecord.whatsappId, ticket.contact, farewell);
+                console.log('📨 Despedida enviada via fallback Baileys');
+              }
+            } catch (fallbackErr) {
+              console.warn('⚠️ Fallback Baileys para despedida também falhou:', fallbackErr.message);
+            }
           }
         }
       } catch (fwErr) {
@@ -555,27 +598,35 @@ export const closeTicket = async (req, res) => {
       // Enviar externamente se não há fila e há sessionId
       if (!ticket.queueId && ticket.sessionId) {
         try {
-          const { sendText } = await import('../services/baileysService.js');
-          try {
-            await sendText(ticket.sessionId, ticket.contact, farewell);
-          } catch(firstSendErr) {
-            console.warn('⚠️ Primeira tentativa despedida falhou, tentando fallback whatsappId:', firstSendErr.message);
-            try {
-              const { Session } = await import('../models/index.js');
-              const sessionRecord = await Session.findByPk(ticket.sessionId);
-              if (sessionRecord) {
-                await sendText(sessionRecord.whatsappId, ticket.contact, farewell);
-              } else {
-                throw new Error('Session record não encontrado (closeTicket)');
-              }
-            } catch(fallbackErr) {
-              console.warn('⚠️ Fallback despedida falhou:', fallbackErr.message);
-              throw firstSendErr;
-            }
+          // Usar o gerenciador inteligente
+          const intelligentLibraryManager = (await import('../services/intelligentLibraryManager.js')).default;
+          const { Session } = await import('../models/index.js');
+          
+          const sessionRecord = await Session.findByPk(ticket.sessionId);
+          if (sessionRecord) {
+            console.log(`🧠 Enviando despedida/NPS via biblioteca ${sessionRecord.library}`);
+            await intelligentLibraryManager.default.sendMessage(
+              sessionRecord.whatsappId, 
+              ticket.contact, 
+              farewell
+            );
+            console.log('✅ Mensagem de despedida/NPS enviada via Gerenciador Inteligente');
           }
-          console.log('📨 Mensagem de despedida/NPS enviada externamente.');
         } catch (extErr) {
-          console.warn('⚠️ Falha ao enviar despedida externa:', extErr.message);
+          console.warn('⚠️ Falha ao enviar despedida/NPS via Gerenciador Inteligente:', extErr.message);
+          
+          // Fallback para Baileys
+          try {
+            const { sendText } = await import('../services/baileysService.js');
+            const { Session } = await import('../models/index.js');
+            const sessionRecord = await Session.findByPk(ticket.sessionId);
+            if (sessionRecord) {
+              await sendText(sessionRecord.whatsappId, ticket.contact, farewell);
+              console.log('📨 Despedida/NPS enviada via fallback Baileys');
+            }
+          } catch (fallbackErr) {
+            console.warn('⚠️ Fallback Baileys para despedida/NPS também falhou:', fallbackErr.message);
+          }
         }
       }
     } catch (e) {
@@ -667,10 +718,35 @@ export const updateTicket = async (req, res) => {
           // Enviar externamente se não há fila e há sessionId
           if (!ticket.queueId && ticket.sessionId) {
             try {
-              const { sendText } = await import('../services/baileysService.js');
-              await sendText(ticket.sessionId, ticket.contact, farewell);
+              // Usar o gerenciador inteligente
+              const intelligentLibraryManager = (await import('../services/intelligentLibraryManager.js')).default;
+              const { Session } = await import('../models/index.js');
+              
+              const sessionRecord = await Session.findByPk(ticket.sessionId);
+              if (sessionRecord) {
+                console.log(`🧠 Enviando despedida/resolve via biblioteca ${sessionRecord.library}`);
+                await intelligentLibraryManager.default.sendMessage(
+                  sessionRecord.whatsappId, 
+                  ticket.contact, 
+                  farewell
+                );
+                console.log('✅ Despedida/resolve enviada via Gerenciador Inteligente');
+              }
             } catch (extErr) {
-              console.warn('⚠️ Falha ao enviar despedida externa (resolve):', extErr.message);
+              console.warn('⚠️ Falha ao enviar despedida/resolve via Gerenciador Inteligente:', extErr.message);
+              
+              // Fallback para Baileys
+              try {
+                const { sendText } = await import('../services/baileysService.js');
+                const { Session } = await import('../models/index.js');
+                const sessionRecord = await Session.findByPk(ticket.sessionId);
+                if (sessionRecord) {
+                  await sendText(sessionRecord.whatsappId, ticket.contact, farewell);
+                  console.log('📨 Despedida/resolve enviada via fallback Baileys');
+                }
+              } catch (fallbackErr) {
+                console.warn('⚠️ Fallback Baileys para despedida/resolve também falhou:', fallbackErr.message);
+              }
             }
           }
         } catch (logErr) {

@@ -40,7 +40,6 @@ export default function SessionsComponent() {
   const [showQRModal, setShowQRModal] = useState(false);
   const [selectedSession, setSelectedSession] = useState(null);
   const [newSession, setNewSession] = useState({ 
-    whatsappId: '', 
     library: 'baileys',
     name: '',
     channel: 'whatsapp',
@@ -64,6 +63,10 @@ export default function SessionsComponent() {
   const [loadingQueues, setLoadingQueues] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [importProgress, setImportProgress] = useState({}); // sessionId -> progress object
+  // WWebJS inline (new session modal)
+  const [wjsQr, setWjsQr] = useState('');
+  const [wjsStatus, setWjsStatus] = useState('');
+  // quick-send via WWebJS removido
 
   useEffect(() => {
     // Buscar sessões iniciais apenas uma vez
@@ -117,7 +120,7 @@ export default function SessionsComponent() {
     
     // Listener para status de sessão individual
     const { addToast } = toastApiRef.current || {};
-    const handleSessionStatusUpdate = ({ sessionId, status }) => {
+  const handleSessionStatusUpdate = ({ sessionId, status }) => {
       console.log('🔄 Status de sessão atualizado via WebSocket:', { sessionId, status });
       setRealTimeStatus(prev => ({ 
         ...prev, 
@@ -132,6 +135,21 @@ export default function SessionsComponent() {
         setQrStatus('');
         setSuccessMessage(`Sessão ${selectedSession.whatsappId || selectedSession.name || sessionId} conectada com sucesso!`);
         setTimeout(() => setSuccessMessage(''), 5000);
+      }
+
+      // Novo: se estivermos com o modal de criação aberto exibindo QR do WWebJS, feche ao conectar
+      if (status === 'connected' && showCreateModal) {
+        // Confirmar se a sessão conectada existe na lista e está em biblioteca wwebjs
+        const sess = sessions.find(s => s.id === sessionId);
+        if (sess && (sess.library === 'wwebjs' || sess.library === 'whatsappjs')) {
+          console.log('🎉 Sessão WWebJS conectada - fechando modal de criação');
+          setShowCreateModal(false);
+          setWjsQr('');
+          setWjsStatus('');
+          setNewSession({ library: 'baileys', name: '', channel: 'whatsapp', igUser: '', igPass: '', fbEmail: '', fbPass: '', importAllChats: false, importFromDate: '', importToDate: '' });
+          setSuccessMessage('Sessão conectada com sucesso!');
+          setTimeout(() => setSuccessMessage(''), 5000);
+        }
       }
 
       // Mostrar toast quando sessão ficar desconectada
@@ -190,6 +208,39 @@ export default function SessionsComponent() {
     socket.on('sessions-update', handleSessionsUpdate);
     socket.on('session-status-update', handleSessionStatusUpdate);
     socket.on('session-qr-update', handleQRCodeUpdate);
+    
+    // Listener para whatsappSession (compatível com referência Baileys)
+    const handleWhatsappSession = (data) => {
+      console.log('📱 whatsappSession event recebido:', data);
+      if (data.action === 'update' && data.session) {
+        const { session } = data;
+        // Se a sessão está conectada e é WWebJS, fechar modal QR se aberto
+        if (session.status === 'connected' && session.library === 'wwebjs') {
+          if (showQRModal && selectedSession?.whatsappId === session.whatsappId) {
+            console.log('🎉 WWebJS conectado via whatsappSession - fechando modal QR');
+            setShowQRModal(false);
+            setSuccessMessage(`Sessão ${session.name || session.whatsappId} conectada com sucesso!`);
+            setTimeout(() => setSuccessMessage(''), 5000);
+          }
+        }
+        // Atualizar lista de sessões também
+        fetchSessions(true);
+      }
+    };
+    socket.on('whatsappSession', handleWhatsappSession);
+    
+    // Fallback para eventos específicos do WWebJS (quando não há id da sessão do banco)
+    const handleWwebjsStatusUpdate = ({ whatsappId, status }) => {
+      if (status === 'connected' && showCreateModal) {
+        // Fecha o modal de criação se estivermos aguardando QR inline
+        setShowCreateModal(false);
+        setWjsQr('');
+        setWjsStatus('');
+        setSuccessMessage('Sessão conectada com sucesso!');
+        setTimeout(() => setSuccessMessage(''), 5000);
+      }
+    };
+    socket.on('wwebjs-status-update', handleWwebjsStatusUpdate);
     // Import progress listener
     const handleImportProgress = (payload) => {
       if (!payload || !payload.sessionId) return;
@@ -213,11 +264,13 @@ export default function SessionsComponent() {
       console.log('🔌 Removendo listeners WebSocket...');
       socket.off('sessions-update', handleSessionsUpdate);
       socket.off('session-status-update', handleSessionStatusUpdate);
-  socket.off('session-qr-update', handleQRCodeUpdate);
-  socket.off('session-import-progress', handleImportProgress);
+      socket.off('session-qr-update', handleQRCodeUpdate);
+      socket.off('session-import-progress', handleImportProgress);
+      socket.off('wwebjs-status-update', handleWwebjsStatusUpdate);
+      socket.off('whatsappSession', handleWhatsappSession);
       console.log('✅ Listeners WebSocket removidos');
     };
-  }, [socket, isConnected, showQRModal, selectedSession]);
+  }, [socket, isConnected, showQRModal, selectedSession, showCreateModal]);
 
   const fetchSessions = async (silent = false) => {
     try {
@@ -250,6 +303,81 @@ export default function SessionsComponent() {
       if (!silent) setLoading(false);
     }
   };
+
+  // ============ WWebJS (whatsapp-web.js) isolated flow ============
+  // Helper to slugify a human name into a safe session id
+  const makeSessionId = useCallback((name) => {
+    const base = String(name || '').toLowerCase().trim()
+      .normalize('NFD').replace(/[^\p{Letter}\p{Number}\s_-]/gu, '')
+      .replace(/\s+/g, '_').replace(/_+/g, '_').slice(0, 40);
+    return base || `sess_${Date.now()}`;
+  }, []);
+
+  const initWwebjs = async (sessionIdArg) => {
+    const sid = sessionIdArg || makeSessionId(newSession.name);
+    if (!sid) {
+      setError('Informe um nome para gerar a sessão (WWebJS)');
+      return;
+    }
+    try {
+      setActionLoading(prev => ({ ...prev, wwebjsInit: true }));
+      setWjsQr('');
+      setWjsStatus('loading');
+      const resp = await apiFetch('/api/wwebjs/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: sid })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        setError(data?.error || 'Falha ao iniciar WWebJS');
+        setWjsStatus('error');
+        return;
+      }
+      // Controller returns { ok, sessionId, qr }
+      const qrObj = data?.qr;
+      const qrImage = typeof qrObj === 'object' ? (qrObj.dataUrl || qrObj.qr || '') : (qrObj || '');
+      setWjsQr(qrImage);
+      setWjsStatus('qr_ready');
+      setError('');
+    } catch (e) {
+      console.error('Erro initWwebjs:', e);
+      setError('Erro ao conectar com o servidor (WWebJS)');
+      setWjsStatus('error');
+    } finally {
+      setActionLoading(prev => ({ ...prev, wwebjsInit: false }));
+    }
+  };
+
+  // Initialize WWebJS and display QR in the global QR modal
+  const initWwebjsForModal = async (whatsappId) => {
+    if (!whatsappId) return;
+    try {
+      setQrCode('');
+      setQrStatus('loading');
+      const resp = await apiFetch('/api/wwebjs/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: whatsappId })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        setQrStatus('error');
+        setError(data?.error || 'Falha ao iniciar WWebJS');
+        return;
+      }
+      const qrObj = data?.qr;
+      const qrImage = typeof qrObj === 'object' ? (qrObj.dataUrl || qrObj.qr || '') : (qrObj || '');
+      setQrCode(qrImage);
+      setQrStatus('qr_ready');
+    } catch (e) {
+      console.error('Erro initWwebjsForModal:', e);
+      setQrStatus('error');
+      setError('Erro ao conectar com o servidor (WWebJS)');
+    }
+  };
+
+  // função de envio removida
 
   const openEditModal = async (session) => {
     setEditSession({ ...session, defaultQueueId: session.defaultQueueId || '' });
@@ -366,8 +494,8 @@ export default function SessionsComponent() {
   };
 
   const createSession = async () => {
-    if (!newSession.whatsappId.trim()) {
-      setError('ID da sessão é obrigatório');
+    if (!newSession.name.trim()) {
+      setError('Nome da sessão é obrigatório');
       return;
     }
     // Valida credenciais conforme canal
@@ -382,12 +510,38 @@ export default function SessionsComponent() {
     try {
       setActionLoading(prev => ({ ...prev, create: true }));
       let response;
+      const generatedId = makeSessionId(newSession.name);
       if (newSession.channel === 'whatsapp') {
+        if (newSession.library === 'wwebjs') {
+          // Cria a sessão no banco e fecha o modal (fluxo igual ao Baileys)
+          const resp = await apiFetch('/api/sessions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              whatsappId: generatedId,
+              library: 'wwebjs',
+              name: newSession.name?.trim() || undefined
+            })
+          });
+          if (!resp.ok) {
+            let errMsg = 'Erro ao criar sessão';
+            try { const j = await resp.json(); errMsg = j.error || errMsg; } catch {}
+            setError(errMsg);
+            return; // não prossegue
+          }
+          await fetchSessions(true);
+          setShowCreateModal(false);
+          setNewSession({ library: 'baileys', name: '', channel: 'whatsapp', igUser: '', igPass: '', fbEmail: '', fbPass: '', importAllChats: false, importFromDate: '', importToDate: '' });
+          setSuccessMessage('Sessão criada. Clique em QR Code no card para conectar.');
+          setTimeout(() => setSuccessMessage(''), 5000);
+          setError('');
+          return;
+        }
         response = await apiFetch('/api/sessions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
-            whatsappId: newSession.whatsappId.trim(), 
+            whatsappId: generatedId, 
             library: 'baileys', 
             name: newSession.name?.trim() || undefined,
             importAllChats: !!newSession.importAllChats,
@@ -396,8 +550,8 @@ export default function SessionsComponent() {
           })
         });
       } else {
-        // Multi canal init direto
-        const payload = { sessionId: newSession.whatsappId.trim(), channel: newSession.channel };
+        // Multi canal init direto (gera ID a partir do nome)
+        const payload = { sessionId: generatedId, channel: newSession.channel };
         if (newSession.channel === 'instagram') {
           payload.credentials = { username: newSession.igUser, password: newSession.igPass };
         }
@@ -412,8 +566,9 @@ export default function SessionsComponent() {
       }
 
       if (response.ok) {
-        setShowCreateModal(false);
-  setNewSession({ whatsappId: '', library: 'baileys', name: '', channel: 'whatsapp', igUser: '', igPass: '', fbEmail: '', fbPass: '', importAllChats: false, importFromDate: '', importToDate: '' });
+  setShowCreateModal(false);
+  setWjsQr(''); setWjsStatus('');
+  setNewSession({ library: 'baileys', name: '', channel: 'whatsapp', igUser: '', igPass: '', fbEmail: '', fbPass: '', importAllChats: false, importFromDate: '', importToDate: '' });
         setError('');
       } else {
         const errorData = await response.json();
@@ -609,29 +764,28 @@ export default function SessionsComponent() {
     setQrStatus('loading');
     
     try {
-      // Primeiro verificar se a sessão está ativa
-      const qrData = await getQRCode(session.id, true); // silent = true
-      
-      if (qrData && qrData.qrCode && qrData.status !== 'disconnected') {
-        // QR code já existe, usar ele
-        setQrCode(qrData.qrCode);
-        setQrStatus(qrData.status || 'qr_ready');
+      if (session.library === 'wwebjs') {
+        await initWwebjsForModal(session.whatsappId);
       } else {
-        // Sessão não está ativa ou não tem QR, iniciar ela
-        console.log('🔄 Sessão não ativa, iniciando...');
-        await startSession(session.id);
-        
-        // Aguardar um pouco para o QR ser gerado
-        setTimeout(async () => {
-          const newQrData = await getQRCode(session.id, true);
-          if (newQrData && newQrData.qrCode) {
-            setQrCode(newQrData.qrCode);
-            setQrStatus(newQrData.status || 'qr_ready');
-          } else {
-            setQrStatus('error');
-            setError('Erro ao gerar QR code. Tente novamente.');
-          }
-        }, 3000);
+        // Baileys: verificar se a sessão está ativa
+        const qrData = await getQRCode(session.id, true);
+        if (qrData && qrData.qrCode && qrData.status !== 'disconnected') {
+          setQrCode(qrData.qrCode);
+          setQrStatus(qrData.status || 'qr_ready');
+        } else {
+          console.log('🔄 Sessão não ativa, iniciando...');
+          await startSession(session.id);
+          setTimeout(async () => {
+            const newQrData = await getQRCode(session.id, true);
+            if (newQrData && newQrData.qrCode) {
+              setQrCode(newQrData.qrCode);
+              setQrStatus(newQrData.status || 'qr_ready');
+            } else {
+              setQrStatus('error');
+              setError('Erro ao gerar QR code. Tente novamente.');
+            }
+          }, 3000);
+        }
       }
     } catch (error) {
       console.error('Erro ao mostrar QR code:', error);
@@ -713,8 +867,36 @@ export default function SessionsComponent() {
     
     return (
       <>
-        {/* Primary Action */}
-        {currentStatus === 'disconnected' || currentStatus === 'error' ? (
+        {/* WWebJS: sempre exibir botão de QR e ocultar start/restart/stop Baileys */}
+        {(session.library === 'wwebjs' || session.library === 'whatsappjs') ? (
+          <>
+            <button
+              onClick={() => showQRCode(session)}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white px-3 py-2.5 sm:py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center space-x-2 touch-manipulation"
+            >
+              <QrCodeIcon className="h-4 w-4" />
+              <span>QR Code</span>
+            </button>
+            {/* Secondary: Remover (manter), ocultar Reiniciar para WWebJS */}
+            <div className="grid grid-cols-1 gap-2 mt-2">
+              <button
+                onClick={() => deleteSession(session.id)}
+                disabled={isLoading}
+                className="bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-white px-2 py-2.5 sm:py-2 rounded-lg text-xs font-medium transition-colors disabled:cursor-not-allowed flex items-center justify-center touch-manipulation min-h-[36px] sm:min-h-[auto]"
+                title="Remover"
+              >
+                {isLoading === 'deleting' ? (
+                  <ClockIcon className="h-4 w-4 sm:h-3 sm:w-3 animate-spin" />
+                ) : (
+                  <TrashIcon className="h-4 w-4 sm:h-3 sm:w-3" />
+                )}
+              </button>
+            </div>
+          </>
+  ) : (
+  <>
+  {/* Primary Action */}
+  {currentStatus === 'disconnected' || currentStatus === 'error' ? (
           <button
             onClick={() => startSession(session.id)}
             disabled={isLoading}
@@ -783,7 +965,9 @@ export default function SessionsComponent() {
               <TrashIcon className="h-4 w-4 sm:h-3 sm:w-3" />
             )}
           </button>
-        </div>
+  </div>
+  </>
+  )}
       </>
     );
   };
@@ -1041,34 +1225,44 @@ export default function SessionsComponent() {
             <div className="space-y-4 sm:space-y-6">
               <div>
                 <label className="block text-sm font-semibold text-gray-300 mb-2 sm:mb-3">
-                  ID da Sessão *
+                  Nome da Sessão *
                 </label>
                 <input
                   type="text"
-                  value={newSession.whatsappId}
-                  onChange={(e) => setNewSession({...newSession, whatsappId: e.target.value})}
+                  value={newSession.name}
+                  onChange={(e) => setNewSession({...newSession, name: e.target.value})}
                   className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-slate-700/50 border border-slate-600/50 text-white rounded-xl focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500/50 transition-all duration-300 backdrop-blur-sm text-sm sm:text-base"
-                  placeholder="Ex: atendimento_01"
+                  placeholder="Ex: Atendimento Principal"
                 />
-                <p className="text-xs text-gray-400 mt-2">
-                  Use apenas letras, números e underline
-                </p>
+                <p className="text-xs text-gray-400 mt-2">Um nome amigável; o ID técnico será gerado automaticamente.</p>
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-300 mb-2 sm:mb-3">
-                  Canal
-                </label>
+                <label className="block text-sm font-semibold text-gray-300 mb-2 sm:mb-3">Canal</label>
                 <select
                   value={newSession.channel}
                   onChange={(e) => setNewSession({ ...newSession, channel: e.target.value })}
                   className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-slate-700/50 border border-slate-600/50 text-white rounded-xl focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500/50 text-sm sm:text-base"
                 >
-                  <option value="whatsapp">WhatsApp (Baileys)</option>
+                  <option value="whatsapp">WhatsApp</option>
                   <option value="instagram">Instagram</option>
                   <option value="facebook">Facebook</option>
                 </select>
               </div>
+
+              {newSession.channel === 'whatsapp' && (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-300 mb-2">Biblioteca</label>
+                  <select
+                    value={newSession.library}
+                    onChange={(e) => setNewSession(prev => ({ ...prev, library: e.target.value }))}
+                    className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600/50 text-white rounded-xl text-sm"
+                  >
+                    <option value="baileys">Baileys (recomendado)</option>
+                    <option value="wwebjs">whatsapp-web.js</option>
+                  </select>
+                </div>
+              )}
 
               {newSession.channel === 'instagram' && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1098,7 +1292,7 @@ export default function SessionsComponent() {
                 </div>
               )}
 
-              {newSession.channel === 'whatsapp' && (
+              {newSession.channel === 'whatsapp' && newSession.library === 'baileys' && (
                 <div className="space-y-4">
                   <div className="flex items-start gap-3 bg-slate-700/30 border border-slate-600/40 rounded-xl p-4">
                     <div>
@@ -1141,22 +1335,23 @@ export default function SessionsComponent() {
                 </div>
               )}
 
+              {newSession.channel === 'whatsapp' && newSession.library === 'wwebjs' && (
+                <div className="space-y-3">
+                  <button onClick={() => initWwebjs()} disabled={actionLoading.wwebjsInit} className="w-full bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg disabled:opacity-50">
+                    {actionLoading.wwebjsInit ? 'Preparando...' : 'Gerar QR (WWebJS)'}
+                  </button>
+                  {wjsStatus && <div className="text-xs text-gray-400">Status: {wjsStatus}</div>}
+                  {wjsQr && (
+                    <div className="mt-2 flex justify-center">
+                      <img src={wjsQr} alt="QR" className="w-56 h-56 bg-white p-2 rounded"/>
+                    </div>
+                  )}
+                  <p className="text-[10px] text-amber-400">Conector separado; não interfere nas sessões Baileys.</p>
+                </div>
+              )}
 
-              <div>
-                <label className="block text-sm font-semibold text-gray-300 mb-2 sm:mb-3">
-                  Nome da Sessão (opcional)
-                </label>
-                <input
-                  type="text"
-                  value={newSession.name}
-                  onChange={(e) => setNewSession({...newSession, name: e.target.value})}
-                  className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-slate-700/50 border border-slate-600/50 text-white rounded-xl focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500/50 transition-all duration-300 backdrop-blur-sm text-sm sm:text-base"
-                  placeholder="Ex: Atendimento Principal"
-                />
-                <p className="text-xs text-gray-400 mt-2">
-                  Nome amigável para identificar a sessão
-                </p>
-              </div>
+
+              {/* Nome da Sessão já definido acima como obrigatório */}
             </div>
 
             <div className="flex flex-col sm:flex-row sm:space-x-3 space-y-3 sm:space-y-0 mt-6 sm:mt-8">
@@ -1168,7 +1363,7 @@ export default function SessionsComponent() {
               </button>
               <button
                 onClick={createSession}
-                disabled={!newSession.whatsappId.trim() || actionLoading.create}
+                disabled={!newSession.name.trim() || actionLoading.create}
                 className="w-full sm:flex-1 px-4 sm:px-6 py-2 sm:py-3 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl hover:from-yellow-600 hover:to-orange-600 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed font-semibold shadow-lg hover:shadow-yellow-500/25 text-sm sm:text-base"
               >
                 {actionLoading.create ? (
@@ -1280,7 +1475,12 @@ export default function SessionsComponent() {
                 </div>
                 
                 <button
-                  onClick={() => getQRCode(selectedSession.id)}
+                  onClick={() => {
+                    if (selectedSession?.library === 'wwebjs' || selectedSession?.library === 'whatsappjs') {
+                      return initWwebjsForModal(selectedSession.whatsappId);
+                    }
+                    return getQRCode(selectedSession.id);
+                  }}
                   className="w-full px-4 py-3 bg-slate-700/50 text-gray-300 rounded-xl hover:bg-slate-600/50 transition-all duration-300 text-sm font-medium border border-slate-600/30 backdrop-blur-sm"
                 >
                   <ArrowPathIcon className="h-4 w-4 inline mr-2" />
@@ -1310,6 +1510,8 @@ export default function SessionsComponent() {
           </div>
         </div>
       )}
+
+
     </div>
   );
 }

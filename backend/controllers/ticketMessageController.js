@@ -1,11 +1,14 @@
 import { TicketMessage, Ticket, Session, Contact, MessageReaction, User, Queue } from '../models/index.js';
 import { Op } from 'sequelize';
 import { sendText as sendTextBaileys, getBaileysSession, sendMedia as sendMediaBaileys } from '../services/baileysService.js';
+import wwebjsService from '../services/wwebjsService.js';
+import intelligentLibraryManager from '../services/intelligentLibraryManager.js';
 import { sendInstagramText, sendInstagramMedia } from '../services/instagramService.js';
 import { sendFacebookText, sendFacebookMedia } from '../services/facebookService.js';
-import { emitToTicket, emitToAll } from '../services/socket.js';
+import { emitToAll, emitToTicket } from '../services/socket.js';
 import path from 'path';
 import fs from 'fs';
+
 
 
 // Função para atualizar informações do contato ao enviar mensagem
@@ -246,19 +249,53 @@ export const sendMessage = async (req, res) => {
             console.error(`❌ Erro no Facebook:`, facebookError.message);
           }
         } else {
-          // Canal WhatsApp (padrão)
+          // Canal WhatsApp (padrão) - usar gerenciador inteligente de bibliotecas
           try {
-            const activeSession = getBaileysSession(session.whatsappId);
-            if (activeSession && activeSession.user) {
-              console.log(`📤 Tentando envio via Baileys para ${ticket.contact}`);
-              await sendTextBaileys(session.whatsappId, ticket.contact, content);
-              console.log(`✅ Mensagem enviada com sucesso via Baileys`);
-              messageSent = true;
-            } else {
-              console.log(`⚠️ Baileys não disponível ou não conectado para sessão ${session.whatsappId}`);
+            console.log(`🧠 Enviando mensagem via Gerenciador Inteligente para ${ticket.contact}`);
+            
+            // Usar o gerenciador inteligente que seleciona automaticamente a melhor biblioteca
+            const result = await intelligentLibraryManager.sendMessage(
+              session.whatsappId, 
+              ticket.contact, 
+              content
+            );
+            
+            console.log(`✅ Mensagem enviada com sucesso via ${result.library} (Gerenciador Inteligente)`);
+            messageSent = true;
+            
+          } catch (intelligentError) {
+            console.error(`❌ Erro no Gerenciador Inteligente:`, intelligentError.message);
+            
+            // Fallback: tentar com bibliotecas individuais
+            try {
+              console.log(`🔄 Tentando fallback direto com Baileys...`);
+              const activeSession = getBaileysSession(session.whatsappId);
+              if (activeSession && activeSession.user) {
+                await sendTextBaileys(session.whatsappId, ticket.contact, content);
+                console.log(`✅ Mensagem enviada via Baileys (fallback)`);
+                messageSent = true;
+              } else {
+                console.log(`🔄 Tentando fallback direto com WWebJS...`);
+                const wwebjsSession = wwebjsService.getWwebjsSession(session.whatsappId);
+                if (wwebjsSession) {
+                  // Verificar se existe método sendText no wwebjsService
+                  if (typeof wwebjsService.sendText === 'function') {
+                    await wwebjsService.sendText(session.whatsappId, ticket.contact, content);
+                  } else {
+                    // Usar método direto do cliente
+                    await wwebjsSession.sendMessage(ticket.contact, content);
+                  }
+                  console.log(`✅ Mensagem enviada via WWebJS (fallback)`);
+                  messageSent = true;
+                }
+              }
+            } catch (fallbackError) {
+              console.error(`❌ Erro no fallback:`, fallbackError.message);
             }
-          } catch (baileysError) {
-            console.error(`❌ Erro no Baileys:`, baileysError.message);
+          }
+          
+          if (!messageSent) {
+            console.log(`⚠️ Nenhuma biblioteca disponível ou conectada para sessão ${session.whatsappId}`);
           }
         }
         
@@ -414,14 +451,74 @@ export const sendMediaMessage = async (req, res) => {
               console.error(`❌ Erro no envio Facebook:`, facebookError.message);
             }
           } else {
-            // Canal WhatsApp (padrão)
-            const sock = getBaileysSession(session.whatsappId);
-            if (sock && sock.user) {
-              await sendMediaBaileys(session.whatsappId, ticket.contact, fileBuffer, file.mimetype);
-              console.log(`✅ Arquivo enviado com sucesso via Baileys`);
+            // Canal WhatsApp (padrão) - usar Gerenciador Inteligente
+            try {
+              console.log(`🧠 Enviando mídia via Gerenciador Inteligente para ${ticket.contact}`);
+              
+              // Usar o gerenciador inteligente para envio de mídia
+              // Diferenciar áudio por biblioteca: para WWebJS precisamos sinalizar voice note
+              const isAudio = (file.mimetype || '').startsWith('audio/');
+              const result = await intelligentLibraryManager.sendMessage(
+                session.whatsappId,
+                ticket.contact,
+                {
+                  type: 'media',
+                  buffer: fileBuffer,
+                  mimetype: file.mimetype,
+                  filename: file.originalname,
+                  // Hint opcional usado pelo gerenciador para WWebJS
+                  voice: isAudio ? true : undefined
+                },
+                // Options também suportam voice=true no gerenciador
+                isAudio ? { voice: true } : undefined
+              );
+              
+              console.log(`✅ Mídia enviada com sucesso via ${result.library} (Gerenciador Inteligente)`);
               fileSent = true;
-            } else {
-              console.log(`⚠️ Baileys não disponível ou não conectado para sessão ${session.whatsappId}`);
+              
+            } catch (intelligentError) {
+              console.error(`❌ Erro no Gerenciador Inteligente para mídia:`, intelligentError.message);
+              
+              // Fallback para Baileys direto
+              try {
+                const sock = getBaileysSession(session.whatsappId);
+                if (sock && sock.user) {
+                  await sendMediaBaileys(session.whatsappId, ticket.contact, fileBuffer, file.mimetype);
+                  console.log(`✅ Arquivo enviado via fallback Baileys`);
+                  fileSent = true;
+                } else {
+                  console.log(`⚠️ Baileys não disponível ou não conectado para sessão ${session.whatsappId}`);
+                }
+              } catch (fallbackError) {
+                console.error(`❌ Fallback Baileys para mídia também falhou:`, fallbackError.message);
+              }
+
+              // Fallback adicional: tentar via WWebJS, diferenciando áudio
+              if (!fileSent) {
+                try {
+                  const wwebClient = wwebjsService.getWwebjsSession(session.whatsappId);
+                  if (wwebClient) {
+                    const isAudio2 = (file.mimetype || '').startsWith('audio/');
+                    if (isAudio2 && typeof wwebjsService.sendVoiceNote === 'function') {
+                      await wwebjsService.sendVoiceNote(session.whatsappId, ticket.contact, fileBuffer, file.mimetype);
+                      console.log(`✅ Áudio enviado como nota de voz via WWebJS (fallback)`);
+                    } else {
+                      const base64 = fileBuffer.toString('base64');
+                      await wwebjsService.sendMedia(session.whatsappId, ticket.contact, {
+                        base64,
+                        mimetype: file.mimetype,
+                        filename: file.originalname
+                      });
+                      console.log(`✅ Mídia enviada via WWebJS (fallback)`);
+                    }
+                    fileSent = true;
+                  } else {
+                    console.log(`⚠️ WWebJS não disponível para sessão ${session.whatsappId}`);
+                  }
+                } catch (wwebFallbackErr) {
+                  console.error(`❌ Fallback WWebJS para mídia também falhou:`, wwebFallbackErr.message);
+                }
+              }
             }
           }
           

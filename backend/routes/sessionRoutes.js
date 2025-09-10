@@ -14,6 +14,7 @@ import {
 } from '../services/baileysService.js';
 import { cancelSessionImport } from '../services/baileysService.js';
 import { getSessionsStatus, reactivateSession } from '../controllers/sessionStatusController.js';
+import { handleBaileysMessage } from '../services/messageCallbacks.js';
 
 // Importar estado global das sessões
 import { sessionQRs, sessionStatus } from '../services/sessionState.js';
@@ -211,8 +212,20 @@ router.post('/:id/start', authMiddleware, async (req, res) => {
             session.update({ status: 'connected' });
             console.log(`✅ Sessão Baileys ${session.whatsappId} conectada`);
           },
-          (message, sock) => {
-            console.log('📨 Mensagem recebida via Baileys:', message);
+          async (message, sock) => {
+            try {
+              console.log('📨 Mensagem recebida via Baileys:', {
+                id: message?.key?.id,
+                from: message?.key?.remoteJid,
+                fromMe: message?.key?.fromMe,
+                content: message?.message?.conversation || message?.message?.extendedTextMessage?.text || '[mídia]'
+              });
+              // Processar e persistir a mensagem, criar/atualizar ticket e emitir para o frontend
+              await handleBaileysMessage(message, session.id);
+              console.log('✅ Mensagem processada por handleBaileysMessage (sessionRoutes)');
+            } catch (err) {
+              console.error('❌ Erro ao processar mensagem Baileys em sessionRoutes:', err);
+            }
           }
         );
 
