@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiFetch, safeJson } from '../../utils/apiClient';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -40,22 +41,22 @@ const IntelligentLibraryManager = () => {
 
   const fetchSystemInfo = async () => {
     try {
-      const response = await fetch('/api/library-manager/system-info');
-      const data = await response.json();
+      const response = await apiFetch('/api/library-manager/system-info');
+      const data = await safeJson(response);
       if (data.success) {
         setSystemInfo(data.data);
       } else {
         throw new Error(data.error);
       }
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'Falha ao carregar informações do sistema');
     }
   };
 
   const fetchActiveStats = async () => {
     try {
-      const response = await fetch('/api/library-manager/stats');
-      const data = await response.json();
+      const response = await apiFetch('/api/library-manager/stats');
+      const data = await safeJson(response);
       if (data.success) {
         setActiveStats(data.data);
       }
@@ -66,8 +67,8 @@ const IntelligentLibraryManager = () => {
 
   const fetchSessions = async () => {
     try {
-      const response = await fetch('/api/library-manager/sessions');
-      const data = await response.json();
+      const response = await apiFetch('/api/library-manager/sessions');
+      const data = await safeJson(response);
       if (data.success) {
         setSessions(data.data);
       }
