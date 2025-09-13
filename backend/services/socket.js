@@ -1,6 +1,8 @@
 import { Server as SocketIOServer } from 'socket.io';
+import { createAdapter } from '@socket.io/redis-adapter';
 import jwt from 'jsonwebtoken';
 import { User } from '../models/index.js';
+import { getRedisManager } from './redisManager.js';
 
 let io = null;
 
@@ -93,7 +95,25 @@ const authenticateSocket = async (socket, next) => {
   }
 };
 
-export const initializeSocket = (server) => {
+// Pool de rooms para otimizar gerenciamento de salas
+const roomPool = {
+  activeRooms: new Map(), // roomId -> Set<socketIds>
+  ticketRooms: new Map(), // ticketId -> roomName
+  maxRoomsPerSocket: 50, // Limite de salas por socket
+  cleanup: () => {
+    // Limpar salas órfãs periodicamente
+    for (const [roomId, sockets] of roomPool.activeRooms) {
+      if (sockets.size === 0) {
+        roomPool.activeRooms.delete(roomId);
+      }
+    }
+  }
+};
+
+// Limpeza periódica de salas órfãs
+setInterval(roomPool.cleanup, 300000); // 5 minutos
+
+export const initializeSocket = async (server) => {
   const raw = process.env.FRONTEND_ORIGINS || process.env.FRONTEND_URL || '';
   const allowed = raw
     .split(',')
@@ -107,8 +127,35 @@ export const initializeSocket = (server) => {
       methods: ['GET', 'POST'],
       credentials: true
     },
-    transports: ['websocket', 'polling']
+    transports: ['websocket', 'polling'],
+    // Otimizações para múltiplas sessões e alta concorrência
+    pingTimeout: 60000,
+    pingInterval: 25000,
+    maxHttpBufferSize: 1e6, // 1MB
+    allowEIO3: true,
+    // Configurações para escalabilidade
+    serveClient: false,
+    connectTimeout: 45000,
+    // Rate limiting para prevenir abuse
+    perMessageDeflate: {
+      threshold: 1024,
+      concurrencyLimit: 10,
+      memLevel: 7
+    }
   });
+
+  // Setup Redis adapter for horizontal scaling
+  try {
+    const redisManager = getRedisManager();
+    await redisManager.redis.ping(); // Ensure Redis is connected
+    
+    const adapter = createAdapter(redisManager.pubClient, redisManager.subClient);
+    io.adapter(adapter);
+    
+    console.log('✅ Socket.IO Redis adapter configured for clustering');
+  } catch (error) {
+    console.warn('⚠️ Redis adapter not available, running in single instance mode:', error.message);
+  }
 
   // Aplicar middleware de autenticação
   io.use(authenticateSocket);
@@ -196,35 +243,70 @@ export const initializeSocket = (server) => {
       }
     });
 
-    // Event listener para entrar em uma sessão específica
+    // Event listener para entrar em uma sessão específica (otimizado)
     socket.on('join-session', (sessionId) => {
       if (!socket.isAuthenticated) {
         socket.emit('auth-required', { message: 'Autenticação necessária para entrar em sessões' });
         return;
       }
       
-      socket.join(`session-${sessionId}`);
-      console.log(`Cliente ${socket.id} entrou na sala da sessão: ${sessionId}`);
+      const roomName = `session-${sessionId}`;
+      socket.join(roomName);
+      
+      // Gerenciar pool de salas
+      if (!roomPool.activeRooms.has(roomName)) {
+        roomPool.activeRooms.set(roomName, new Set());
+      }
+      roomPool.activeRooms.get(roomName).add(socket.id);
+      
+      console.log(`Cliente ${socket.id} entrou na sala da sessão: ${sessionId} (${roomPool.activeRooms.get(roomName).size} clientes)`);
     });
 
-    // Event listener para sair de uma sessão específica
+    // Event listener para sair de uma sessão específica (otimizado)
     socket.on('leave-session', (sessionId) => {
       if (!socket.isAuthenticated) {
         return;
       }
       
-      socket.leave(`session-${sessionId}`);
+      const roomName = `session-${sessionId}`;
+      socket.leave(roomName);
+      
+      // Atualizar pool de salas
+      if (roomPool.activeRooms.has(roomName)) {
+        roomPool.activeRooms.get(roomName).delete(socket.id);
+        if (roomPool.activeRooms.get(roomName).size === 0) {
+          roomPool.activeRooms.delete(roomName);
+        }
+      }
+      
       console.log(`Cliente ${socket.id} saiu da sala da sessão: ${sessionId}`);
     });
 
-    // Event listener para entrar em um ticket específico
+    // Event listener para entrar em um ticket específico (otimizado)
     socket.on('join-ticket', (ticketId) => {
       if (!socket.isAuthenticated) {
         socket.emit('auth-required', { message: 'Autenticação necessária para entrar em tickets' });
         return;
       }
       
-      socket.join(`ticket-${ticketId}`);
+      // Verificar limite de salas por socket
+      const currentRooms = Array.from(socket.rooms).length;
+      if (currentRooms >= roomPool.maxRoomsPerSocket) {
+        socket.emit('room-limit-exceeded', { 
+          message: `Limite de ${roomPool.maxRoomsPerSocket} salas atingido` 
+        });
+        return;
+      }
+      
+      const roomName = `ticket-${ticketId}`;
+      socket.join(roomName);
+      
+      // Gerenciar pool de salas
+      if (!roomPool.activeRooms.has(roomName)) {
+        roomPool.activeRooms.set(roomName, new Set());
+      }
+      roomPool.activeRooms.get(roomName).add(socket.id);
+      roomPool.ticketRooms.set(ticketId, roomName);
       console.log(`Cliente ${socket.id} entrou na sala do ticket: ${ticketId}`);
       
       // Verificar quantos clientes estão na sala

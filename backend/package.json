@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "start:optimized": "NODE_ENV=production node index.js",
     "start:pm2": "pm2 start ecosystem.config.cjs --env production",
     "restart:pm2": "pm2 restart zazap-backend || pm2 start ecosystem.config.cjs --env production",
     "stop:pm2": "pm2 delete zazap-backend || true",
@@ -20,16 +21,20 @@
     "db:reset": "npm run db:migrate:undo:all && npm run db:migrate && npm run db:seed",
     "migration:create": "npx sequelize-cli migration:generate --name",
     "model:create": "npx sequelize-cli model:generate --name",
-    "seed:create": "npx sequelize-cli seed:generate --name"
+    "seed:create": "npx sequelize-cli seed:generate --name",
+    "optimize": "node generate-env.js",
+    "optimize:apply": "node generate-env.js && echo 'Otimizações geradas! Copie .env.optimized para .env se desejar aplicar.'"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",
+    "@socket.io/redis-adapter": "^8.3.0",
     "@whiskeysockets/baileys": "^6.7.19",
     "audio-decode": "^2.2.3",
     "axios": "^1.10.0",
     "bcryptjs": "^3.0.2",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
+  "compression": "^1.8.1",
     "dotenv": "^17.0.1",
     "express": "^4.18.2",
     "fca-unofficial": "^1.3.10",
@@ -37,6 +42,7 @@
     "form-data": "^4.0.3",
     "glob": "^11.0.3",
     "instagram-private-api": "^1.46.1",
+    "ioredis": "^5.4.1",
     "jimp": "^1.6.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",

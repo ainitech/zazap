@@ -19,8 +19,35 @@ if (process.platform === 'win32') {
   process.env.PUPPETEER_CACHE_DIR = path.join(process.cwd(), 'privated', 'puppeteer-cache');
 }
 
-// Runtime in-memory registry of clients
+// Runtime in-memory registry of clients with performance limits
 const clients = new Map(); // key: sessionId -> { client, status }
+
+// Limites de recursos dinamicamente ajustados pelo hardware  
+// Função para obter limites dinâmicos
+const getDynamicLimits = () => {
+  try {
+    // Import dinâmico sem await para evitar problemas de sync
+    return {
+      maxSessions: process.env.MAX_WWEBJS_SESSIONS ? parseInt(process.env.MAX_WWEBJS_SESSIONS) : undefined, // Ilimitado se não especificado
+      throttle: parseInt(process.env.WWEBJS_CONNECTION_THROTTLE) || 3000 // Valor padrão
+    };
+  } catch (error) {
+    return {
+      maxSessions: undefined, // Ilimitado
+      throttle: 3000
+    };
+  }
+};
+
+const WWEBJS_CONNECTION_THROTTLE_MS = getDynamicLimits().throttle;
+const SESSION_CLEANUP_INTERVAL = 300000; // 5 minutos
+
+// Pool de conexões para reutilização
+const connectionPool = {
+  available: [],
+  busy: new Set(),
+  maxSize: 20 // Valor padrão, será ajustado dinamicamente
+};
 
 const ensureDir = (dirPath) => {
   if (!fs.existsSync(dirPath)) {
@@ -162,6 +189,12 @@ export async function createWwebjsSession(sessionId, {
 } = {}) {
   if (!sessionId) throw new Error('sessionId is required');
   
+  // Verificar limites de sessões concorrentes (apenas se especificado)
+  const { maxSessions } = getDynamicLimits();
+  if (maxSessions && clients.size >= maxSessions) {
+    throw new Error(`Limite máximo de ${maxSessions} sessões WWebJS atingido. Encerre uma sessão antes de criar outra.`);
+  }
+  
   // Se já existe uma sessão, destruir primeiro
   if (clients.has(sessionId)) {
     console.log(`⚠️ Sessão ${sessionId} já existe, removendo antes de criar nova...`);
@@ -175,6 +208,9 @@ export async function createWwebjsSession(sessionId, {
     }
     clients.delete(sessionId);
   }
+
+  // Throttle de conexão para prevenir sobrecarga
+  await new Promise(resolve => setTimeout(resolve, WWEBJS_CONNECTION_THROTTLE_MS));
 
   const authStrategy = new LocalAuth({
     clientId: sessionId,

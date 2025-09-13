@@ -1,23 +1,25 @@
 
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import LoginPage from './pages/LoginPage';
-import ChatPage from './pages/ChatPage';
-import DashboardPage from './pages/DashboardPage';
-import ContactsPage from './pages/ContactsPage';
-import QueuesPage from './pages/QueuesPage';
-import SessionsPage from './pages/SessionsPage';
-import IntegrationsPage from './pages/IntegrationsPage';
-import SettingsPage from './pages/SettingsPage';
-import RecentPage from './pages/RecentPage';
-import FavoritesPage from './pages/FavoritesPage';
-import ArchivedPage from './pages/ArchivedPage';
-import TrashPage from './pages/TrashPage';
-import QuickRepliesPage from './pages/QuickRepliesPage';
-import SchedulesPage from './pages/SchedulesPage';
-import TagsPage from './pages/TagsPage';
-import AgentsPage from './pages/AgentsPage';
-import LibraryManagerPage from './pages/LibraryManagerPage';
+
+// Lazy loading controlado (sem criar novos arquivos)
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const ChatPage = lazy(() => import('./pages/ChatPage'));
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const ContactsPage = lazy(() => import('./pages/ContactsPage')); 
+const QueuesPage = lazy(() => import('./pages/QueuesPage'));
+const SessionsPage = lazy(() => import('./pages/SessionsPage'));
+const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const RecentPage = lazy(() => import('./pages/RecentPage'));
+const FavoritesPage = lazy(() => import('./pages/FavoritesPage'));
+const ArchivedPage = lazy(() => import('./pages/ArchivedPage'));
+const TrashPage = lazy(() => import('./pages/TrashPage'));
+const QuickRepliesPage = lazy(() => import('./pages/QuickRepliesPage'));
+const SchedulesPage = lazy(() => import('./pages/SchedulesPage'));
+const TagsPage = lazy(() => import('./pages/TagsPage'));
+const AgentsPage = lazy(() => import('./pages/AgentsPage'));
+const LibraryManagerPage = lazy(() => import('./pages/LibraryManagerPage'));
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SocketProvider } from './context/SocketContext';
 import { SettingsProvider } from './context/SettingsContext';
@@ -38,10 +40,7 @@ function AppRoutes() {
     );
   }
 
-  console.log('🚦 AppRoutes: Renderizando, isAuthenticated:', isAuthenticated);
-
   if (!isAuthenticated) {
-    console.log('🚦 AppRoutes: Usuário não autenticado, mostrando login');
     return (
       <Routes>
         <Route path="/login" element={<LoginPage />} />
@@ -50,46 +49,50 @@ function AppRoutes() {
     );
   }
 
-  console.log('🚦 AppRoutes: Usuário autenticado, mostrando aplicação principal');
   return (
     <Routes>
-      {/* Debug: Log da rota atual */}
-      {console.log('🔍 AppRoutes: Rota atual:', window.location.pathname)}
-      
-      {/* ROTAS MAIS ESPECÍFICAS PRIMEIRO - ORDEM CRÍTICA */}
-      
-      {/* Chat com UID específico - MAIS ESPECÍFICA */}
+      {/* Chat com UID específico */}
       <Route path="/tickets/:uid" element={
         <ProtectedRoute requiredPermissions={['admin', 'supervisor', 'attendant']}>
-          <ChatPage />
+          <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div></div>}>
+            <ChatPage />
+          </Suspense>
         </ProtectedRoute>
       } />
       
       {/* Chat com ID específico */}
       <Route path="/chat/:ticketId" element={
         <ProtectedRoute requiredPermissions={['admin', 'supervisor', 'attendant']}>
-          <ChatPage />
+          <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div></div>}>
+            <ChatPage />
+          </Suspense>
         </ProtectedRoute>
       } />
       
       {/* Chat geral */}
       <Route path="/chat" element={
         <ProtectedRoute requiredPermissions={['admin', 'supervisor', 'attendant']}>
-          <ChatPage />
+          <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div></div>}>
+            <ChatPage />
+          </Suspense>
         </ProtectedRoute>
       } />
       
       {/* Dashboard */}
       <Route path="/dashboard" element={
         <ProtectedRoute requiredPermissions={['admin', 'supervisor', 'attendant']}>
-          <DashboardPage />
+          <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div></div>}>
+            <DashboardPage />
+          </Suspense>
         </ProtectedRoute>
       } />
       
       {/* Página inicial redireciona para dashboard */}
       <Route path="/" element={
         <ProtectedRoute requiredPermissions={['admin', 'supervisor', 'attendant']}>
-          <DashboardPage />
+          <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div></div>}>
+            <DashboardPage />
+          </Suspense>
         </ProtectedRoute>
       } />
       

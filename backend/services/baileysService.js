@@ -78,13 +78,44 @@ const getAuthDir = (sessionId) => {
   return path.resolve(getAuthRoot(), sanitized);
 };
 
-// Função auxiliar para encontrar sessão por ID normalizado
-const findSessionIndex = (sessionId) => {
+// Função auxiliar para encontrar sessão por ID normalizado (otimizada com Map)
+const findSession = (sessionId) => {
   const baseNumber = sessionId.split(':')[0];
-  return sessions.findIndex(s => {
-    const sBaseNumber = s.sessionId.split(':')[0];
-    return sBaseNumber === baseNumber;
-  });
+  
+  // Busca direta primeiro
+  if (sessions.has(baseNumber)) {
+    return sessions.get(baseNumber);
+  }
+  
+  // Busca por base number se não encontrou direta
+  for (const [key, session] of sessions) {
+    const sBaseNumber = session.sessionId.split(':')[0];
+    if (sBaseNumber === baseNumber) {
+      return session;
+    }
+  }
+  return null;
+};
+
+// Função auxiliar para remover sessão por ID normalizado
+const removeSession = (sessionId) => {
+  const baseNumber = sessionId.split(':')[0];
+  
+  // Remoção direta primeiro
+  if (sessions.has(baseNumber)) {
+    sessions.delete(baseNumber);
+    return true;
+  }
+  
+  // Busca e remove por base number
+  for (const [key, session] of sessions) {
+    const sBaseNumber = session.sessionId.split(':')[0];
+    if (sBaseNumber === baseNumber) {
+      sessions.delete(key);
+      return true;
+    }
+  }
+  return false;
 };
 
 // Função para limpar e recriar pasta de autenticação (async, usando fs/promises)
@@ -164,10 +195,13 @@ class BaileysSession {
   }
 }
 
-// Armazenar sessões ativas
-const sessions = [];
+// Armazenar sessões ativas com Map para melhor performance
+const sessions = new Map(); // sessionId -> BaileysSession
 // Map para rastrear tentativas de reconexão por número base (sessionId normalizado)
 const reconnectAttemptsMap = new Map();
+
+
+const CONNECTION_THROTTLE_MS = parseInt(process.env.BAILEYS_CONNECTION_THROTTLE) || 2000;
 
 // Controle de cancelamento de importação de chats
 const canceledImports = new Set();
@@ -261,14 +295,21 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
   try {
     console.log(`Criando sessão Baileys: ${sessionId}`);
 
+    // Verificar limites de sessões concorrentes (apenas se especificado)
+    // Limite de sessões concorrentes (opcional via env)
+    const maxSessions = process.env.MAX_BAILEYS_SESSIONS ? parseInt(process.env.MAX_BAILEYS_SESSIONS) : undefined;
+    if (maxSessions && sessions.size >= maxSessions) {
+      throw new Error(`Limite máximo de ${maxSessions} sessões Baileys atingido. Encerre uma sessão antes de criar outra.`);
+    }
+
     // Verificar se já existe uma sessão
-    const existingSessionIndex = findSessionIndex(sessionId);
-    if (existingSessionIndex !== -1) {
-      console.log(`Removendo sessão existente: ${sessions[existingSessionIndex].sessionId} (busca: ${sessionId})`);
-      if (sessions[existingSessionIndex].socket) {
-        await sessions[existingSessionIndex].socket.end();
+    const existingSession = findSession(sessionId);
+    if (existingSession) {
+      console.log(`Removendo sessão existente: ${existingSession.sessionId} (busca: ${sessionId})`);
+      if (existingSession.socket) {
+        await existingSession.socket.end();
       }
-      sessions.splice(existingSessionIndex, 1);
+      removeSession(sessionId);
     }
 
     // Garantir diretórios de autenticação será feito logo abaixo junto com authRoot/authDir
@@ -357,12 +398,15 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
       console.log('⚠️ Não foi possível inicializar store em memória:', storeErr.message);
     }
 
-  // Criar instância da sessão (preservar tentativas de reconexão se existirem)
-  const baseNumber = sessionId.split(':')[0];
-  const previousAttempts = reconnectAttemptsMap.get(baseNumber) || 0;
-  const session = new BaileysSession(sock, sessionId);
-  session.reconnectAttempts = previousAttempts; // manter histórico para backoff
-  sessions.push(session);
+    // Throttle de conexão para prevenir sobrecarga
+    await new Promise(resolve => setTimeout(resolve, CONNECTION_THROTTLE_MS));
+
+    // Criar instância da sessão (preservar tentativas de reconexão se existirem)
+    const baseNumber = sessionId.split(':')[0];
+    const previousAttempts = reconnectAttemptsMap.get(baseNumber) || 0;
+    const session = new BaileysSession(sock, sessionId);
+    session.reconnectAttempts = previousAttempts; // manter histórico para backoff
+    sessions.set(baseNumber, session);
 
     // LOG DO SOCKET CRIADO PARA ANÁLISE
     // Logs detalhados do socket (reduzidos para evitar ruído em produção)
@@ -482,12 +526,11 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
     // CONFIGURAR HANDLERS DE CONEXÃO DEPOIS DOS LISTENERS DE MENSAGEM
     const scheduleReconnect = async (sessionId, onQR, onReady, onMessage, reasonCode) => {
       try {
-        const existingIndex = findSessionIndex(sessionId);
-        if (existingIndex === -1) {
+        const s = findSession(sessionId);
+        if (!s) {
           console.log(`⚠️ Não foi possível agendar reconexão: sessão ${sessionId} não encontrada`);
           return;
         }
-        const s = sessions[existingIndex];
         if (s.reconnectTimer) {
           clearTimeout(s.reconnectTimer);
           s.reconnectTimer = null;
@@ -919,28 +962,22 @@ export const createBaileysSession = async (sessionId, onQR, onReady, onMessage) 
 };
 
 /**
- * Obter uma sessão existente
+ * Obter uma sessão existente (otimizada)
  */
 export const getBaileysSession = (sessionId) => {
   // Normalizar sessionId para encontrar a sessão correta
   const baseNumber = sessionId.split(':')[0]; // Remove o :XX se existir
   
-  // Procurar por uma sessão que tenha o mesmo número base
-  const sessionIndex = sessions.findIndex(s => {
-    const sBaseNumber = s.sessionId.split(':')[0];
-    return sBaseNumber === baseNumber;
-  });
-  
-  if (sessionIndex === -1) {
+  const session = findSession(sessionId);
+  if (!session) {
     console.log(`❌ Sessão Baileys não encontrada para ${sessionId} (base: ${baseNumber})`);
-    const available = sessions.map(s => s.sessionId).join(', ');
+    const available = Array.from(sessions.keys()).join(', ');
     console.log(`📋 Sessões disponíveis: ${available || 'nenhuma'}`);
-    // Não lançar erro aqui; retornar null permite chamadas 'safe' em verificações
     return null;
   }
   
-  console.log(`✅ Sessão Baileys encontrada: ${sessions[sessionIndex].sessionId} para busca ${sessionId}`);
-  return sessions[sessionIndex].socket;
+  console.log(`✅ Sessão Baileys encontrada: ${session.sessionId} para busca ${sessionId}`);
+  return session.socket;
 };
 
 /**
@@ -1470,7 +1507,7 @@ export const disconnectBaileysSession = async (sessionId) => {
  * Listar todas as sessões Baileys
  */
 export const listBaileysSessions = () => {
-  return sessions
+  return Array.from(sessions.values())
     .filter(s => s && typeof s.sessionId === 'string' && s.sessionId.trim() !== '')
     .map(session => session.sessionId);
 };
@@ -1479,15 +1516,15 @@ export const listBaileysSessions = () => {
  * Obter status de uma sessão
  */
 export const getBaileysSessionStatus = (sessionId) => {
-  const sessionIndex = findSessionIndex(sessionId);
-  return sessionIndex !== -1 ? sessions[sessionIndex].status : 'disconnected';
+  const session = findSession(sessionId);
+  return session ? session.status : 'disconnected';
 };
 
 /**
  * Listar todas as sessões ativas
  */
 export const getAllActiveBaileysSessions = () => {
-  return sessions.map(session => ({
+  return Array.from(sessions.values()).map(session => ({
     sessionId: session.sessionId,
     status: session.status
   }));

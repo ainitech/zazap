@@ -1,5 +1,6 @@
 import { TicketMessage, Ticket, Session } from '../models/index.js';
 import { sendMedia as sendMediaBaileys } from '../services/baileysService.js';
+import wwebjsService from '../services/wwebjsService.js';
 import path from 'path';
 import fs from 'fs';
 
@@ -100,40 +101,48 @@ export const sendFileMessage = async (req, res) => {
           let fileSent = false;
           const filePath = path.join(uploadDir, req.file.filename);
           
+          const fileBuffer = fs.readFileSync(filePath);
           if (session.library === 'baileys') {
             try {
-              console.log(`📤 Enviando arquivo via Baileys para ${ticket.contact}`);
-              const fileBuffer = fs.readFileSync(filePath);
-              
               // Preparar opções para áudio
               const mediaOptions = {};
-              
-              // Se for áudio e tiver informações específicas
               if (req.file.mimetype.startsWith('audio/')) {
                 mediaOptions.isVoiceNote = isVoiceNote === 'true';
-                
                 if (audioDuration) {
                   mediaOptions.duration = audioDuration;
                   console.log(`🎵 Enviando áudio com duração: ${audioDuration}s`);
                 }
-                
                 console.log(`🎵 Enviando como ${mediaOptions.isVoiceNote ? 'nota de voz (PTT)' : 'arquivo de áudio'}`);
               }
-              
-              // Usar session.whatsappId em vez de ticket.sessionId
               await sendMediaBaileys(
                 session.whatsappId, 
                 ticket.contact, 
                 fileBuffer, 
                 req.file.mimetype, 
-                content || '', // caption
+                content || '',
                 mediaOptions
               );
-              
               console.log(`✅ Arquivo enviado via Baileys`);
               fileSent = true;
             } catch (baileysError) {
               console.error(`❌ Erro no Baileys:`, baileysError.message);
+            }
+          } else if (session.library === 'wwebjs' || session.library === 'whatsappjs') {
+            try {
+              // WhatsAppJS/WWebJS: precisa de base64
+              const base64 = fileBuffer.toString('base64');
+              const filename = req.file.originalname;
+              const mimetype = req.file.mimetype;
+              console.log(`📤 Enviando arquivo via WWebJS para ${ticket.contact}`);
+              await wwebjsService.sendMedia(
+                session.whatsappId,
+                ticket.contact,
+                { base64, mimetype, filename }
+              );
+              console.log(`✅ Arquivo enviado via WWebJS`);
+              fileSent = true;
+            } catch (wwebjsError) {
+              console.error(`❌ Erro no WWebJS:`, wwebjsError.message);
             }
           } else {
             console.error(`❌ Biblioteca desconhecida: ${session.library}`);

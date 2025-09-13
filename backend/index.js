@@ -2,11 +2,14 @@ import express from 'express';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import compression from 'compression';
+import os from 'os';
 import { createServer } from 'http';
 import { initializeSocket } from './services/socket.js';
 import { autoReconnectSessions, startSessionHealthCheck } from './services/sessionManager.js';
 import RedisService from './services/redisService.js';
-// Removed whatsappjs and selection routes; using only Baileys
+
+// Importar as rotas
 import baileysRoutes from './routes/baileysRoutes.js';
 import whatsappjsRoutes from './routes/whatsappjsRoutes.js';
 import wwebjsAdvancedRoutes from './routes/wwebjsAdvanced.js';
@@ -34,84 +37,96 @@ import multiChannelRoutes from './routes/multiChannelRoutes.js';
 import settingRoutes from './routes/settingRoutes.js';
 import path from 'path';
 
+// Carregar variáveis de ambiente
 dotenv.config();
+
+console.log('🚀 Zazap Backend - Inicializando...');
+
+// ===== 🔍 Detecção simples de hardware (inline, sem arquivo extra) =====
+const SYS = {
+  cores: (os.cpus() || []).length || 1,
+  totalMemGB: Math.max(1, Math.round(os.totalmem() / 1024 / 1024 / 1024))
+};
+const PROFILE = (() => {
+  if (SYS.totalMemGB >= 16) return { name: 'High', json: '80mb', url: '80mb' };
+  if (SYS.totalMemGB >= 8) return { name: 'Medium', json: '50mb', url: '50mb' };
+  if (SYS.totalMemGB >= 4) return { name: 'Basic', json: '25mb', url: '25mb' };
+  return { name: 'Low', json: '10mb', url: '10mb' };
+})();
+console.log(`🧠 Hardware: ${SYS.totalMemGB}GB RAM | Cores: ${SYS.cores} | Perfil: ${PROFILE.name}`);
 
 const app = express();
 const server = createServer(app);
 
-// Inicializar Socket.IO
-const io = initializeSocket(server);
+// Configurar Socket.IO
+initializeSocket(server);
 
-// Middlewares
-// Permitir APENAS o frontend definido no .env (FRONTEND_URL ou FRONTEND_ORIGINS csv)
-const parseAllowedOrigins = () => {
-  const raw = process.env.FRONTEND_ORIGINS || process.env.FRONTEND_URL || '';
-  const fromEnv = raw
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean);
-  if (fromEnv.length > 0) return fromEnv;
-  // Fallback amigável apenas em desenvolvimento
-  if ((process.env.NODE_ENV || 'development') !== 'production') {
-    return ['http://localhost:3000'];
-  }
-  return [];
-};
-
-const ALLOWED_ORIGINS = parseAllowedOrigins();
-const isAllowedOrigin = (origin) => !!origin && ALLOWED_ORIGINS.includes(origin);
-
+// Configuração de CORS
 const corsOptions = {
-  origin: function (origin, callback) {
-    // Permitir requests sem origin (como mobile apps, Postman, etc)
-    if (!origin) return callback(null, true);
-    if (isAllowedOrigin(origin)) return callback(null, true);
-    console.log(`🚫 CORS bloqueado para origem: ${origin}`);
-    return callback(new Error('Not allowed by CORS'));
-  },
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With']
 };
 
+// ===== ⚙️ Middlewares essenciais + otimizações inline =====
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
+
+// Compressão HTTP (ajuste de nível moderado para equilibrar CPU)
+app.use(compression({
+  level: 6,
+  threshold: 1024,
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) return false;
+    return compression.filter(req, res);
+  }
+}));
+
 app.use(cors(corsOptions));
 app.use(cookieParser());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// Servir arquivos enviados
-// Caminho público correto: /uploads/arquivo.ext (NÃO /api/uploads)
-app.use('/uploads', (req, res, next) => {
-  const origin = req.headers.origin;
-  if (origin && isAllowedOrigin(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-    res.header('Vary', 'Origin');
-  }
-  res.header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  res.header('Cache-Control', 'public, max-age=3600'); // Cache por 1 hora
+// Limites dinâmicos baseados no perfil de hardware
+app.use(express.json({ limit: PROFILE.json, strict: true }));
+app.use(express.urlencoded({ extended: true, limit: PROFILE.url, parameterLimit: 1000 }));
+
+// Segurança básica sem dependências adicionais
+app.use((req, res, next) => {
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+  res.setHeader('Cache-Control', 'no-cache');
   next();
-}, express.static(path.join(process.cwd(), 'uploads')));
-
-// Rota de teste para verificar se os arquivos estão sendo servidos
-app.get('/test-file/:folder/:filename', (req, res) => {
-  const { folder, filename } = req.params;
-  const filePath = path.join(process.cwd(), 'uploads', folder, filename);
-  console.log('🔍 Testando arquivo:', filePath);
-  res.sendFile(filePath, (err) => {
-    if (err) {
-      console.error('❌ Erro ao servir arquivo:', err);
-      res.status(404).send('Arquivo não encontrado');
-    } else {
-      console.log('✅ Arquivo servido com sucesso');
-    }
-  });
 });
 
-// Rotas principais
+// Rate limiting simples em memória (janela 60s)
+const rateBucket = new Map();
+const WINDOW_MS = 60_000;
+const LIMIT = 800; // por IP por minuto
+setInterval(() => rateBucket.clear(), WINDOW_MS).unref();
+app.use((req, res, next) => {
+  const ip = req.ip || req.connection.remoteAddress || 'unknown';
+  const count = (rateBucket.get(ip) || 0) + 1;
+  rateBucket.set(ip, count);
+  if (count > LIMIT) {
+    return res.status(429).json({ error: 'Too many requests' });
+  }
+  next();
+});
+
+// Servir arquivos enviados (cache leve para mídia)
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), {
+  maxAge: '6h',
+  setHeaders: (res) => {
+    res.setHeader('Cache-Control', 'public, max-age=21600');
+  }
+}));
+
+// Rotas da API
 app.use('/api/baileys', baileysRoutes);
-app.use('/api/wwebjs', whatsappjsRoutes);
-app.use('/api/wwebjs-advanced', wwebjsAdvancedRoutes);
+app.use('/api/whatsappjs', whatsappjsRoutes);
+app.use('/api/wweb-advanced', wwebjsAdvancedRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/queues', queueRoutes);
 app.use('/api/tickets', ticketRoutes);
@@ -155,19 +170,19 @@ server.listen(PORT, HOST, async () => {
     console.log('ℹ️ PM2 não detectado (executando diretamente via node / npm).');
   }
   
-  // Inicializar Redis para sistema ultra leve
-  console.log('🔥 Inicializando Redis para sistema ultra leve...');
+  // Inicializar Redis
+  console.log('🔗 Inicializando Redis...');
   await RedisService.initialize();
   
   // Aguardar um pouco para o servidor estabilizar
   setTimeout(async () => {
-    console.log('🚀 Iniciando sistemas automáticos...');
+    console.log('🚀 Iniciando sistemas...');
     
-  // Reconectar sessões que estavam conectadas
-  await autoReconnectSessions();
+    // Reconectar sessões que estavam conectadas
+    await autoReconnectSessions();
 
-  // Iniciar verificação de saúde (execução a cada 5 min)
-  startSessionHealthCheck();
+    // Iniciar verificação de saúde (execução a cada 5 min)  
+    startSessionHealthCheck();
 
     // Iniciar despachante de agendamentos
     try {
@@ -179,4 +194,32 @@ server.listen(PORT, HOST, async () => {
     }
     
   }, 3000); // Aguardar 3 segundos
+
+  // ===== 🧪 Monitoramento simples de event loop =====
+  let last = Date.now();
+  setInterval(() => {
+    const now = Date.now();
+    const lag = now - last - 1000;
+    if (lag > 250) console.warn(`⚠️ Event loop lag: ${lag}ms`);
+    last = now;
+  }, 1000).unref();
+
+  // ===== ♻️ Graceful shutdown =====
+  const shutdown = (signal) => {
+    console.log(`\n🛑 Recebido ${signal}. Encerrando com segurança...`);
+    server.close(() => {
+      console.log('HTTP server fechado.');
+      process.exit(0);
+    });
+    setTimeout(() => {
+      console.warn('Forçando saída (timeout).');
+      process.exit(1);
+    }, 10000).unref();
+  };
+  ['SIGINT', 'SIGTERM'].forEach(sig => process.on(sig, () => shutdown(sig)));
 });
+
+// Ajustes de timeout do servidor (reduz conexões zumbis)
+server.keepAliveTimeout = 65_000; // padrão 5s em alguns ambientes
+server.headersTimeout = 66_000;
+server.requestTimeout = 60_000;
